@@ -218,14 +218,14 @@ test('Yes in a home like the owner’s: only new files are written, nothing ther
     // The one Undo: every take-in by its own Undo; each tool file back as it was before Yes, byte for byte; the rule off.
     const [switchOn] = await switchesOn(box);
     const offered = everythingAction(switchOn, await history(box), await entryItems(box, tools));
-    assert.deepEqual(offered, { label: 'Undo', help: 'Switch Synchronize everything off and take back the 37 items it took in since, each tool it was found in keeping its own copy' });
+    assert.deepEqual(offered, { label: 'Undo', help: 'Switch Synchronize everything off and take back the 37 items it took in since, each tool they were found in keeping its own' });
     const undone = await everythingEntryAction(box.context, tools, switchOn.id);
     assert.equal(undone.stopped, undefined);
     assert.deepEqual(await filesIn(box), before);
     assert.deepEqual([(await recordOf(box))?.syncEverything, asksNow(await homeView(box))], [false, undefined]);
     const undo = (await history(box)).find(event => event.id === undone.made![0])!;
     assert.deepEqual([undo.everything?.undo?.itemUndos.length, undo.everything?.undo?.left, everythingSentence(undo).text],
-      [37, [], 'Undone: switched off, and 37 items it took in are out of Central Knot again, each tool it was found in keeping its own copy.']);
+      [37, [], 'Undone: switched off, and 37 items it took in are out of Central Knot again, each tool they were found in keeping its own.']);
     assert.equal((await history(box)).find(event => event.id === switchOn.id)?.undoneBy, undo.id);
     // Each take-in is marked undone by the entry its own Undo made, as History shows it ("Undone"), and those are what it took back.
     const takeIns = (await history(box)).filter(event => event.cause === 'sync-everything');
@@ -435,7 +435,7 @@ test('The one Undo after later changes: each take-in edited, turned Off, deleted
     assert.deepEqual(plan.takeBack.map(event => event.item).sort(), ['docs', 'other', 'plain']);
     const undone = await everythingEntryAction(box.context, tools, switchOn.id);
     const undo = (await history(box)).find(event => event.id === undone.made![0])!;
-    assert.equal(everythingSentence(undo).text, 'Undone: switched off, and 3 items it took in are out of Central Knot again, each tool it was found in keeping its own copy. Left in: '
+    assert.equal(everythingSentence(undo).text, 'Undone: switched off, and 3 items it took in are out of Central Knot again, each tool they were found in keeping its own. Left in: '
       + 'deleted (deleted from Central Knot since), edited (changed since), offed (turned off since), shared (a copy it was found in taken over since) '
       + 'and first and second (you chose their copies: each has its own Undo).');
     const after = await filesIn(box), docsPut = ['.copilot/mcp-config.json', '.codex/config.toml'];

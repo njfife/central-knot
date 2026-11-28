@@ -941,7 +941,7 @@ async function harnessFlow() {
   await a.click('button#harness-copilot-cli.harness-card-head');
   await a.click('#harness-tab-skills');
   const firstMark = () => a.run(`document.querySelector('.ov-row[data-key] .tool-mark')?.dataset.tool ?? null`);
-  same('a harness’s skills put its own mark first on each row, and have no column heads', [await firstMark(), await a.exists('.ov-head')], ['copilot-cli', false]);
+  same('a harness’s skills put its own mark first on each row, with its Every tool switch head and no multi-tool .ov-head', [await firstMark(), await a.exists('.ov-head'), await a.exists('.ov-tab-head')], ['copilot-cli', false, true]);
   const away = await a.run(`[...document.querySelectorAll('[role="rowgroup"]')].find(group => group.querySelector('.ov-section-label strong')?.textContent === 'Not in Copilot CLI')?.querySelector('[data-key="${rowPart('', 'skills', 'release-notes')}"]') ? true : false`);
   check('a skill only other tools have is under "Not in Copilot CLI"', away);
   check('a harness’s page has no menus or Add from… to bring items in: a found row’s Add does', !(await a.exists('.tool-menu, #harness-add-from, .tool-head-button')));
@@ -1237,6 +1237,275 @@ async function harnessFlow() {
   } finally {
     chmodSync(hCodex, 0o755);
     await h.quit();
+  }
+
+  // Tool page navigation fit (named switcher only, single row or stacked across 5/6 tools and 860/1316/1728),
+  // switch column head, toolbar "What the marks mean" disclosure, plain "Jump to:" links with landing flash, and bar-settled jump height.
+  const tHome = join(scratch, 'tool-page-home'), tData = join(scratch, 'tool-page-data'), tReal = join(scratch, 'tool-page-real');
+  mkdirSync(tReal, { recursive: true });
+  mkdirSync(tData, { recursive: true });
+  toolClis(tHome);
+  for (const dir of ['.codex/skills', '.pi/agent/skills', '.config/opencode/skills', '.claude/agents']) mkdirSync(join(tHome, dir), { recursive: true });
+  for (const cli of ['pi', 'opencode']) {
+    writeFileSync(join(tHome, '.local/bin', cli), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.0.0" && exit 0\nexit 9\n');
+    chmodSync(join(tHome, '.local/bin', cli), 0o755);
+  }
+  const tClaude = join(tHome, '.claude/skills'), tCopilot = join(tHome, '.copilot/skills'), tAgents = join(tHome, '.claude/agents');
+  for (let i = 1; i <= 22; i++) skill(tClaude, `skill-${String(i).padStart(2, '0')}`, text(`skill-${String(i).padStart(2, '0')}`, `Description for skill ${i}.`));
+  skill(tClaude, 'found-local', text('found-local', 'Found in Claude Code.'));
+  skill(tClaude, 'found-extra', text('found-extra', 'Another found skill.'));
+  skill(tClaude, 'off-one', text('off-one', 'Will be turned off.'));
+  skill(tClaude, 'off-two', text('off-two', 'Also turned off.'));
+  skill(tCopilot, 'copilot-only', text('copilot-only', 'Only in Copilot CLI.'));
+  for (let i = 1; i <= 5; i++) writeFileSync(join(tAgents, `agent-${String(i).padStart(2, '0')}.md`), `---\nname: agent-${String(i).padStart(2, '0')}\ndescription: Agent ${i}.\n---\nRun agent ${i}.\n`);
+  for (const key of ['agent-off-1', 'agent-off-2']) writeFileSync(join(tAgents, `${key}.md`), `---\nname: ${key}\ndescription: Off agent.\n---\nRun ${key}.\n`);
+  writeFileSync(join(tHome, '.claude.json'), `${JSON.stringify({ mcpServers: { 'mcp-a': { command: 'node', args: ['-e', '0'] }, 'mcp-b': { command: 'node', args: ['-e', '1'] }, 'mcp-off': { command: 'node', args: ['-e', '2'] } } }, null, 2)}\n`);
+  writeClaudeInstall(tHome, 'tool-market', 'tool-kit', '1.0.0', { 'skills/plug-triage/SKILL.md': text('plug-triage', 'Plugin skill.') });
+  writeFileSync(join(tData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: tHome } }));
+  const t = await launch(tData, [], tReal, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
+  try {
+    await openKind(t, 'all');
+    for (let i = 1; i <= 22; i++) await t.click(`#${rowPart('add', 'skills', `skill-${String(i).padStart(2, '0')}`)}`);
+    for (const key of ['off-one', 'off-two']) { await t.click(`#${rowPart('add', 'skills', key)}`); await t.click(`#${rowPart('switch', 'skills', key)}`); }
+    for (const key of ['mcp-a', 'mcp-b', 'mcp-off']) await t.click(`#${rowPart('add', 'mcp', key)}`);
+    await t.click(`#${rowPart('switch', 'mcp', 'mcp-off')}`);
+    for (let i = 1; i <= 5; i++) await t.click(`#${rowPart('add', 'agents', `agent-${String(i).padStart(2, '0')}`)}`);
+    for (const key of ['agent-off-1', 'agent-off-2']) { await t.click(`#${rowPart('add', 'agents', key)}`); await t.click(`#${rowPart('switch', 'agents', key)}`); }
+    await t.click('#nav-harnesses');
+    await t.click('button#harness-claude-cli.harness-card-head');
+    await t.click('#harness-tab-skills');
+
+    const sidebarAs = async open => { if (await t.run(`document.body.classList.contains('rail')`) === open) await t.click('#sidebar-toggle'); };
+    const readBar = () => t.run(`(() => {
+      const b = document.querySelector('.harness-bar');
+      const tabs = [...document.querySelectorAll('.harness-tab')];
+      const sw = [...document.querySelectorAll('.harness-switch-item')];
+      const tabLines = new Set(tabs.map(el => Math.round(el.getBoundingClientRect().top))).size;
+      const swLines = new Set(sw.map(el => Math.round(el.getBoundingClientRect().top))).size;
+      const fullTabs = tabs.every(el => el.scrollWidth <= el.clientWidth + 1);
+      const allNamed = sw.every(el => { const n = el.querySelector('.harness-switch-name'); return n && n.offsetWidth > 0 && el.getAttribute('aria-label') === el.title; });
+      const tabsTop = Math.min(...tabs.map(el => el.getBoundingClientRect().top));
+      const swBottom = Math.max(...sw.map(el => el.getBoundingClientRect().bottom));
+      const stacked = b.classList.contains('harness-bar-stacked');
+      const marksOnly = b.classList.contains('harness-bar-marks');
+      return { count: sw.length, content: b.clientWidth, tabLines, swLines, fullTabs, allNamed, stacked, marksOnly, swAboveTabs: tabsTop >= swBottom - 1 };
+    })()`);
+    const checkNav = async (toolCount, label) => {
+      const states = {};
+      for (const [width, height] of [SMALLEST, [1316, 819], [1728, 1117]]) {
+        for (const open of [false, true]) {
+          await sizeTo(t, width, height);
+          await sidebarAs(open);
+          const bar = await readBar();
+          states[`${width}-${open ? 'open' : 'rail'}`] = bar.stacked ? 'stacked' : 'single';
+          const expectSingle = width === 1728 || (width === 1316 && (!open || toolCount === 5));
+          same(`${label} (${toolCount} tools) at ${width}×${height} ${open ? 'sidebar open' : 'rail'}: full tabs on one row, switcher always named and above tabs when stacked`,
+            [bar.count, bar.tabLines, bar.swLines, bar.fullTabs, bar.allNamed, bar.marksOnly, bar.stacked, !bar.stacked || bar.swAboveTabs],
+            [toolCount, 1, 1, true, true, false, !expectSingle, true]);
+          same(`${label} (${toolCount} tools) at ${width}×${height} ${open ? 'sidebar open' : 'rail'}: nothing cut off`, await t.run(CUT_OFF), []);
+        }
+      }
+      // Real redraw right across the single-row / stacked threshold with rail sidebar (56 px).
+      await sizeTo(t, 1728, 900);
+      await sidebarAs(false);
+      const needed = await t.run(`(() => {
+        const tabs = [...document.querySelectorAll('.harness-tab')], sw = document.querySelector('.harness-switch');
+        return Math.ceil(tabs.at(-1).getBoundingClientRect().right - document.querySelector('.harness-bar').getBoundingClientRect().left + 12 + sw.offsetWidth + 16);
+      })()`);
+      await sizeTo(t, needed + 56 - 16, 900);
+      await sidebarAs(false);
+      const below = await readBar();
+      await sizeTo(t, needed + 56 + 24, 900);
+      await sidebarAs(false);
+      const above = await readBar();
+      same(`${label} (${toolCount} tools) threshold redraw (${needed}px content): stacks below and shares one row above with all names shown`,
+        [below.stacked, below.allNamed, below.tabLines, above.stacked, above.allNamed, above.tabLines],
+        [true, true, 1, false, true, 1]);
+      await fullSize(t);
+    };
+    await checkNav(5, 'tool page nav');
+
+    // Add 6th tool (Antigravity) and check every width/sidebar combination and threshold again.
+    writeFileSync(join(tHome, '.local/bin/agy'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.0.0" && exit 0\nexit 9\n');
+    chmodSync(join(tHome, '.local/bin/agy'), 0o755);
+    mkdirSync(join(tHome, '.gemini/config/skills'), { recursive: true });
+    await t.click('#header-refresh');
+    for (let tries = 0; tries < 40 && (await t.run(`document.querySelectorAll('.harness-switch-item').length`)) !== 6; tries++) await wait(100);
+    await checkNav(6, 'tool page nav');
+
+    // Switch column head ("Every tool" + (?)), single tool mark on ordinary & plugin rows, global switch labels, 28×28 file icon, all 6 tools in opened details.
+    const tabHead = await t.run(`(() => {
+      const head = document.querySelector('.ov-tab-head');
+      const mark = document.getElementById('tab-switch-info');
+      const r = mark?.getBoundingClientRect();
+      return { exists: !!head, text: head?.querySelector('.ov-tab-head-switch')?.innerText?.trim() ?? null, markLabel: head?.querySelector('.ov-tab-head-mark')?.textContent?.trim() ?? null, markSized: !!(r && r.width > 0 && r.height > 0) };
+    })()`);
+    same('tool tab shows Every tool (?) above the switch column and the tool name above its mark column',
+      tabHead, { exists: true, text: 'Every tool', markLabel: 'Claude Code', markSized: true });
+    await t.click('#tab-switch-info');
+    same('clicking Every tool (?) opens its explanation card and Escape closes it',
+      await t.run(`(() => { const c = document.getElementById('tab-switch-info-card'); return [!!c?.matches(':popover-open'), c?.textContent?.trim() ?? null]; })()`),
+      [true, 'Each switch turns an item on or off in every tool that can take it. Open a row to change one tool alone.']);
+    await t.press('Escape');
+
+    const tabMarks = await t.run(`(() => {
+      const ord = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'skill-01')}"]');
+      const plug = document.querySelector('.ov-plugin-row');
+      const sw = ord?.querySelector('.switch');
+      const pSw = plug?.querySelector('.switch');
+      const fileBtn = ord?.querySelector('.row-file-btn')?.getBoundingClientRect();
+      return {
+        ordTools: [...(ord?.querySelectorAll('.tool-mark') ?? [])].map(el => el.dataset.tool),
+        plugTools: [...(plug?.querySelectorAll('.tool-mark') ?? [])].map(el => el.dataset.tool),
+        swLabel: sw?.getAttribute('aria-label') ?? null,
+        pSwGlobal: /every tool that can switch it/.test(pSw?.getAttribute('aria-label') ?? ''),
+        fileHit: !!(fileBtn && fileBtn.width >= 26 && fileBtn.height >= 26),
+      };
+    })()`);
+    same('Claude Code’s Skills tab shows only Claude Code’s mark on ordinary and plugin rows, keeps global switch labels, and sizes the file icon',
+      tabMarks,
+      { ordTools: ['claude-cli'], plugTools: ['claude-cli'], swLabel: 'skill-01: on. Click to take it out of every tool; Central Knot keeps it.', pSwGlobal: true, fileHit: true });
+
+    await t.click(`#${rowPart('open', 'skills', 'skill-01')}`);
+    same('opening a row on Claude Code’s tab still lists all 6 tools in its details (Claude Code first)',
+      await t.all('.details-tool-label', 'e.textContent.trim()'), ['Claude Code', 'Copilot CLI', 'Codex', 'Pi', 'OpenCode', 'Antigravity']);
+    await t.click(`#${rowPart('open', 'skills', 'skill-01')}`);
+
+    // "What the marks mean" disclosure sits in the toolbar, opens directly below it with one entry per visual look, and leaves no floating empty divider.
+    const legendClosed = await t.run(`(() => {
+      const d = document.getElementById('mark-legend'), s = document.getElementById('mark-legend-toggle');
+      const r = s?.getBoundingClientRect();
+      return { inToolbar: !!d?.closest('.toolbar'), open: !!d?.open, label: s?.textContent?.trim() ?? null, body: !!document.getElementById('mark-legend-body'), sized: !!(r && r.width >= 60 && r.height >= 18) };
+    })()`);
+    same('tool tab places What the marks mean in the toolbar behind a closed disclosure',
+      legendClosed, { inToolbar: true, open: false, label: 'What the marks mean', body: false, sized: true });
+    await t.click('#mark-legend-toggle');
+    const legendOpen = await t.run(`(() => {
+      const d = document.getElementById('mark-legend'), body = document.getElementById('mark-legend-body');
+      const items = [...(body?.querySelectorAll('.legend-item') ?? [])].map(el => el.textContent.trim());
+      const barBottom = document.querySelector('.toolbar').getBoundingClientRect().bottom;
+      const bodyTop = body?.getBoundingClientRect().top ?? 0;
+      return { open: !!d?.open, belowToolbar: !!body && Math.abs(bodyTop - barBottom) <= 2, items };
+    })()`);
+    same('opening What the marks mean groups keyWords by visual look right under the toolbar',
+      legendOpen, { open: true, belowToolbar: true, items: ['On there / Has the current version / Has it', 'No copy', 'Off: Central Knot keeps it'] });
+    await t.click('#mark-legend-toggle');
+
+    // Plain "Jump to:" links on a long tool list at 860×528: all section names without counts, sticky heads stay in sight, landing heading flashes with an accent bar and clears under reduced motion.
+    await sizeTo(t, ...SMALLEST);
+    await sidebarAs(false);
+    const jumpState = await t.run(`(() => {
+      const nav = document.querySelector('.harness-page .section-jump');
+      const lead = nav?.querySelector('.section-jump-lead')?.textContent?.trim() ?? null;
+      const links = [...(nav?.querySelectorAll('.section-jump-link') ?? [])];
+      const visible = links.filter(el => !el.hidden).map(el => el.textContent.trim());
+      const noPill = links.every(el => getComputedStyle(el).borderTopWidth === '0px');
+      return { shown: !!nav && !nav.hidden, lead, visible, noPill };
+    })()`);
+    same('long tool list shows plain Jump to: links with all section names and no counts', jumpState, {
+      shown: true,
+      lead: 'Jump to:',
+      visible: ['On', 'Found', 'Only through a plugin', 'Not in Claude Code', 'Off'],
+      noPill: true,
+    });
+    await t.click('#jump-off');
+    const jumpedOff = await t.run(`(() => {
+      const list = document.querySelector('.scroll.matrix').getBoundingClientRect();
+      const head = document.querySelector('.ov-tab-head').getBoundingClientRect();
+      const off = document.querySelector('.ov-section[data-section="off"]');
+      const r = off.getBoundingClientRect();
+      const links = [...document.querySelectorAll('.harness-page .section-jump-link')].filter(el => !el.hidden).map(el => el.textContent.trim());
+      return {
+        stickyInSight: Math.abs(head.top - list.top) <= 2,
+        inViewBelowHead: r.top >= head.bottom - 2 && r.bottom <= list.bottom + 2,
+        flashed: off.classList.contains('section-flash'),
+        accentBar: /inset 3px 0px 0px|3px 0px 0px 0px inset/.test(getComputedStyle(off).boxShadow),
+        sameLinks: links.length === 5,
+      };
+    })()`);
+    same('jumping to Off keeps sticky heads in sight, lands Off uncovered with an accent-bar flash, and keeps all Jump to: links', jumpedOff,
+      { stickyInSight: true, inViewBelowHead: true, flashed: true, accentBar: true, sameLinks: true });
+    // Under prefers-reduced-motion: reduce, the landing mark still clears on its timer instead of sticking until a redraw.
+    await t.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await t.click('#jump-found');
+    const reducedBefore = await t.run(`document.querySelector('.ov-section[data-section="found"]').classList.contains('section-flash')`);
+    await wait(2600);
+    const reducedAfter = await t.run(`document.querySelector('.ov-section[data-section="found"]').classList.contains('section-flash')`);
+    await t.send('Emulation.setEmulatedMedia', { features: [] });
+    same('under reduced motion, the landing mark appears on jump and clears after its timer', [reducedBefore, reducedAfter], [true, false]);
+    await t.click('#jump-on');
+    const jumpedOn = await t.run(`(() => {
+      const on = document.querySelector('.ov-section[data-section="on"]');
+      return { atTop: document.querySelector('.scroll.matrix').scrollTop <= 2, flashed: on.classList.contains('section-flash') };
+    })()`);
+    same('jumping back to On scrolls to top and marks On', jumpedOn, { atTop: true, flashed: true });
+
+    // Short MCP tab hides section jump even after opening an inline file panel (.details.details-file-only) that overflows the viewport.
+    await t.click('#harness-tab-mcp');
+    same('short MCP tab hides the section jump', await t.run(`(() => { const n = document.querySelector('.harness-page .section-jump'); return !n || n.hidden; })()`), true);
+    await t.click(`#${rowPart('file', 'mcp', 'mcp-a')}`);
+    for (let tries = 0; tries < 40 && !(await t.exists('.details.details-file-only')); tries++) await wait(100);
+    same('opening an inline file panel on a short tab keeps the section jump hidden',
+      await t.run(`(() => { const n = document.querySelector('.harness-page .section-jump'); return [!!document.querySelector('.details.details-file-only'), !n || n.hidden]; })()`),
+      [true, true]);
+    await t.click(`#${rowPart('file', 'mcp', 'mcp-a')}`);
+
+    // Borderline 7-row Agents tab at 860×548 sidebar open: overflows ONLY because harness-bar stacked, and shows section jump on initial tab draw without a resize.
+    await sizeTo(t, 860, 548);
+    await sidebarAs(true);
+    await t.click('#harness-tab-agents');
+    same('borderline 7-row tab shows section jump immediately on first draw after the stacked bar settles',
+      await t.run(`(() => { const b = document.querySelector('.harness-bar'), n = document.querySelector('.harness-page .section-jump'); return [b.classList.contains('harness-bar-stacked'), !!n && !n.hidden]; })()`),
+      [true, true]);
+    await t.click('#harness-tab-skills');
+
+    // Optional picture capture for the tool page (--shots with CK_SHOT_ONLY=tool-page or unrestricted).
+    const shotOnly = process.env.CK_SHOT_ONLY ? new Set(process.env.CK_SHOT_ONLY.split(',')) : null;
+    if (shots && (!shotOnly || shotOnly.has('tool-page'))) {
+      const take = async (name, [w, h], open, theme) => {
+        await sizeTo(t, w, h);
+        await sidebarAs(open);
+        await t.run(`document.activeElement?.blur(); window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+        await wait(120);
+        await t.shot(name);
+      };
+      await t.run(`const d = document.getElementById('mark-legend'); if (d?.open) document.getElementById('mark-legend-toggle')?.click();`);
+      await t.settle();
+      await take('tool-page-skills-860-open-light', [860, 560], true, 'light');
+      await take('tool-page-skills-1316-dark', [1316, 819], true, 'dark');
+      await sizeTo(t, 860, 560);
+      await sidebarAs(false);
+      await t.run(`window.centralKnot.setAppearance('light')`);
+      await wait(100);
+      await t.click('#mark-legend-toggle');
+      await t.run(`document.activeElement?.blur()`);
+      await wait(80);
+      await t.shot('tool-page-legend-open-860-light');
+      await t.click('#mark-legend-toggle');
+      await t.click('#jump-off');
+      await t.run(`document.activeElement?.blur()`);
+      await wait(40);
+      await t.shot('tool-page-jump-860-light');
+      // Open Every tool (?) card while plugin row is visible beneath the sticky head.
+      await t.click('#jump-plugins');
+      await t.click('#tab-switch-info');
+      await wait(80);
+      await t.shot('tool-page-card-open-860-light');
+      await t.press('Escape');
+      await t.run(`window.centralKnot.setAppearance('system')`);
+      await wait(80);
+    }
+
+    // Library still shows all 6 tool marks and open key with no toolbar disclosure.
+    await openKind(t, 'skills');
+    same('Library still shows all 6 tool marks per row and an open legend', [
+      await t.run(`document.querySelectorAll('.ov-row[data-key="${rowPart('', 'skills', 'skill-01')}"] .tool-mark').length`),
+      await t.exists('#mark-legend'),
+      await t.exists('.legend .legend-item'),
+    ], [6, false, true]);
+    same('no page errors, tool page fit', t.pageErrors, []);
+  } finally {
+    await t.quit();
   }
 }
 
@@ -1837,31 +2106,47 @@ const WORDS_CUT = `[...document.querySelectorAll('.plugin-click, .toolbar-result
 })`;
 
 /**
- * On Plugin marketplaces, each piece of a plugin's row that doesn't show whole: a piece of its open button (the title, the
- * version, a chip) hidden (no box, or hidden by its visibility or opacity), reaching past the button, with words outside its
- * row's name cell at any edge, or shortened; a version or chip broken over two lines though it fits its open button whole
- * (only a piece wider than the button may break inside itself); the button reaching past its row's name cell; and each tool's
- * heading wider than its column. Empty when every row's name, version and chips show whole (style.css "The plugin table").
- * CUT_OFF looks at the button and the heading's cell, not what is in them.
+ * On Plugin marketplaces, each piece of a plugin's row or column head that doesn't show cleanly: each tool's heading wider
+ * than its column, or its visible short label (`.plugin-tool-short`) hidden, outside its cell, shortened or wrapped past one
+ * line; a piece of a row's open button (the title, the version, a chip) hidden (no box, or hidden by its visibility or
+ * opacity), reaching past the button, with words outside its row's name cell at any edge, or shortened (except an intentionally
+ * single-line ellipsized long version on `.plugin-row-version`, which must stay one line and inside its cell, never breaking
+ * mid-token); a chip broken over two lines though it fits its open button whole; and the button reaching past its row's name
+ * cell. Empty when every row and heading fits (style.css "The plugin table"). CUT_OFF looks at controls and heading cells.
  */
 const ROW_PIECES_CUT = `(() => {
   const within = (inner, outer) => inner.left >= outer.left - 1 && inner.right <= outer.right + 1 && inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
   const words = node => { const range = document.createRange(); range.selectNodeContents(node); return [...range.getClientRects()]; };
-  const lines = node => new Set(words(node).map(rect => Math.round(rect.top))).size;
+  const lines = node => new Set(words(node).map(rect => Math.round(rect.top / 4))).size;
   // A piece's width on one line: its wrapping is off for the moment it is measured.
   const wholeWidth = node => { node.style.whiteSpace = 'nowrap'; const width = node.scrollWidth; node.style.whiteSpace = ''; return width; };
   const shown = node => node.checkVisibility({ visibilityProperty: true, opacityProperty: true });
-  const out = [...document.querySelectorAll('.plugin-table .ov-tool-head')].filter(head => head.scrollWidth > head.clientWidth + 1).map(head => head.textContent + '’s heading is wider than its column');
+  const out = [...document.querySelectorAll('.plugin-table .ov-tool-head')].flatMap(head => {
+    const label = head.getAttribute('aria-label') || head.textContent.trim();
+    const box = head.getBoundingClientRect();
+    const issues = [];
+    if (head.scrollWidth > head.clientWidth + 1) issues.push(label + '’s heading is wider than its column');
+    const short = head.querySelector('.plugin-tool-short');
+    if (short && shown(short)) {
+      const sbox = short.getBoundingClientRect();
+      if (sbox.width < 1 || sbox.height < 1 || !within(sbox, box) || short.scrollWidth > short.clientWidth + 1 || lines(short) > 1) {
+        issues.push(label + '’s short label is clipped or wrapped');
+      }
+    }
+    return issues;
+  });
   for (const row of document.querySelectorAll('.plugin-table .plugin-row')) {
     const name = row.querySelector('.plugin-row-name'), open = name.querySelector('.plugin-row-open');
     const cell = name.getBoundingClientRect(), button = open.getBoundingClientRect();
     if (!within(button, cell)) out.push(row.dataset.plugin + ': its open button reaches past its name cell');
-    for (const piece of open.children) {
+    for (const piece of open.querySelectorAll(':scope > :not(.plugin-row-tags), :scope > .plugin-row-tags > *')) {
       const box = piece.getBoundingClientRect(), says = row.dataset.plugin + ': ' + piece.textContent;
+      const cappedVersion = piece.matches('.plugin-row-version') && getComputedStyle(piece).textOverflow === 'ellipsis';
       if (box.width < 1 || box.height < 1 || !shown(piece)) out.push(says + ' is hidden');
       else if (!within(box, button)) out.push(says + ' reaches past its open button');
-      else if (!words(piece).every(rect => within(rect, cell))) out.push(says + ' has words outside its name cell');
-      else if (piece.scrollWidth > piece.clientWidth + 1) out.push(says + ' is shortened');
+      else if (!within(box, cell) || (!cappedVersion && !words(piece).every(rect => within(rect, cell)))) out.push(says + ' has words outside its name cell');
+      else if (cappedVersion && lines(piece) > 1) out.push(says + ' is broken across lines');
+      else if (!cappedVersion && piece.scrollWidth > piece.clientWidth + 1) out.push(says + ' is shortened');
       else if (!piece.matches('.plugin-row-title') && lines(piece) > 1 && wholeWidth(piece) <= button.width + 1) out.push(says + ' is broken over two lines, though it fits its open button whole');
     }
   }
@@ -1917,7 +2202,8 @@ async function checkCard(a, markId, expected, label) {
     const clearStatus = !status || !status.height || box.bottom <= status.top + 1;
     return { exists: true, open: card.matches(':popover-open'), text: card.textContent, clearStatus };
   })()`);
-  same(label, got, { exists: true, open: true, text: expected, clearStatus: true });
+  const byPattern = expected instanceof RegExp;
+  same(label, byPattern ? { ...got, text: expected.test(got.text ?? '') } : got, { exists: true, open: true, text: byPattern ? true : expected, clearStatus: true });
   same(`${label}: nothing cut off`, await a.run(CUT_OFF), []);
   await a.press('Escape');
   same(`${label}: Escape closes the card`, await a.run(`!!document.getElementById(${JSON.stringify(`${markId}-card`)})?.matches(':popover-open')`), false);
@@ -4992,9 +5278,6 @@ async function practiceFlow() {
   // Info marks and their top-layer detail cards (dom.ts infoMark) on Settings: Start at sign-in, Synchronize everything,
   // Update plugins automatically, Read what plugins hold and Log.
   const signInCardText = `Opens hidden in ${process.platform === 'darwin' ? 'the menu bar' : 'the system tray'} at sign-in, so sync keeps running.`;
-  const syncCardText = 'What turns up in a tool is turned on in every tool. Items whose copies differ wait for your choice.';
-  const pluginUpdatesCardText = 'Every four hours, window closed too. A plugin you turned off stays off.';
-  const pluginTextCardText = 'Keeps plugin items’ names, descriptions and first lines, so Find can search them.';
   const logCardText = 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t in it.';
   const cardOpen = id => a.run(`!!document.querySelector('#${id}-card')?.matches(':popover-open')`);
   const cardBecomes = async (id, want, bound, from = Date.now()) => {
@@ -5014,27 +5297,30 @@ async function practiceFlow() {
   const pressEsc = async () => { for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await wait(60); };
   const moveTo = async at => a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
   same('Settings has named info marks for all five explained rows, drops removed filler, keeps Updates can’t be undone., and every aria-describedby points at a drawn element', await a.run(`(() => {
-    const read = id => { const m = document.querySelector('#' + id), c = document.querySelector('#' + id + '-card'); return [m?.tagName, m?.getAttribute('aria-label'), m?.hasAttribute('title'), m?.getAttribute('aria-describedby'), c?.getAttribute('role'), c?.getAttribute('popover'), c?.textContent]; };
+    const read = (id, full = false) => { const m = document.querySelector('#' + id), c = document.querySelector('#' + id + '-card'); return [m?.tagName, m?.getAttribute('aria-label'), m?.hasAttribute('title'), m?.getAttribute('aria-describedby'), c?.getAttribute('role'), c?.getAttribute('popover'), full ? c?.textContent : Boolean(c?.textContent?.trim())]; };
     const text = document.querySelector('#settings-scroll')?.textContent ?? '';
     const gone = ['System follows your computer’s light or dark setting.', 'Changes and deleted items stay in History, ready to restore, for this long.', 'checks GitHub for a newer release', 'A new release shows at the bottom of the sidebar.', 'For this home: a skill, MCP server or agent', 'Central Knot checks your marketplaces every four hours', 'Central Knot keeps the names, descriptions and first lines', 'Nothing is installed or run.'];
     const dangling = [...document.querySelectorAll('#settings-scroll [aria-describedby]')].flatMap(el => (el.getAttribute('aria-describedby') ?? '').split(/\\s+/).filter(Boolean).filter(id => !document.getElementById(id)).map(id => (el.id || el.className) + '->' + id));
-    return [read('setting-sign-in-info'), read('setting-sync-everything-info'), read('setting-plugin-updates-info'), read('setting-plugin-text-info'), read('setting-log-info'),
+    return [read('setting-sign-in-info', true), read('setting-sync-everything-info'), read('setting-plugin-updates-info'), read('setting-plugin-text-info'), read('setting-log-info', true),
       !!document.querySelector('#setting-appearance-hint'), !!document.querySelector('#setting-history-hint'), !!document.querySelector('#setting-log-hint'),
       document.querySelector('.appearance-choices')?.getAttribute('aria-describedby'), document.querySelector('#setting-plugin-updates-hint')?.textContent,
       document.querySelector('#show-log')?.getAttribute('aria-describedby'), document.querySelector('#open-log-folder')?.getAttribute('aria-describedby'),
       gone.filter(phrase => text.includes(phrase)), dangling];
   })()`), [
     ['BUTTON', 'About Start at sign-in', false, 'setting-sign-in-info-card', 'tooltip', 'manual', signInCardText],
-    ['BUTTON', 'About Synchronize everything', false, 'setting-sync-everything-info-card', 'tooltip', 'manual', syncCardText],
-    ['BUTTON', 'About Update plugins automatically', false, 'setting-plugin-updates-info-card', 'tooltip', 'manual', pluginUpdatesCardText],
-    ['BUTTON', 'About Read what plugins hold', false, 'setting-plugin-text-info-card', 'tooltip', 'manual', pluginTextCardText],
+    ['BUTTON', 'About Synchronize everything', false, 'setting-sync-everything-info-card', 'tooltip', 'manual', true],
+    ['BUTTON', 'About Update plugins automatically', false, 'setting-plugin-updates-info-card', 'tooltip', 'manual', true],
+    ['BUTTON', 'About Read what plugins hold', false, 'setting-plugin-text-info-card', 'tooltip', 'manual', true],
     ['BUTTON', 'About Log', false, 'setting-log-info-card', 'tooltip', 'manual', logCardText],
     false, false, false, null, 'Updates can’t be undone.', 'setting-log-info-card', 'setting-log-info-card', [], [],
   ]);
-  for (const [id, text, label] of [['setting-sync-everything-info', syncCardText, 'Synchronize everything card'], ['setting-plugin-updates-info', pluginUpdatesCardText, 'Update plugins automatically card'], ['setting-plugin-text-info', pluginTextCardText, 'Read what plugins hold card']]) {
+  for (const [id, pattern, label] of [['setting-sync-everything-info', /every tool Central Knot manages/, 'Synchronize everything card'], ['setting-plugin-updates-info', /every four hours/, 'Update plugins automatically card'], ['setting-plugin-text-info', /names, descriptions and first lines/, 'Read what plugins hold card']]) {
     await a.run(`document.getElementById(${JSON.stringify(id)}).scrollIntoView({ block: 'center' })`);
-    await checkCard(a, id, text, label);
+    await checkCard(a, id, pattern, label);
   }
+  same('the status bar’s Automatic sync switch has a sized target, keeps its name, and tells itself apart from Synchronize everything for hover and keyboard',
+    await a.run(`(() => { const s = document.getElementById('sync-switch'), r = s?.getBoundingClientRect(); return [r ? r.width > 0 && r.height > 0 : false, s?.querySelector('.sync-label')?.textContent, s?.title === s?.getAttribute('aria-description'), /Synchronize everything decides whether new items found in tools are added\\./.test(s?.title ?? '')]; })()`),
+    [true, 'Automatic sync', true, true]);
   for (const [width, height] of [[860, 560], [1316, 819]]) {
     await withSidebarOpen(a, width, height, async () => {
       await a.run(`document.getElementById('setting-plugin-updates-info').scrollIntoView({ block: 'center' })`);
@@ -5401,6 +5687,11 @@ async function practiceFlow() {
   // At sign-in the panel may still be starting: such a start asks again, about once a second up to ten times (platform.ts trayWithin).
   same('on a Linux desktop with no system tray, a start at sign-in (--hidden) asks ten times, then shows the window',
     [asked('never'), await b.run('location.search'), await bMain?.run('electron.BrowserWindow.getAllWindows()[0].isVisible()') ?? true], [10, '', true]);
+  await b.click('#nav-settings');
+  for (let tries = 0; tries < 40 && await b.run(`document.getElementById('plugin-updates-on')?.disabled !== false`); tries++) await wait(100);
+  const noTrayCard = await b.text('#setting-plugin-updates-info-card') ?? '';
+  check('on a Linux desktop with no system tray, the plugin-updates card drops “window closed too”',
+    !/window closed too/.test(noTrayCard) && /while this window stays open/.test(noTrayCard), noTrayCard);
   // Closed through the window's own close, as a person's click is (main's debugger). A packaged app has no debugger: there the
   // page closes itself, which skips the window's close handler and quits from window-all-closed.
   if (bMain) {
@@ -7013,11 +7304,13 @@ async function openCodeFlow() {
 }
 
 /**
- * Plugin marketplaces with four tools, then five (Pi joins): every row's name, version and chips show whole, in the smallest
- * window with the sidebar folded and open, and at 860×600, 1280×800, 1316×819, 1728×1117 and 2560×1440 with it open (style.css
- * "The plugin table"). The marketplace is this flow's own, registered in Claude Code: a plugin whose name is 45 characters with
- * a run of 25 letters, a long version and a category; one whose version is a build identifier with no break in it, wider than
- * the name's column in a narrow window; and one that Claude Code still has and the marketplace no longer lists.
+ * Plugin marketplaces with two, three, four, five and six tools: every row's name, version, chips, description, counts and
+ * Library link show cleanly, with tool column names shown wherever the name column keeps its room (per tool count: 2–4 tools
+ * stay named at 860, while 6 tools drop to icon-only below 780 px of table so 860–1190 windows keep room). Tests 860×528
+ * (folded and open), 860×600, 940×700, 1000×700, 1190×700, 1280×800, 1316×819, 1728×1117 and 2560×1440 (style.css "The plugin
+ * table"). The marketplace is this flow's own, registered in Claude Code: a plugin whose name is 45 characters with a run of
+ * 25 letters, a long version and a category; one whose version is a build identifier with no break in it; and one that Claude
+ * Code still has and the marketplace no longer lists.
  */
 async function pluginRowsFitFlow() {
   const home = join(scratch, 'home-rows-fit'), market = join(scratch, 'market-rows-fit');
@@ -7025,8 +7318,8 @@ async function pluginRowsFitFlow() {
   const buildId = '2.4.0+build20261118ab12cd34ef56ab78cd90ef12ab34';
   const file = (root, path, body) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), body); };
   const cli = (name, version) => { file(home, `.local/bin/${name}`, `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, '.local/bin', name), 0o755); };
-  toolClis(home);
-  cli('opencode', '1.19.5');
+  cli('claude', '2.1.309 (Claude Code)');
+  cli('copilot', 'GitHub Copilot CLI 1.0.107.');
   file(market, '.claude-plugin/marketplace.json', JSON.stringify({ name: 'rows-fit', owner: { name: 'Platform team' }, plugins: [
     { name: long, source: `./plugins/${long}`, version: '12.10.0-beta.3', category: 'observability', description: 'Dashboards, alerts and traces for the services a team runs, in one place.' },
     { name: nightly, source: `./plugins/${nightly}`, version: buildId, category: 'development', description: 'The latest build of the team’s tools, every night.' },
@@ -7034,31 +7327,237 @@ async function pluginRowsFitFlow() {
   for (const plugin of [long, nightly]) file(market, `plugins/${plugin}/skills/dashboards/SKILL.md`, '---\nname: dashboards\ndescription: Builds a dashboard.\n---\n\nBuild it.\n');
   file(home, '.claude/plugins/known_marketplaces.json', JSON.stringify({ 'rows-fit': { source: { source: 'directory', path: market }, installLocation: market } }));
   writeClaudeInstall(home, 'rows-fit', gone, '1.0.0', { 'skills/ship/SKILL.md': '---\nname: ship\ndescription: Ships logs.\n---\n\nShip them.\n' });
+  const copilotCopy = join(home, '.copilot/installed-plugins/rows-fit', nightly);
+  file(copilotCopy, 'skills/dashboards/SKILL.md', '---\nname: dashboards\ndescription: Builds a dashboard.\n---\n\nBuild it.\n');
+  file(home, '.copilot/config.json', JSON.stringify({ installedPlugins: [{ name: nightly, marketplace: 'rows-fit', version: '2.3.0', cache_path: copilotCopy, enabled: true }] }));
   const a = await launch(join(scratch, 'rows-fit-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
-  const pieces = name => a.all(`.plugin-row[data-plugin="${name}"] .plugin-row-open > *`);
+  const pieces = name => a.all(`.plugin-row[data-plugin="${name}"] .plugin-row-open > :not(.plugin-row-tags), .plugin-row[data-plugin="${name}"] .plugin-row-tags > *`);
   const sidebarOpen = async open => { if (await a.run(`document.body.classList.contains('rail')`) === open) await a.click('#sidebar-toggle'); };
+  const parkPointer = () => a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0, button: 'none' });
   const titleLines = () => a.run(`(() => { const range = document.createRange(); range.selectNodeContents(document.querySelector('.plugin-row[data-plugin="${long}"] .plugin-row-title'));
-    return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size; })()`);
+    return new Set([...range.getClientRects()].map(rect => Math.round(rect.top / 4))).size; })()`);
   const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  const expectedTools = {
+    2: [['Claude Code', 'Claude'], ['Copilot CLI', 'Copilot']],
+    3: [['Claude Code', 'Claude'], ['Copilot CLI', 'Copilot'], ['Codex', 'Codex']],
+    4: [['Claude Code', 'Claude'], ['Copilot CLI', 'Copilot'], ['Codex', 'Codex'], ['OpenCode', 'OpenCode']],
+    5: [['Claude Code', 'Claude'], ['Copilot CLI', 'Copilot'], ['Codex', 'Codex'], ['Pi', 'Pi'], ['OpenCode', 'OpenCode']],
+    6: [['Claude Code', 'Claude'], ['Copilot CLI', 'Copilot'], ['Codex', 'Codex'], ['Pi', 'Pi'], ['OpenCode', 'OpenCode'], ['Antigravity', 'Antigravity']],
+  };
+  const EVERY_CARD_BASE = 'On puts it in every tool that takes it. Off turns it off in every tool; nothing is uninstalled. A striped switch: on, with a tool off or kept out. Add brings an installed plugin under this switch. Open a row for one tool.';
+  const everyCard = tools => `${EVERY_CARD_BASE} Columns: ${tools.map(([full]) => full).join(', ')}.`;
+  const readHeaders = () => a.run(`(() => {
+    const shown = el => !!el && el.checkVisibility({ visibilityProperty: true, opacityProperty: true });
+    return {
+      nameWidth: Math.round(document.querySelector('.plugin-row-name').getBoundingClientRect().width),
+      heads: [...document.querySelectorAll('.plugin-table .ov-tool-head')].map(el => {
+        const r = el.getBoundingClientRect();
+        const mark = el.querySelector('svg.brand-mark, .mono-mark');
+        const mr = mark?.getBoundingClientRect();
+        const short = el.querySelector('.plugin-tool-short');
+        const sr = short?.getBoundingClientRect();
+        const shortVisible = shown(short) && !!sr && sr.width > 0 && sr.height > 0;
+        return {
+          markOk: shown(mark) && !!mr && mr.width >= 14 && mr.height >= 14,
+          short: shortVisible ? short.textContent.trim() : '',
+          shortFits: !shortVisible || (short.scrollWidth <= short.clientWidth + 1 && sr.left >= r.left - 1 && sr.right <= r.right + 1),
+          title: el.title,
+          label: el.getAttribute('aria-label'),
+          tabIndex: el.tabIndex,
+          width: Math.round(r.width),
+        };
+      }),
+    };
+  })()`);
   const rowsWhole = async tools => {
     for (let tries = 0; tries < 50 && await a.run(`document.querySelector('.plugin-table')?.dataset.tools`) !== String(tools); tries++) await wait(100);
     same(`the table has ${tools} tool columns; each row has its name, version and chips: the one no longer offered says so`,
       [await a.run(`document.querySelector('.plugin-table')?.dataset.tools`), await pieces(long), await pieces(nightly), await pieces(gone)],
       [String(tools), [long, '12.10.0-beta.3', 'observability'], [nightly, buildId, 'development'], [gone, 'No longer offered']]);
-    for (const [width, height, open] of [[...SMALLEST, false], [...SMALLEST, true], [860, 600, true], [1280, 800, true], [1316, 819, true], [1728, 1117, true], [2560, 1440, true]]) {
-      await sizeTo(a, width, height); await sidebarOpen(open);
-      same(`with ${tools} tools at ${width}×${height}, the sidebar ${open ? 'open' : 'folded'}, every plugin’s name, version and chips show whole, nothing cut off`, [...await a.run(ROW_PIECES_CUT), ...await a.run(CUT_OFF)], []);
+    const sizes = tools === 6
+      ? [[...SMALLEST, false], [...SMALLEST, true], [860, 600, true], [940, 700, true], [1000, 700, true], [1190, 700, true], [1280, 800, true], [1316, 819, true], [1728, 1117, true], [2560, 1440, true]]
+      : [[...SMALLEST, false], [...SMALLEST, true], [860, 600, true], [1280, 800, true], [1316, 819, true], [1728, 1117, true], [2560, 1440, true]];
+    for (const [width, height, open] of sizes) {
+      await sizeTo(a, width, height); await sidebarOpen(open); await parkPointer();
+      same(`with ${tools} tools at ${width}×${height}, the sidebar ${open ? 'open' : 'folded'}, every plugin’s name, version and chips show cleanly, nothing cut off`, [...await a.run(ROW_PIECES_CUT), ...await a.run(CUT_OFF)], []);
       if (width === 1280) same(`with ${tools} tools at 1280×800 the 45-character name has room for one line, and takes it`, await titleLines(), 1);
-      if (open) await a.shot(`rows-fit-${tools}-tools-${width}x${height}`);
+      // Item 1: 2, 3 and 4 tools keep names at 860 open; 5 and 6 tools drop to icon-only at 860; 6 tools stay icon-only at 940, 1000 and 1190.
+      if (open && height === 528 && [2, 3, 4, 5].includes(tools)) {
+        const iconOnly = tools >= 5;
+        const { nameWidth, heads } = await readHeaders();
+        console.log(`rows-fit ${tools} tools @ 860: nameWidth=${nameWidth}px (${iconOnly ? 'icons' : 'names'})`);
+        same(`with ${tools} tools at 860×528, headers show ${iconOnly ? 'icons alone' : 'short names'} and name column keeps room`,
+          [nameWidth >= 280, heads.map(({ markOk, short, shortFits, title, label, tabIndex }) => ({ markOk, short, shortFits, title, label, tabIndex }))],
+          [true, expectedTools[tools].map(([full, short]) => ({ markOk: true, short: iconOnly ? '' : short, shortFits: true, title: full, label: full, tabIndex: 0 }))]);
+        if (tools === 3) await a.shot('rows-fit-3-tools-860x528');
+      }
+      if (open && tools === 6 && height !== 600) {
+        const iconOnly = width < 1280;
+        const measured = await a.run(`(() => {
+          const shown = el => !!el && el.checkVisibility({ visibilityProperty: true, opacityProperty: true });
+          const heads = [...document.querySelectorAll('.plugin-table .ov-tool-head')].map(el => {
+            const r = el.getBoundingClientRect();
+            const mark = el.querySelector('svg.brand-mark, .mono-mark');
+            const mr = mark?.getBoundingClientRect();
+            const short = el.querySelector('.plugin-tool-short');
+            const sr = short?.getBoundingClientRect();
+            const shortVisible = shown(short) && !!sr && sr.width > 0 && sr.height > 0;
+            return {
+              markOk: shown(mark) && !!mr && mr.width >= 14 && mr.height >= 14,
+              short: shortVisible ? short.textContent.trim() : '',
+              shortFits: !shortVisible || (short.scrollWidth <= short.clientWidth + 1 && sr.left >= r.left - 1 && sr.right <= r.right + 1),
+              title: el.title,
+              label: el.getAttribute('aria-label'),
+              tabIndex: el.tabIndex,
+              okSize: ${iconOnly} ? (r.width >= 39 && r.width <= 42) : (r.width >= 62 && r.width <= 74),
+            };
+          });
+          const wholeRow = (name, hasAbout, hasHolds, hasLibrary) => {
+            const row = document.querySelector(\`.plugin-row[data-plugin="\${name}"]\`);
+            const cell = row.querySelector('.plugin-row-name').getBoundingClientRect();
+            const okEl = (sel, maxLines = 1) => {
+              const el = row.querySelector(sel);
+              if (!shown(el)) return false;
+              const r = el.getBoundingClientRect();
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              const lineCount = new Set([...range.getClientRects()].map(rect => Math.round(rect.top / 4))).size;
+              const inline = getComputedStyle(el).display === 'inline';
+              return r.width > 0 && r.height > 0 && r.left >= cell.left - 1 && r.right <= cell.right + 1
+                && (inline || (el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + 1)) && lineCount <= maxLines;
+            };
+            const lineEl = row.querySelector('.plugin-row-line');
+            const badSep = [...row.querySelectorAll('.plugin-row-line > .plugin-row-sep, .plugin-row-meta > .plugin-row-sep')].length > 0
+              || /^\\s*·|·\\s*$|·\\s*·/.test(lineEl?.innerText ?? '');
+            return {
+              about: hasAbout ? okEl('.plugin-row-about', 2) : !row.querySelector('.plugin-row-about'),
+              holds: !hasHolds || okEl('.plugin-row-holds', 2),
+              library: !hasLibrary || okEl('.plugin-row-library', 1),
+              noOrphanSep: !badSep,
+            };
+          };
+          const everyHead = document.querySelector('.plugin-table .plugin-head-every');
+          const nameWidth = Math.round(document.querySelector('.plugin-row-name').getBoundingClientRect().width);
+          const upd = [...document.querySelectorAll(\`.plugin-row[data-plugin="${nightly}"] .plugin-row-update > *\`)].map(el => el.getBoundingClientRect());
+          const oneUpdateLine = upd.length >= ${canWriteRealHome ? 2 : 1} && upd.every(r => r.top < upd[0].bottom - 1 && r.bottom > upd[0].top + 1);
+          const nightlyVer = document.querySelector(\`.plugin-row[data-plugin="${nightly}"] .plugin-row-version\`);
+          const nightlyChip = document.querySelector(\`.plugin-row[data-plugin="${nightly}"] .plugin-chip\`);
+          const vr = nightlyVer.getBoundingClientRect(), cr = nightlyChip.getBoundingClientRect();
+          const chipOnVersionLine = cr.top < vr.bottom - 1 && cr.bottom > vr.top + 1;
+          const longAbout = document.querySelector(\`.plugin-row[data-plugin="${long}"] .plugin-row-about\`);
+          const longHolds = document.querySelector(\`.plugin-row[data-plugin="${long}"] .plugin-row-holds\`);
+          const aboutRects = (() => { const rg = document.createRange(); rg.selectNodeContents(longAbout); return [...rg.getClientRects()]; })();
+          const lastAbout = aboutRects.at(-1), hr = longHolds.getBoundingClientRect();
+          const holdsOnLastLine = !!lastAbout && hr.top < lastAbout.bottom + 2 && hr.bottom > lastAbout.top - 2;
+          const shorts = [...document.querySelectorAll('.plugin-table .plugin-tool-short')].filter(shown).map(el => el.getBoundingClientRect());
+          const lastTwoGap = shorts.length >= 2 ? Math.round(shorts.at(-1).left - shorts.at(-2).right) : null;
+          const goneTitle = document.querySelector(\`.plugin-row[data-plugin="${gone}"] .plugin-chip-gone\`)?.title ?? '';
+          const suggestedWhole = [...document.querySelectorAll('.market-suggestion-meta')].filter(shown).every(el => el.scrollWidth <= el.clientWidth + 1);
+          return {
+            nameWidth,
+            everyLabel: everyHead ? everyHead.getAttribute('aria-label') : null,
+            heads,
+            rows: [
+              wholeRow(${JSON.stringify(long)}, true, true, false),
+              wholeRow(${JSON.stringify(nightly)}, true, true, true),
+              wholeRow(${JSON.stringify(gone)}, false, false, true),
+            ],
+            oneUpdateLine,
+            chipOnVersionLine,
+            holdsOnLastLine,
+            lastTwoGap,
+            goneTitle,
+            suggestedWhole,
+          };
+        })()`);
+        if ([860, 940, 1000, 1190, 1280, 1316, 1728].includes(width)) console.log(`rows-fit 6 tools @ ${width}: nameWidth=${measured.nameWidth}px (${iconOnly ? 'icons' : 'names'}), lastTwoGap=${measured.lastTwoGap}px`);
+        same(`with 6 tools at ${width}×${height}, headers show marks (${iconOnly ? 'icon-only' : 'with short names'}), rows stay whole and compact`, {
+          nameRoomOk: measured.nameWidth >= 300,
+          everyLabel: measured.everyLabel, heads: measured.heads, rows: measured.rows,
+          chipOnVersionLine: measured.chipOnVersionLine,
+          holdsOnLastLine: measured.holdsOnLastLine,
+          goneTitle: measured.goneTitle,
+          suggestedWhole: measured.suggestedWhole,
+          ...(!iconOnly ? { lastTwoGapOk: measured.lastTwoGap >= 10 } : {}),
+          ...(width === 1316 ? { oneUpdateLine: measured.oneUpdateLine } : {}),
+        }, {
+          nameRoomOk: true,
+          everyLabel: canWriteRealHome ? 'Every tool' : null,
+          heads: expectedTools[6].map(([full, short]) => ({ markOk: true, short: iconOnly ? '' : short, shortFits: true, title: full, label: full, tabIndex: 0, okSize: true })),
+          rows: [
+            { about: true, holds: true, library: true, noOrphanSep: true },
+            { about: true, holds: true, library: true, noOrphanSep: true },
+            { about: true, holds: true, library: true, noOrphanSep: true },
+          ],
+          chipOnVersionLine: true,
+          holdsOnLastLine: true,
+          goneTitle: 'Stays installed as it is until you uninstall it.',
+          suggestedWhole: true,
+          ...(!iconOnly ? { lastTwoGapOk: true } : {}),
+          ...(width === 1316 ? { oneUpdateLine: true } : {}),
+        });
+        if ([860, 1000, 1280, 1316, 1728, 2560].includes(width)) await a.shot(`rows-fit-6-tools-${width}x${height}`);
+      }
     }
-    await theme('dark');
-    for (const [width, height] of [SMALLEST, [1316, 819]]) { await sizeTo(a, width, height); await sidebarOpen(true); await a.shot(`rows-fit-${tools}-tools-${width}x${height}-dark`); }
-    await theme('light');
+    if (tools === 6) {
+      await sizeTo(a, 1316, 819); await sidebarOpen(true); await parkPointer();
+      same('with 6 tools, the key shows the centered dash for Can’t go there and drops Out of date when rows name Update', await a.run(`(() => {
+        const legend = document.querySelector('.plugin-legend');
+        const cannot = legend?.querySelector('.legend-cell.cell-cannot .cannot-dash');
+        const cr = cannot?.getBoundingClientRect();
+        return {
+          hasCannot: !!legend && legend.textContent.includes('Can’t go there'),
+          cannotDash: !!cannot && cannot.textContent.trim() === '–' && !!cr && cr.width > 0 && cr.height > 0,
+          hasOutdated: !!legend && legend.textContent.includes('Out of date'),
+        };
+      })()`), { hasCannot: true, cannotDash: true, hasOutdated: false });
+      if (canWriteRealHome) {
+        await a.click('#plugin-switch-info');
+        const namedCardText = await a.run(`document.getElementById('plugin-switch-info-card')?.innerText.trim()`);
+        await a.press('Escape');
+        same('when tool names are visible at 1316, Every tool (?) omits the Columns list', namedCardText, EVERY_CARD_BASE);
+      }
+    }
+    if (tools === 6 && canWriteRealHome) {
+      await sizeTo(a, ...SMALLEST); await sidebarOpen(true); await parkPointer();
+      if (await a.exists('#plugin-switch-info')) {
+        // Tab from Every tool (?) reaches the first icon-only tool header and shows its full name via :focus-visible::after.
+        await a.run(`document.getElementById('plugin-switch-info').focus()`);
+        await a.press('Tab');
+        same('at 860 icon-only, Tab focuses a tool header and surfaces its full name visibly', await a.run(`(() => {
+          const el = document.activeElement;
+          return [el?.classList.contains('ov-tool-head'), el?.title, el?.getAttribute('aria-label'), getComputedStyle(el, '::after').content];
+        })()`), [true, 'Claude Code', 'Claude Code', '"Claude Code"']);
+        await a.run(`document.activeElement?.blur()`);
+        if (shots) { await a.click('#plugin-switch-info'); await a.shot('rows-fit-6-tools-860x528-every-tool-card'); await a.press('Escape'); }
+        await a.click('#plugin-switch-info');
+        const iconCardText = await a.run(`document.getElementById('plugin-switch-info-card')?.innerText.trim()`);
+        await a.press('Escape');
+        same('at 860 icon-only, Every tool (?) visibly includes Columns in order', iconCardText, everyCard(expectedTools[6]));
+        await checkCard(a, 'plugin-switch-info', everyCard(expectedTools[6]),
+          'with 6 tools at 860×528, Every tool (?) opens its card clear of the status bar');
+      } else check('with 6 tools at 860×528, Every tool (?) info mark exists', false);
+    }
+    if (tools === 6) {
+      await theme('dark');
+      await sizeTo(a, 1316, 819); await sidebarOpen(true); await parkPointer(); await a.shot('rows-fit-6-tools-1316x819-dark');
+      await theme('light');
+    }
     await fullSize(a);
   };
   await theme('light');
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists(`.plugin-row[data-plugin="${gone}"]`)); tries++) await wait(100);
+  await rowsWhole(2);
+  cli('codex', 'codex-cli 0.142.3');
+  await a.click('#nav-harnesses');
+  await a.click('#header-refresh');
+  await a.click('#nav-plugins');
+  await rowsWhole(3);
+  cli('opencode', '1.19.5');
+  await a.click('#nav-harnesses');
+  await a.click('#header-refresh');
+  await a.click('#nav-plugins');
   await rowsWhole(4);
   // Pi joins at a read of the home, made where it is the one read (as openCodeFlow does: Plugins' own read would start a second).
   cli('pi', '0.70.2');
@@ -7066,6 +7565,11 @@ async function pluginRowsFitFlow() {
   await a.click('#header-refresh');
   await a.click('#nav-plugins');
   await rowsWhole(5);
+  cli('agy', '1.5.14');
+  await a.click('#nav-harnesses');
+  await a.click('#header-refresh');
+  await a.click('#nav-plugins');
+  await rowsWhole(6);
   same('no page errors, the plugin rows', a.pageErrors, []);
   await a.quit();
 }
@@ -7145,6 +7649,37 @@ async function dockedListFlow() {
   const under = await place();
   await sidebarOpen(false);
   same('across the dock’s breakpoint and back, the opened row stays open, where it was in its table', [under, await place()], [['under its row', top, offset], ['docked', top, offset]]);
+  // Long filename + hittable file icon win over description when docked on both the tool tab and Library.
+  const longDocked = 'quarterly-platform-engineering-release-doc';
+  skill(claude, longDocked, text(longDocked, 'Summarises quarterly platform engineering changes and release milestones.'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !(await a.exists(`#${rowPart('add', 'skills', longDocked)}`)); tries++) await wait(100);
+  await a.click(`#${rowPart('add', 'skills', longDocked)}`);
+  const shortDocked = names.filter(name => name !== 'research').sort((first, second) => first.length - second.length)[0];
+  const checkDockedLong = async (where, minBtn, expectLongHidden) => {
+    await sizeTo(a, 1316, 787); await sidebarOpen(false);
+    const got = await a.run(`(() => {
+      const row = document.querySelector('.dock-main .ov-row[data-key="${rowPart('', 'skills', longDocked)}"]');
+      const other = document.querySelector('.dock-main .ov-row[data-key="${rowPart('', 'skills', shortDocked)}"]');
+      const cell = row?.querySelector('.ov-name'), text = row?.querySelector('.ov-name-text'), btn = row?.querySelector('.row-file-btn');
+      const cr = cell?.getBoundingClientRect(), br = btn?.getBoundingClientRect();
+      return {
+        nameWhole: !!(text && text.scrollWidth <= text.clientWidth + 1),
+        nameCut: !!cell?.classList.contains('name-cut'),
+        longAboutHidden: !row?.querySelector('.ov-name-about')?.offsetWidth,
+        otherAboutShown: !!(other?.querySelector('.ov-name-about')?.offsetWidth),
+        btnHit: !!(br && cr && br.width >= ${minBtn} && br.height >= ${minBtn} && br.right <= cr.right + 1 && br.bottom <= cr.bottom + 1),
+      };
+    })()`);
+    same(`${where} docked at 1260 px prioritizes the 42-letter filename and hittable file icon over its own description while other rows keep theirs`,
+      got, { nameWhole: true, nameCut: false, longAboutHidden: expectLongHidden, otherAboutShown: true, btnHit: true });
+  };
+  await checkDockedLong('Claude Code’s Skills tab', 26, false);
+  for (const selector of ['#nav-library', '#library-kind-all']) await a.click(selector);
+  if (!(await a.exists('.dock-main'))) await a.click(`#${rowPart('open', 'skills', 'research')}`);
+  await a.run(`(() => { const sort = document.querySelector('#item-order'); sort.value = 'name'; sort.dispatchEvent(new Event('change')); })()`);
+  await a.settle();
+  await checkDockedLong('Library by Name', 20, true);
   same('no page errors, the docked list', a.pageErrors, []);
   await a.quit();
 }
@@ -7970,10 +8505,10 @@ async function syncEverythingFlow() {
     [null, 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.', false]);
   await a.click('#nav-settings');
   for (let tries = 0; tries < 30 && !(await a.exists('#setting-sync-everything')); tries++) await wait(100);
-  same('Settings › This home: Synchronize everything is off, moves its paragraph behind its mark with live aria-describedby, and says what it would add now and what waits',
-    [await ruleOn(), await ruleSays(), await a.exists('#setting-sync-everything-hint'), await a.run(`document.getElementById('setting-sync-everything-info')?.getAttribute('aria-label')`), await a.run(`document.getElementById('sync-everything-on')?.getAttribute('aria-describedby')`)],
-    ['false', 'Turning it on puts the 2 items found in your tools into every tool now. 1 found item has copies that differ and waits for your choice of copy.', false, 'About Synchronize everything', 'setting-sync-everything-info-card setting-sync-everything-notice']);
-  await checkCard(a, 'setting-sync-everything-info', 'What turns up in a tool is turned on in every tool. Items whose copies differ wait for your choice.', 'Synchronize everything card');
+  same('Settings › This home: Synchronize everything is off, shows the switch difference under its title with live aria-describedby, and says what it would add now and what waits',
+    [await ruleOn(), await ruleSays(), /Automatic sync/.test(await a.text('#setting-sync-everything-hint') ?? ''), await a.run(`document.getElementById('setting-sync-everything-info')?.getAttribute('aria-label')`), await a.run(`document.getElementById('sync-everything-on')?.getAttribute('aria-describedby')`)],
+    ['false', 'Turning it on puts the 2 items found in your tools into every tool Central Knot manages now. 1 found item has copies that differ and waits for your choice of copy.', true, 'About Synchronize everything', 'setting-sync-everything-info-card setting-sync-everything-hint setting-sync-everything-notice']);
+  await checkCard(a, 'setting-sync-everything-info', /every tool Central Knot manages/, 'Synchronize everything card');
   await fitsAtMinimum(a, 'Settings with Synchronize everything off');
   await a.shot('everything-off');
   await openAgainOnSettings('before switching on');
@@ -7987,14 +8522,18 @@ async function syncEverythingFlow() {
     await a.run(`(() => { const o = document.querySelector('[data-outcome]'), u = o?.querySelector('#outcome-undo'); return [o?.querySelector('.band-text')?.textContent, u?.textContent, u?.title, u?.getAttribute('aria-description')]; })()`),
     ['Synchronize everything is on: it added 2 items.', 'Undo', 'Switches Synchronize everything off. It takes back the items it added, but for any changed since.', null]);
   same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
-  same('and Settings says what it took in, a line per kind, each with History', await a.all('.setting-added .setting-message', 'e.textContent'),
-    ['Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.History', 'Synchronize everything took in 1 MCP server, found in Codex: files. History can undo it.History']);
+  same('and Settings puts what it added above what waits, a line per kind without repeating the title, omitting History while the band holds Undo',
+    [await a.all('.setting-added .setting-message', 'e.textContent'), await a.run(`(() => { const a = document.querySelector('#setting-sync-everything .setting-added'), n = document.getElementById('setting-sync-everything-notice'); return !!a && !!n && !!(a.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING); })()`)],
+    [['Added skill notes from Claude Code.', 'Added MCP server files from Codex.'], true]);
   await takenInSoon('fresh', text('fresh', 'Just saved.'), freshSaved, 'a skill saved just before is taken in soon after, with no click, once it has settled');
   // The read after that pass reaches the page: the sidebar's dot names both skills' notices, neither shown yet.
   const unseenOnLibrary = () => a.run(`document.querySelector('#nav-library .nav-unseen')?.title ?? ''`);
   for (let tries = 0; tries < 300 && !/fresh/.test(await unseenOnLibrary()); tries++) await wait(100);
   same('a notice no page has shown stays until shown: the sidebar’s Library names both passes’ notices, of every kind', await unseenOnLibrary(), '3 automatic changes: notes, fresh, files');
   await a.shot('everything-on');
+  await a.click('#outcome-dismiss');
+  same('closing the band brings back History on the take-in lines', await a.all('.setting-added .setting-message', 'e.textContent'),
+    ['Added skill notes from Claude Code. History can undo it.History', 'Added skill fresh from Claude Code. History can undo it.History', 'Added MCP server files from Codex. History can undo it.History']);
   await a.click('#nav-overview');
   same('the Overview’s foot is one sentence, where every change is kept: Automatic sync is the status bar’s to say', (await a.text('#overview-kept'))?.trim(), 'Every change Central Knot makes in your tools is kept in History, with Undo where it can be undone.');
   await openKind(a, 'skills');
@@ -8043,7 +8582,7 @@ async function syncEverythingFlow() {
   await a.click('#nav-settings');
   await a.click('#sync-everything-on');
   for (let tries = 0; tries < 40 && await ruleOn() !== 'false'; tries++) await wait(100);
-  same('turned off, it says what it would add now: nothing, since what was undone stays out', [await ruleOn(), await ruleSays()], ['false', 'Nothing found in your tools now would be added. 1 found item was taken out of Central Knot earlier and isn’t added by itself again: Add on its row, or Restore in History, brings it back. 2 found items have copies that differ and wait for your choice of copy.']);
+  same('turned off, it says first that what was undone isn’t added again by itself', [await ruleOn(), await ruleSays()], ['false', '1 found item isn’t added by itself again (taken out of Central Knot). Add on its row in the Library, or Restore in History, brings it back. 2 found items have copies that differ and wait for your choice of copy.']);
   await openAgainOnSettings('switched on and off');
   // Saved just before the rule is switched on again, with nothing else for that pass to write, and still being saved as it
   // runs: that pass leaves it, and a pass soon after takes it in (takenInSoon).
@@ -8088,18 +8627,20 @@ async function syncEverythingFlow() {
     [['Synchronize everything is on: it added 2 items.', 'Undo', twoHelp, true, false], text('notes', 'Take notes.'), 'files-mcp']);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
-  const twoUndone = 'Undone: switched off, and 2 items it took in are out of Central Knot again, each tool it was found in keeping its own copy.';
+  const twoUndone = 'Undone: switched off, and 2 items it took in are out of Central Knot again, each tool they were found in keeping its own.';
   same('Settings inline Undo turns the rule off, takes back both kinds like History’s Undo, leaves originals and conflict, clears undone taken-in lines, and reads as History’s',
     [uRecord().syncEverything, existsSync(join(uCodex, 'notes')), readNow(join(uClaude, 'notes/SKILL.md')), readNow(join(uClaude, 'review/SKILL.md')), readNow(join(uCodex, 'review/SKILL.md')), 'files' in (JSON.parse(readNow(join(uHome, '.claude.json'))).mcpServers ?? {}), /\[mcp_servers\.files\]/.test(readNow(join(uHome, '.codex/config.toml'))), await uBand(),
       await b.all('.setting-added .setting-message', 'e.textContent'), await b.exists('#nav-library .nav-unseen'), await b.text('#setting-sync-everything-notice .setting-message-text')],
     [false, false, text('notes', 'Take notes.'), text('review', 'Review gently.'), text('review', 'Review hard.'), false, true, [twoUndone, null, null, false, false],
-      [], false, 'Nothing found in your tools now would be added. 2 found items were taken out of Central Knot earlier and aren’t added by themselves again: Add on a row, or Restore in History, brings one back. 1 found item has copies that differ and waits for your choice of copy.']);
+      [], false, '2 found items aren’t added by themselves again (taken out of Central Knot). Add on their rows in the Library, or Restore in History, brings them back. 1 found item has copies that differ and waits for your choice of copy.']);
+  check('Choose copies sits beside the last sentence (waiting), not up on the first line', await b.run(`(() => { const t = document.querySelector('#setting-sync-everything-notice .setting-message-text')?.getBoundingClientRect(), a = document.querySelector('#setting-sync-everything-notice-action')?.getBoundingClientRect(); return !!t && !!a && a.bottom >= t.bottom - 4; })()`));
   await b.click('#nav-history');
   for (let tries = 0; tries < 30 && !(await b.exists('.history-row[data-kind="everything"]')); tries++) await wait(100);
   same('History records the same Undo sentence and marks the switch-on Undone',
     [await b.text('.history-row[data-kind="everything"] .history-about'), await b.all('.history-row[data-kind="everything"] .history-done')],
     [twoUndone, ['Undone']]);
-  // A later automatic addition edited on disk before pressing Settings' inline Undo: left in and named; its taken-in line stays while the undone one goes.
+  // A later automatic addition edited on disk while Settings stays open: its line restores History even before Undo is clicked,
+  // while the untouched take-in still hides History; then inline Undo leaves the edited one in and clears the untouched line.
   await b.click('#nav-settings');
   for (let tries = 0; tries < 30 && !(await b.exists('#sync-everything-on')); tries++) await wait(100);
   settleOld([skill(uClaude, 'later', text('later', 'Later skill.')), join(uClaude, 'later/SKILL.md')]);
@@ -8108,18 +8649,23 @@ async function syncEverythingFlow() {
   settleOld([skill(uClaude, 'edited', text('edited', 'Original.')), join(uClaude, 'edited/SKILL.md')]);
   for (let tries = 0; tries < 100 && (readNow(join(uCodex, 'edited/SKILL.md')) !== text('edited', 'Original.') || (await b.all('.setting-added .setting-message')).length < 2); tries++) await wait(100);
   writeFileSync(join(uClaude, 'edited/SKILL.md'), text('edited', 'Edited by hand.'));
+  for (let tries = 0; tries < 80 && !(await b.all('.setting-added .setting-message', 'e.textContent')).includes('Added skill edited from Claude Code. History can undo it.History'); tries++) await wait(100);
+  same('editing a taken-in skill in its tool restores History on its line while the band’s Undo still stands',
+    await b.all('.setting-added .setting-message', 'e.textContent'),
+    ['Added skill later from Claude Code.', 'Added skill edited from Claude Code. History can undo it.History']);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
   same('inline Undo takes back the untouched take-in, clears its line, and keeps the later edited addition and its line',
     [uRecord().syncEverything, existsSync(join(uCodex, 'later')), readNow(join(uClaude, 'edited/SKILL.md')), await b.text('[data-outcome] .band-text'), await b.all('.setting-added .setting-message', 'e.textContent')],
-    [false, false, text('edited', 'Edited by hand.'), 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: edited (changed since).', ['Synchronize everything took in 1 skill, found in Claude Code: edited. History can undo it.History']]);
+    [false, false, text('edited', 'Edited by hand.'), 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: edited (changed since).', ['Added skill edited from Claude Code. History can undo it.History']]);
   // Automatic sync off: band shows without reloads, carries the second sentence, and Undo switches the rule off.
   await b.click('#sync-switch');
   for (let tries = 0; tries < 40 && await b.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
   await b.click('#sync-everything-on');
   await waitBand('true', 'Synchronize everything is on');
-  same('with Automatic sync off, the band shows its second sentence and Undo without reloads',
-    await uBand(), ['Synchronize everything is on. Nothing added yet: Automatic sync is off.', 'Undo', twoHelp, false, false]);
+  same('with Automatic sync off, the band shows its second sentence and Undo without reloads, and an older take-in line keeps its History link',
+    [await uBand(), await b.exists('#setting-sync-everything-added-skills-action')],
+    [['Synchronize everything is on. Nothing added yet: Automatic sync is off.', 'Undo', twoHelp, false, false], true]);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
   same('Undo with Automatic sync off turns the rule off and says nothing was taken back',
@@ -8254,7 +8800,7 @@ async function firstSetupFlow() {
   same('its Undo takes notes back out of Codex, leaves review (chosen, with its own Undo) as it is, and stores the rule off',
     [existsSync(join(codex, 'notes')), readNow(join(claude, 'review/SKILL.md')), record().syncEverything], [false, text('review', 'Review hard.'), false]);
   same('its entry says what it did and offers Restore; the switch-on’s says Undone', [await a.text(`${ruleRow} .history-about`), await a.text(`${ruleRow} .history-actions button`), await a.all(`${ruleRow} .history-done`)],
-    ['Undone: switched off, and 2 items it took in are out of Central Knot again, each tool it was found in keeping its own copy. Left in: review (you chose its copy: it has its own Undo).', 'Restore', ['Undone']]);
+    ['Undone: switched off, and 2 items it took in are out of Central Knot again, each tool they were found in keeping its own. Left in: review (you chose its copy: it has its own Undo).', 'Restore', ['Undone']]);
   await fitsAtMinimum(a, 'History after the one Undo');
   await a.shot('setup-undone');
   await a.click(`${ruleRow} .history-actions button`);
@@ -9147,9 +9693,19 @@ esac
   same('the marketplace is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-issue-tracker')); tries++) await wait(100);
-  const pluginHint = (await a.text('.plugin-hint .hint-long'))?.trim() ?? '';
-  check('Plugin marketplaces’ switch hint says off is kept installed where the tool can, not removes',
-    pluginHint === 'A switch turns it on or off (kept installed where the tool can) in every tool that takes it; clicks run in turn.' && !/removes|uninstall/i.test(pluginHint), pluginHint);
+  same('Plugin marketplaces’ head shows Every tool (?) with no hint spans and tool headers with marks and short names', await a.run(`(() => {
+    const head = document.querySelector('.plugin-table .ov-head');
+    const every = head.querySelector('.plugin-head-every');
+    const tools = [...head.querySelectorAll('.ov-tool-head')].map(el => {
+      const mark = el.querySelector('svg.brand-mark, .mono-mark'), mr = mark?.getBoundingClientRect();
+      return [!!mark && mr.width >= 14 && mr.height >= 14, el.querySelector('.plugin-tool-short')?.textContent.trim() ?? '', el.title, el.getAttribute('aria-label')];
+    });
+    return [every?.innerText.trim(), every?.getAttribute('aria-label'), !!head.querySelector('.hint-long, .hint-short, .plugin-hint'), tools];
+  })()`), ['Every tool', 'Every tool', false, [[true, 'Claude', 'Claude Code', 'Claude Code'], [true, 'Pi', 'Pi', 'Pi']]]);
+  if (await a.exists('#plugin-switch-info')) {
+    await checkCard(a, 'plugin-switch-info', 'On puts it in every tool that takes it. Off turns it off in every tool; nothing is uninstalled. A striped switch: on, with a tool off or kept out. Add brings an installed plugin under this switch. Open a row for one tool. Columns: Claude Code, Pi.',
+      'Plugin marketplaces’ Every tool (?) card explains On, Off, stripes, Add, choosing one tool and column order');
+  } else check('Plugin marketplaces’ Every tool (?) info mark exists', false);
   const marks = (plugin = 'issue-tracker') => a.run(`[...document.querySelectorAll('[data-plugin="${plugin}"] .cell-button')].map(cell => cell.dataset.state)`);
   const switchIs = selector => a.run(`(() => { const s = document.querySelector('${selector}'); return s ? s.getAttribute('aria-checked') + (s.classList.contains('switch-partial') ? ' partial' : '') : 'missing'; })()`);
   const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
@@ -10280,8 +10836,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   same('while its click runs, a plugin’s switch is off and keeps the focus', [await a.run(`document.querySelector('#pswitch-0-plug-22').getAttribute('aria-disabled')`), await focused()], ['true', 'pswitch-0-plug-22']);
   letGo(); await done();
   // Five plugins clicked quickly, one after another, each where it was before the first click: they wait their turn in one
-  // list, each row saying how its click stands in place of its line, so no row grows and none below moves. In the table's
-  // narrow form (here) and its wide one (1728), where a row's line sits beside its name.
+  // list, each row saying how its click stands in place of its line, so no row grows and none below moves, at 1280 and 1728.
   const fiveQuickly = async from => {
     await putAt(list, `[data-plugin="${from}"]`, 200);
     const five = listed.slice(listed.indexOf(from), listed.indexOf(from) + 5), points = [], before = await states('[data-plugin]');
@@ -10345,7 +10900,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   // so its Off above left that copy where it is, and its On now finds it there: pluginstatus.ts cantUninstall.)
   const failNow = ['plug-04', 'plug-05', 'plug-17'];
   for (const name of failNow) writeFileSync(join(home, `fail-${name}`), '');
-  // 80 px clears sticky .ov-head (min-height 48 px) while keeping plug-17 in view; wait for the four switches to rest, enabled and uncovered.
+  // 80 px clears sticky .ov-head (min-height 48 px with tool labels, 40 px icon-only) while keeping plug-17 in view; wait for the four switches to rest, enabled and uncovered.
   await putAt(list, '[data-plugin="plug-04"]', 80);
   const four = ['plug-04', 'plug-05', 'plug-17', 'plug-10'];
   await a.run(`(async () => {
@@ -10628,7 +11183,7 @@ esac
     && await a.run(`document.getElementById('check-plugin-updates')?.getAttribute('aria-label')`) === 'Check now for plugin updates'
     && await a.run(`['check-plugin-updates', 'plugin-updates-on'].every(id => (document.getElementById(id)?.getAttribute('aria-describedby') ?? '').split(/\\s+/).filter(Boolean).every(ref => !!document.getElementById(ref)))`)
     && /Last checked today at .*\. Nothing needed updating\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && await a.exists('#check-plugin-updates'), await a.text('#setting-plugin-updates'));
-  await checkCard(a, 'setting-plugin-updates-info', 'Every four hours, window closed too. A plugin you turned off stays off.', 'Update plugins automatically card');
+  await checkCard(a, 'setting-plugin-updates-info', /every four hours/, 'Update plugins automatically card');
   // A page-made close destroys the window outright (see the practice flow): from here on this launch has no window at all.
   await a.run(`setTimeout(() => window.close(), 50), true`);
   await wait(800);
@@ -10769,12 +11324,12 @@ async function pluginTextFlow() {
     await a.click('#nav-settings');
   };
   await toSettings();
-  check('Settings has the switch, on, how much is read and that the fifth is tried again, only the download estimate in the hint, and live aria-describedby', await switched() === 'true'
-    && await saying(/^Read 4 of 5 plugins\. 1 couldn’t be read; Central Knot tries again later\.$/)
-    && (await said())[1] === 'The one plugin outside its marketplace is downloaded once (under 1 MB), then only changes, or daily if on a branch.'
+  check('Settings has the switch, on, how much is read without standing retry/refresh tails, only the download estimate in the hint, and live aria-describedby', await switched() === 'true'
+    && await saying(/^Read 4 of 5 plugins\. 1 couldn’t be read\.$/)
+    && (await said())[1] === 'The one plugin outside its marketplace is downloaded once (under 1 MB).'
     && await a.run(`document.getElementById('setting-plugin-text-info')?.getAttribute('aria-label')`) === 'About Read what plugins hold'
     && await a.run(`document.getElementById('plugin-text-on')?.getAttribute('aria-describedby')`) === 'setting-plugin-text-info-card setting-plugin-text-hint setting-plugin-text-notice', await said());
-  await checkCard(a, 'setting-plugin-text-info', 'Keeps plugin items’ names, descriptions and first lines, so Find can search them.', 'Read what plugins hold card');
+  await checkCard(a, 'setting-plugin-text-info', /names, descriptions and first lines/, 'Read what plugins hold card');
   same('the four kept in the marketplace are kept as text; nothing of the one Git could not reach', kept().map(entry => entry.plugin).sort(), ['document-tools', 'issue-tracker', 'release-helper', 'starter-skills']);
   check('a skill is kept by its name and description', kept().find(entry => entry.plugin === 'document-tools')?.items.some(item => item.kind === 'skill' && item.name === 'pdf-reader' && item.description), kept().find(entry => entry.plugin === 'document-tools'));
   await pictures('failed', [[860, 600]], ['dark']);
@@ -22905,6 +23460,12 @@ async function skillFileFlow() {
     await a.click('#nav-harnesses');
     await a.click('button#harness-claude-cli.harness-card-head');
     await a.click('#harness-tab-skills');
+    const tabFileHit = await a.run(`(() => {
+      const row = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]');
+      const br = row?.querySelector('.row-file-btn')?.getBoundingClientRect(), rr = row?.getBoundingClientRect();
+      return { hit: !!(br && br.width >= 26 && br.height >= 26), rowHeight: Math.round(rr?.height ?? 0) };
+    })()`);
+    same('on Claude Code’s Skills tab, Open file icon has a hittable target on its 40px row', tabFileHit, { hit: true, rowHeight: 40 });
     await a.click(reviewBtn);
     await until(() => a.exists('.file-open-box pre.content'));
     same('on Claude Code’s Skills tab, Open file opens in 1 click with Claude Code’s path and details closed', [
