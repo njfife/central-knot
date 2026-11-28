@@ -127,7 +127,7 @@ export function uninstallControl(entry: MarketplaceView, plugin: PluginView, too
     if (open) readAgainNow(entry.source, plugin.name);
     market.asking = open ? asks : undefined; rerender(); document.getElementById(open ? `${id}-cancel` : id)?.focus();
   };
-  if (market.asking !== asks) return [button({ variant: 'link', size: 'small', label: 'Uninstall…', id, disabled: busy, onclick: () => ask(true) }), null];
+  if (market.asking !== asks) return [h('button.text-action.text-danger-quiet.plugin-uninstall', { type: 'button', id, disabled: busy, onclick: () => ask(true) }, 'Uninstall…'), null];
   // A new view drops a read in flight (pluginstate.ts markDetailsStale): the open question asks again, and acts on its answer alone.
   if (!market.details.has(key)) readAgainNow(entry.source, plugin.name);
   const read = market.details.get(key), detail = read && !read.reading ? read.value : undefined, facts = uninstallFacts(entry, plugin, tool, detail);

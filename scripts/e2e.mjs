@@ -24623,14 +24623,20 @@ async function pluginPageSaysLessFlow() {
   same('Pi (unticked earlier) and OpenCode (never installed) read Not installed while Claude Code and Codex show Installed',
     [await stateUnder('claude-cli'), await stateUnder('codex-cli'), await stateUnder('pi-cli'), await stateUnder('opencode-cli')],
     ['Installed · 1.0.0', 'Installed · 1.0.0', 'Not installed', 'Not installed']);
-  same('Uninstall… aligns flush with the state line above it in the link’s own colour',
+  same('Uninstall… aligns flush with the state line as a quiet 24 px link, distinct from blue jump links',
     await a.run(`(() => {
       const box = document.querySelector('.plugin-tool[data-tool="claude-cli"]');
       const st = box.querySelector('.plugin-tool-state'), btn = box.querySelector('#puninstall-0-plain-kit-claude-cli');
       const s = st.getBoundingClientRect(), b = btn.getBoundingClientRect();
-      return { link: btn.classList.contains('link'), flush: Math.abs(b.left - s.left) <= 1, notMuted: getComputedStyle(btn).color !== getComputedStyle(st).color };
+      const cs = getComputedStyle(btn);
+      return {
+        quiet: btn.classList.contains('text-danger-quiet') && !btn.classList.contains('link'),
+        flush: Math.abs(b.left - s.left) <= 1,
+        tall: b.height >= 24,
+        underlined: cs.textDecorationLine.includes('underline'),
+      };
     })()`),
-    { link: true, flush: true, notMuted: true });
+    { quiet: true, flush: true, tall: true, underlined: true });
 
   // 5. Folds on plain-kit (plain outcomes only): Readme closed and In each tool closed at open without limits; keyboard opens/closes both; state survives redraws.
   same('on a plain plugin, both In each tool (plain heading) and Readme start folded closed',
@@ -24735,43 +24741,45 @@ async function pluginPageSaysLessFlow() {
     [false, false]);
 
   // Ignored-only outcome (agent in Codex): In each tool starts shut and names Codex from the same limitsIn predicate as Codex's box;
-  // Codex's limit note is a control that opens In each tool (limited tools first) and brings Codex into sight, with the fold's toggle still working.
+  // Codex's limit note sits in .plugin-tool-parts (no orphan dot on wrap), opens In each tool (limited tools first), lands Codex in sight and flashes it, with the fold's toggle still working.
   await openPluginPage('agent-kit');
-  same('agent-kit (ignored in Codex) keeps In each tool shut and names Codex in its summary matching Codex’s box',
-    [await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), await a.text('#plugin-outcomes-toggle'), await stateUnder('codex-cli'), await a.run(`document.getElementById('plugin-readme')?.open ?? null`)],
-    [false, 'In each tool · limits in Codex', 'Not installed · Agents are ignored', false]);
+  same('agent-kit (ignored in Codex) keeps In each tool shut and names Codex in its summary matching Codex’s box parts',
+    [await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), await a.text('#plugin-outcomes-toggle'),
+      await a.run(`[...document.querySelectorAll('.plugin-tool[data-tool="codex-cli"] .plugin-tool-part')].map(el => el.textContent)`),
+      await a.run(`document.getElementById('plugin-readme')?.open ?? null`)],
+    [false, 'In each tool · limits in Codex', ['Not installed', 'Agents are ignored'], false]);
   await sizeTo(a, ...SMALLEST);
   if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
   await a.click('#plimit-0-agent-kit-codex-cli');
   await a.settle();
-  same('clicking Codex’s limit note opens In each tool with Codex first and scrolled into sight',
+  same('clicking Codex’s limit note opens In each tool with Codex first, scrolled into sight and flashed',
     await a.run(`(() => {
       const sc = document.getElementById('plugins-scroll').getBoundingClientRect();
-      const row = document.querySelector('.plugin-outcome-row[data-tools~="codex-cli"]');
+      const row = document.querySelector('.plugin-outcome-row[data-outcome-tools~="codex-cli"]');
       const r = row.getBoundingClientRect();
       const order = [...document.querySelectorAll('.plugin-outcome-row .plugin-outcome-tools strong')].map(el => el.textContent);
-      return { open: document.getElementById('plugin-outcomes')?.open ?? null, order, inSight: r.top >= sc.top - 1 && r.bottom <= sc.bottom + 1 };
+      return { open: document.getElementById('plugin-outcomes')?.open ?? null, order, inSight: r.top >= sc.top - 1 && r.bottom <= sc.bottom + 1, flashed: row.classList.contains('section-flash') };
     })()`),
-    { open: true, order: ['Codex', 'Claude Code'], inSight: true });
+    { open: true, order: ['Codex', 'Claude Code'], inSight: true, flashed: true });
   await a.click('#plugin-outcomes-toggle');
   same('the fold’s own toggle still closes In each tool after opening from a limit note',
     await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), false);
   await a.run(`document.getElementById('plimit-0-agent-kit-codex-cli')?.focus()`);
   await sendKey('Enter', 'Enter', 13, '\r');
-  same('pressing Enter on Codex’s limit note opens In each tool, brings Codex into sight, and moves focus to its row',
+  same('pressing Enter on Codex’s limit note opens In each tool, brings Codex into sight, flashes it and moves focus to its row',
     await a.run(`(() => {
       const sc = document.getElementById('plugins-scroll').getBoundingClientRect();
-      const row = document.querySelector('.plugin-outcome-row[data-tools~="codex-cli"]');
+      const row = document.querySelector('.plugin-outcome-row[data-outcome-tools~="codex-cli"]');
       const r = row.getBoundingClientRect();
-      return { open: document.getElementById('plugin-outcomes')?.open ?? null, inSight: r.top >= sc.top - 1 && r.bottom <= sc.bottom + 1, focused: document.activeElement === row };
+      return { open: document.getElementById('plugin-outcomes')?.open ?? null, inSight: r.top >= sc.top - 1 && r.bottom <= sc.bottom + 1, flashed: row.classList.contains('section-flash'), focused: document.activeElement === row };
     })()`),
-    { open: true, inSight: true, focused: true });
+    { open: true, inSight: true, flashed: true, focused: true });
   await a.click('#plugin-outcomes-toggle');
   same('the fold’s own toggle closes In each tool again after keyboard activation',
     await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), false);
   await fullSize(a);
 
-  // Can't be turned off here (Anthropic Directory copy): the state line's hover carries the same reason as the disabled box.
+  // Can't be turned off here (Anthropic Directory copy): the state line's hover and (?) card beside it both carry the reason.
   const dirCache = join(home, '.claude/plugins/cache/anthropic-plugin-directory/dir-kit/1.0.0');
   put(join(dirCache, 'skills/dir-skill/SKILL.md'), skillMd('dir-skill', 'From directory.'));
   const installedFile = join(home, '.claude/plugins/installed_plugins.json');
@@ -24782,12 +24790,13 @@ async function pluginPageSaysLessFlow() {
   await done();
   await openPluginPage('dir-kit');
   await until(() => a.run(`document.querySelector('.plugin-tool[data-tool="claude-cli"] .plugin-tool-state')?.textContent === 'Can’t be turned off here'`));
-  same('Can’t be turned off here puts the box’s reason on the line’s hover',
-    await a.run(`(() => {
+  same('Can’t be turned off here puts the box’s reason on the line’s hover and on the (?) beside it',
+    [await a.run(`(() => {
       const st = document.querySelector('.plugin-tool[data-tool="claude-cli"] .plugin-tool-state');
       return [st?.textContent ?? null, st?.title ?? null];
-    })()`),
-    ['Can’t be turned off here', 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).']);
+    })()`), await openCard('pwhy-0-dir-kit-claude-cli')],
+    [['Can’t be turned off here', 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).'],
+      [true, 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).']]);
 
   // Instructions-only plugin: concise advice with no jump to Instructions; file opens right here.
   await openPluginPage('only-notes');

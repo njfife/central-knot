@@ -1,6 +1,6 @@
-// Plugin page unit tests (pluginpage.ts, pluginparts.ts): box limit links, In each tool row order,
-// tool-count grid attribute, Uninstall… link look, Can’t be turned off here line tooltip, catalog componentsOf,
-// shut fold headings, and formatted MCP server JSON entries.
+// Plugin page pure-rule unit tests (pluginpage.ts): catalog componentsOf precedence, shut fold summary,
+// formatted MCP JSON entry, In each tool limits-first order + severity-led limit note, and box hover + (?) reason rules.
+// Interactive presses, scrolling, grid track widths, Uninstall… sizing and popover opening are covered in scripts/e2e.mjs pluginPageSaysLessFlow.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
@@ -19,18 +19,11 @@ installDom({}, {
   userAgent: 'Linux',
   byId: id => (renderedRoot ? findById(renderedRoot, id) : undefined),
 });
-// Match `.plugin-outcome-row[data-tools~="<tool>"]` against the currently rendered plugin page.
-(globalThis.document as unknown as { querySelector: (selector: string) => FakeNode | null }).querySelector = (selector: string) => {
-  const match = /^\.plugin-outcome-row\[data-tools~="([^"]+)"\]$/.exec(selector);
-  if (!match || !renderedRoot) return null;
-  const tool = match[1]!;
-  return findNode(renderedRoot, el => el.className.split(/\s+/).includes('plugin-outcome-row') && (el.attrs['data-tools'] ?? '').split(/\s+/).includes(tool)) ?? null;
-};
 
 const { state } = await import('../src/app.ts');
 const { market, resetMarket } = await import('../src/pluginstate.ts');
 const { afterPluginPageDrawn, pluginPage } = await import('../src/pluginpage.ts');
-const { FROM_DIRECTORY, toolNow } = await import('../src/pluginstatus.ts');
+const { FROM_DIRECTORY, PREVIEW_ONLY, toolNow } = await import('../src/pluginstatus.ts');
 const { owedTo } = await import('../src/pluginrecord.ts');
 
 const withSwitches = (view: PluginsView, entry: MarketplaceView, swEntry?: { on: boolean; except: HarnessId[] }): MarketplaceView => ({
@@ -128,7 +121,7 @@ test('Plugin page reads catalog componentsOf over detail, starts In each tool sh
   ].join('\n'));
 });
 
-test('A tool’s limit note is a control that opens In each tool at that tool, and tools with limits come first in tool order', () => {
+test('In each tool lists tools with limits first in tool order using data-outcome-tools, and a box’s limit note leads with the worst limit', () => {
   setup(['claude-cli', 'copilot-cli', 'codex-cli']);
   const entry: MarketplaceView = {
     source: '/markets/team', origins: ['central-knot'], name: 'team', kind: 'folder', sourceLabel: 'Folder: team',
@@ -143,68 +136,16 @@ test('A tool’s limit note is a control that opens In each tool at that tool, a
   };
   const base = baseView(['claude-cli', 'copilot-cli', 'codex-cli'], entry);
   const switched = withSwitches(base, entry);
-  const view = { ...base, marketplaces: [switched] };
-  const page = renderPage(view, switched);
+  const page = renderPage({ ...base, marketplaces: [switched] }, switched);
 
-  // Opened order in In each tool: tools with limits first (Copilot CLI, Codex), tools without limits after (Claude Code).
-  const rowTools = findAll(page, n => n.className.split(/\s+/).includes('plugin-outcome-row'))
-    .map(row => textOf(findNode(row, el => el.tag === 'strong')));
-  assert.deepEqual(rowTools, ['Copilot CLI', 'Codex', 'Claude Code']);
-
-  // Codex's limit note is a button; clicking it opens #plugin-outcomes and scrolls Codex's row into sight.
-  const limitBtn = findById(page, 'plimit-0-helper-codex-cli')!;
-  assert.ok(limitBtn, 'Codex limit note is a button control');
-  assert.equal(limitBtn.tag, 'button');
-  assert.equal(textOf(limitBtn), 'Commands limited +2');
-
-  const details = findById(page, 'plugin-outcomes') as FakeNode & { open?: boolean };
-  const codexRow = findNode(page, el => el.className.split(/\s+/).includes('plugin-outcome-row') && (el.attrs['data-tools'] ?? '').split(/\s+/).includes('codex-cli'))!;
-  assert.ok(codexRow, 'Codex row carries data-tools="codex-cli"');
-  let scrolled: unknown;
-  codexRow.scrollIntoView = ((opts?: unknown) => { scrolled = opts ?? true; }) as () => void;
-
-  // Mouse click opens the fold and scrolls without forcing focus onto the row.
-  limitBtn.onclick!({ detail: 1 });
-  assert.equal(details.open, true);
-  assert.ok(scrolled, 'scrollIntoView called on Codex outcome row');
-  assert.equal(codexRow.focused, 0);
-
-  // Keyboard activation also moves focus to the tool's outcome row.
-  limitBtn.onclick!({ detail: 0 });
-  assert.equal(codexRow.focused, 1);
-
-  // Subsequent redraw keeps In each tool open.
-  const redrawn = renderPage(view, switched);
-  assert.equal(findById(redrawn, 'plugin-outcomes')!.attrs.open, '');
+  const rows = findAll(page, n => n.className.split(/\s+/).includes('plugin-outcome-row'));
+  assert.deepEqual(rows.map(row => [row.attrs['data-outcome-tools'], textOf(findNode(row, el => el.tag === 'strong'))]),
+    [['copilot-cli', 'Copilot CLI'], ['codex-cli', 'Codex'], ['claude-cli', 'Claude Code']]);
+  assert.equal(rows.every(row => row.attrs['data-tools'] === undefined), true, 'outcome rows use data-outcome-tools, never data-tools');
+  assert.equal(textOf(findById(page, 'plimit-0-helper-codex-cli')), 'MCP servers won’t start +2');
 });
 
-test('Your tools sets --tool-count and data-tools for 1 and 2 tools so boxes spread across the panel width', () => {
-  for (const tools of [['claude-cli'] as HarnessId[], ['claude-cli', 'codex-cli'] as HarnessId[]]) {
-    setup(tools);
-    const entry: MarketplaceView = {
-      source: '/markets/team', origins: ['central-knot'], name: 'team', kind: 'folder', sourceLabel: 'Folder: team',
-      plugins: [{ name: 'plain', version: '1.0.0', description: 'Plain', folder: 'plugins/plain' }],
-      states: { plain: {} },
-    };
-    const setProps: Record<string, string> = {};
-    const origCreate = globalThis.document.createElement;
-    (globalThis.document as unknown as { createElement: (tag: string) => FakeNode }).createElement = (tag: string) => {
-      const node = origCreate(tag) as unknown as FakeNode;
-      node.style = { setProperty(k: string, v: string) { setProps[`${node.className}:${k}`] = v; } };
-      return node;
-    };
-    try {
-      const page = renderPage(baseView(tools, entry), entry);
-      const rows = findNode(page, el => el.className.split(/\s+/).includes('plugin-tool-rows'))!;
-      assert.equal(rows.dataset.tools, String(tools.length));
-      assert.equal(setProps['plugin-tool-rows:--tool-count'], String(tools.length));
-    } finally {
-      (globalThis.document as unknown as { createElement: typeof origCreate }).createElement = origCreate;
-    }
-  }
-});
-
-test('Uninstall… uses the link variant, and Can’t be turned off here puts the box’s reason on the line’s hover', () => {
+test('A box’s hover carries the box’s reason and a (?) only when the line is the reason’s own; other lines keep their own words', () => {
   setup(['claude-cli', 'codex-cli']);
   const entry: MarketplaceView = {
     source: '/markets/team', origins: ['central-knot'], name: 'team', kind: 'folder', sourceLabel: 'Folder: team',
@@ -218,18 +159,31 @@ test('Uninstall… uses the link variant, and Can’t be turned off here puts th
   };
   const base = baseView(['claude-cli', 'codex-cli'], entry);
   const switched = withSwitches(base, entry, { on: true, except: [] });
-  const view = { ...base, marketplaces: [switched] };
-  const page = renderPage(view, switched);
+  const page = renderPage({ ...base, marketplaces: [switched] }, switched);
 
-  // Codex's Uninstall… is a link button (not ghost).
-  const uninstall = findById(page, 'puninstall-0-both-codex-cli')!;
-  assert.ok(uninstall, 'Uninstall… button present for Codex');
-  assert.equal(uninstall.classList.contains('link'), true);
-  assert.equal(uninstall.classList.contains('ghost'), false);
-
-  // Claude Code's Anthropic Directory copy shows "Can’t be turned off here" with FROM_DIRECTORY on its title.
+  // Anthropic Directory copy (box.line set): hover holds FROM_DIRECTORY and a (?) sits beside the line with the same reason.
   const claudeBox = findNode(page, el => el.className.split(/\s+/).includes('plugin-tool') && el.attrs['data-tool'] === 'claude-cli')!;
   const stateLine = findNode(claudeBox, el => el.className.split(/\s+/).includes('plugin-tool-state'))!;
   assert.equal(textOf(stateLine), 'Can’t be turned off here');
   assert.equal(stateLine.attrs.title, FROM_DIRECTORY);
+  const whyBtn = findById(claudeBox, 'pwhy-0-both-claude-cli')!;
+  assert.ok(whyBtn, '(?) mark sits beside Can’t be turned off here');
+  assert.equal(textOf(findById(claudeBox, 'pwhy-0-both-claude-cli-card')), FROM_DIRECTORY);
+
+  // Preview-only home (canWrite: false, box.line undefined): a box's state line keeps its own words on hover, not PREVIEW_ONLY, with no (?).
+  setup(['claude-cli', 'codex-cli']);
+  const previewEntry: MarketplaceView = {
+    source: '/markets/team', origins: ['central-knot'], name: 'team', kind: 'folder', sourceLabel: 'Folder: team',
+    plugins: [{ name: 'kept', version: '1.0.0', description: 'Kept', folder: 'plugins/kept' }],
+    states: { kept: { 'claude-cli': { state: 'installed', version: '1.0.0', path: '/tmp/c' } } },
+  };
+  const previewBase = { ...baseView(['claude-cli', 'codex-cli'], previewEntry), canWrite: false };
+  const previewSwitched = withSwitches(previewBase, previewEntry, { on: true, except: ['codex-cli'] });
+  const previewPage = renderPage({ ...previewBase, marketplaces: [previewSwitched] }, previewSwitched);
+  const codexBox = findNode(previewPage, el => el.className.split(/\s+/).includes('plugin-tool') && el.attrs['data-tool'] === 'codex-cli')!;
+  const codexState = findNode(codexBox, el => el.className.split(/\s+/).includes('plugin-tool-state'))!;
+  assert.equal(textOf(codexState), 'Not installed');
+  assert.equal(codexState.attrs.title, 'Not installed in Codex, and kept out of it: nothing puts it there by itself.');
+  assert.notEqual(codexState.attrs.title, PREVIEW_ONLY);
+  assert.equal(findById(codexBox, 'pwhy-0-kept-codex-cli'), undefined);
 });

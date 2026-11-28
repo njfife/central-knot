@@ -59,19 +59,33 @@ function outcomesBlock(view: PluginsView, entry: MarketplaceView, plugin: Plugin
   const line = (outcome: Outcome) => h('span.plugin-outcome-item', {}, outcome.result === 'works' ? null : icon(glyph[outcome.result], 12, tone[outcome.result]),
     h('span.plugin-outcome-kind', {}, outcome.component), ' ', ...inlineMarkdown(outcome.text, openLink), outcome.names ? [' ', h('code.plugin-name', {}, example(outcome.names))] : null);
   const allWork = tools.every(tool => byTool[tool].every(outcome => outcome.result === 'works'));
-  return h(`ul.plugin-outcome-list${allWork ? '.plugin-outcome-plain' : ''}`, {}, [...groups.values()].map(group => h('li.plugin-outcome-row', { 'data-tools': group.join(' '), tabindex: '-1' },
+  return h(`ul.plugin-outcome-list${allWork ? '.plugin-outcome-plain' : ''}`, {}, [...groups.values()].map(group => h('li.plugin-outcome-row', { 'data-outcome-tools': group.join(' '), tabindex: '-1' },
     h('span.plugin-outcome-tools', {}, group.map(tool => brandMark(tool, 14)), h('strong', {}, group.map(tool => names[tool]).join(', '))),
     h('span.plugin-outcome-what', {}, byTool[group[0]!].map(line)))));
 }
 
-/** Opens the "In each tool" fold and brings `tool`'s row into sight (moving focus there when activated from the keyboard). */
+let outcomeFlashTimer: ReturnType<typeof setTimeout> | undefined;
+/** Opens the "In each tool" fold, lands `tool`'s row at the top of the scroll view and marks it for a moment (moving focus there when activated from the keyboard). */
 function openOutcomesFor(pageKey: string, tool: HarnessId, fromKeyboard = false): void {
   if (shownFolds?.key === pageKey) shownFolds.folds.outcomes = true;
   const details = document.getElementById('plugin-outcomes') as HTMLDetailsElement | null;
   if (details && !details.open) details.open = true;
-  const row = document.querySelector<HTMLElement>(`.plugin-outcome-row[data-tools~="${tool}"]`);
-  row?.scrollIntoView({ block: 'center' });
-  if (fromKeyboard) row?.focus({ preventScroll: true });
+  const row = document.querySelector<HTMLElement>(`.plugin-outcome-row[data-outcome-tools~="${tool}"]`);
+  if (!row) return;
+  const list = row.closest<HTMLElement>('.scroll');
+  // For the first row, align the fold heading above it; for any later row, bring that tool's row to the top of the view.
+  const anchor = details && details.querySelector('.plugin-outcome-row') === row ? details : row;
+  if (list && typeof anchor.getBoundingClientRect === 'function') {
+    list.scrollTop += anchor.getBoundingClientRect().top - list.getBoundingClientRect().top - 8;
+  } else {
+    anchor.scrollIntoView?.({ block: 'start' });
+  }
+  for (const prev of details?.querySelectorAll('.section-flash') ?? []) prev.classList.remove('section-flash');
+  void row.offsetWidth;
+  row.classList.add('section-flash');
+  clearTimeout(outcomeFlashTimer);
+  outcomeFlashTimer = setTimeout(() => row.classList.remove('section-flash'), 2500);
+  if (fromKeyboard) row.focus({ preventScroll: true });
 }
 
 /** "Installed · 1.2.0", then `more` ("differs from the marketplace’s copy", "1 skill off"). When the tool has another version than the marketplace offers, a second line says which. */
@@ -106,7 +120,9 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
         title: `Open In each tool at ${names[tool]}’s limits`,
         onclick: (event: MouseEvent) => openOutcomesFor(pageKey, tool, event.detail === 0),
       }, limit);
-      return MARK_WORDS[mark] ? h('span', {}, MARK_WORDS[mark], ' · ', link) : link;
+      return MARK_WORDS[mark]
+        ? h('span.plugin-tool-parts', {}, h('span.plugin-tool-part', {}, MARK_WORDS[mark]), h('span.plugin-tool-part', {}, link))
+        : link;
     }
     return MARK_WORDS[mark];
   };
@@ -143,8 +159,11 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
       const why = notIn?.nonClash ?? notIn?.reasons ?? [];
       const clashes = (items?.clashes ?? []).filter(clash => clash.tool === tool && clash.clash === 'shared');
       const yours = items?.yours?.[tool] ?? [];
+      const stateSpan = h('span.plugin-tool-state', { title: box.line ? box.off : words }, box.line ?? status(tool, mark));
       const state = why.length ? why.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason))
-        : box.held && (yours.length || clashes.length) ? null : h('span.plugin-tool-state', { title: box.off ?? words }, box.line ?? status(tool, mark));
+        : box.held && (yours.length || clashes.length) ? null
+          : !box.held && box.line && box.off ? h('span.plugin-tool-state-row', {}, stateSpan, infoMark(`pwhy-${marketIndex}-${plugin.name}-${tool}`, `${names[tool]}: ${box.line}`, box.off))
+            : stateSpan;
       // Uninstall… under the box; its question, open, on a line of its own after this tool's.
       const [uninstall, question] = uninstallControl(entry, plugin, tool, `puninstall-${marketIndex}-${plugin.name}-${tool}`, box);
       return [h('div.plugin-tool', { 'data-tool': tool }, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
@@ -573,7 +592,7 @@ let drawnPlugin: string | undefined;
 
 /** After each draw of the page (renderer.ts renderWindow): fold state lives only while that plugin's page is drawn. */
 export function afterPluginPageDrawn(): void {
-  if (drawnPlugin !== shownFolds?.key) shownFolds = undefined;
+  if (drawnPlugin !== shownFolds?.key) { shownFolds = undefined; clearTimeout(outcomeFlashTimer); }
   drawnPlugin = undefined;
 }
 

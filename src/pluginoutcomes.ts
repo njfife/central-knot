@@ -159,6 +159,13 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
   return list;
 }
 
-/** Outcomes in `tool` that don't fully work (`result !== 'works'`): one rule for a tool's box (`pluginstatus.ts limitNote`) and the "In each tool" fold summary. */
+const LIMIT_RANK: Record<Exclude<Outcome['result'], 'works'>, number> = { fails: 0, ignored: 1, limited: 2, unknown: 3 };
+
+/**
+ * Outcomes in `tool` that don't fully work (`result !== 'works'`), ordered most serious first (won't start, ignored, limited,
+ * unconfirmed; keeping `outcomes`' order within each): one rule for a tool's box (`pluginstatus.ts limitNote`) and the "In each tool" fold summary.
+ */
 export const limitsIn = (tool: HarnessId, components: Components): Outcome[] =>
-  outcomes(tool, components).filter(outcome => outcome.result !== 'works');
+  outcomes(tool, components)
+    .filter((outcome): outcome is Outcome & { result: Exclude<Outcome['result'], 'works'> } => outcome.result !== 'works')
+    .sort((a, b) => LIMIT_RANK[a.result] - LIMIT_RANK[b.result]);

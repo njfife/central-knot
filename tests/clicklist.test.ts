@@ -82,6 +82,11 @@ const findById = (node: any, id: string): any => {
 };
 const textOf = (node: any): string => (typeof node === 'string' ? node : (node?.children ?? []).map(textOf).join(''));
 const announcement = element();
+const isHidden = (node: any): boolean => !!node?.classList?.contains('visually-hidden') || String(node?.className ?? '').split(/\s+/).includes('visually-hidden');
+/** What the status bar draws in sight (omitting a quiet bar and any visually-hidden spoken tail). */
+const visibleInBar = (): string => (isHidden(announcement) ? '' : announcement.children.filter((kid: any) => !isHidden(kid)).map(textOf).join(''));
+/** First sentence in the status bar (.said-first): the part that stays in sight at 860 px when .said-rest drops. */
+const firstInBar = (): string => (isHidden(announcement) ? '' : announcement.children.filter((kid: any) => String(kid?.className ?? '').split(/\s+/).includes('said-first')).map(textOf).join(''));
 Object.assign(globalThis, {
   window: { centralKnot: new Proxy(api, { get: (known, name) => (known as Record<string | symbol, unknown>)[name] ?? (() => Promise.resolve(null)) }), addEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {} }) },
   document: { body: element(), documentElement: element(), activeElement: null, hidden: false, hasFocus: () => true, getElementById: (id: string) => id === 'announcement' ? announcement : element(), querySelector: () => null, querySelectorAll: () => [], addEventListener(name: string, fn: () => void) { if (name === 'visibilitychange') main.visibilityChange = fn; }, createElement: element, createTextNode: element },
@@ -203,39 +208,37 @@ test('A click that ends with nothing to do leaves the panel note and header empt
   assert.ok(clickNote(entry, 'alpha'), 'panel note shows while running');
   await main.answer({ done: [], before: null, back: [] });
   await settled();
-  assert.deepEqual([clickNote(entry, 'alpha'), pluginsResult(), app.said.text, app.said.quiet, announcement.classList.contains('visually-hidden')],
-    [null, [], 'Nothing changed for alpha.', false, false]);
+  assert.deepEqual([clickNote(entry, 'alpha'), pluginsResult(), firstInBar(), visibleInBar(), app.said.text, app.said.quiet],
+    [null, [], 'Nothing changed for alpha.', 'Nothing changed for alpha.', 'Nothing changed for alpha.', false]);
 });
 
-test('Two clicks in turn where one succeeds and the other changes nothing still name the unchanged click in sight in the status bar', async () => {
-  const undoable = (name: string): PluginTurnResult => ({
-    ...installed(name),
-    back: [{ source: '/market', marketName: 'team', plugin: name, tool: 'claude-cli', action: 'plugin-off' }],
+test('Two clicks in turn where one succeeds and the other changes nothing lead with the unchanged click in sight, without repeating the header', async () => {
+  const undoable = (name: string, tool: HarnessId = 'claude-cli', reloads?: { tool: HarnessId; kind: 'plugin'; plugin: string; on: true }[]): PluginTurnResult => ({
+    done: [{ source: '/market', marketName: 'team', plugin: name, tool, action: 'install', report: { ...report('installed', 'Installed.'), tool, ...(reloads ? { reloads } : {}) } }],
+    before: null,
+    back: [{ source: '/market', marketName: 'team', plugin: name, tool, action: 'plugin-off' }],
   });
-  // Two tool-box clicks on the same plugin's page: first installs in Claude Code, second changes nothing in Codex.
+  const withClaudeCli = () => {
+    (app.home as unknown as { snapshots: unknown[] }).snapshots = [{ harness: 'claude-cli', detection: 'Installed', probe: {} }];
+  };
+
+  // Two tool-box clicks on the same plugin's page: first installs in Claude Code (shown in header via reload advice), second changes nothing in Codex.
+  // The status bar shows ONLY the unchanged click (not repeating the header's sentence).
   start();
+  withClaudeCli();
   market.nav = { ...market.nav, source: '/market', plugin: 'alpha' };
   turnPlugin(entry, 'alpha', 'let-in', 'claude-cli');
   turnPlugin(entry, 'alpha', 'let-in', 'codex-cli');
   await settled();
-  await main.answer(undoable('alpha'));
+  await main.answer(undoable('alpha', 'claude-cli', [{ tool: 'claude-cli', kind: 'plugin', plugin: 'alpha', on: true }]));
   await main.answer({ done: [], before: null, back: [] });
   await settled();
-  assert.deepEqual([app.said.text, app.said.quiet, announcement.classList.contains('visually-hidden')],
-    ['alpha: installed in Claude Code. Nothing changed for alpha in Codex.', false, false]);
+  assert.equal(pluginsResult().length > 0, true, 'header holds Claude Code’s install result');
+  assert.deepEqual([firstInBar(), visibleInBar(), announcement.title, app.said.text, app.said.quiet],
+    ['Nothing changed for alpha in Codex.', 'Nothing changed for alpha in Codex.', 'Nothing changed for alpha in Codex.',
+      'Nothing changed for alpha in Codex. alpha: installed in Claude Code.', false]);
 
-  // Two plugin clicks: first succeeds, second changes nothing.
-  start();
-  turnPlugin(entry, 'alpha', 'on');
-  turnPlugin(entry, 'beta', 'on');
-  await settled();
-  await main.answer(undoable('alpha'));
-  await main.answer({ done: [], before: null, back: [] });
-  await settled();
-  assert.deepEqual([app.said.text, app.said.quiet, announcement.classList.contains('visually-hidden')],
-    ['alpha: installed in Claude Code. Nothing changed for beta.', false, false]);
-
-  // Reverse order: first changes nothing, second succeeds with Undo in the header -> status bar still visibly names the unchanged click.
+  // Reverse order: first changes nothing, second succeeds with Undo in the header -> status bar shows only the unchanged click in sight.
   start();
   turnPlugin(entry, 'alpha', 'on');
   turnPlugin(entry, 'beta', 'on');
@@ -244,8 +247,37 @@ test('Two clicks in turn where one succeeds and the other changes nothing still 
   await main.answer(undoable('beta'));
   await settled();
   assert.equal(pluginsResult().length > 0, true, 'header holds the undoable result');
-  assert.deepEqual([app.said.text, app.said.quiet, announcement.classList.contains('visually-hidden')],
-    ['beta: installed in Claude Code. Nothing changed for alpha.', false, false]);
+  assert.deepEqual([firstInBar(), visibleInBar(), announcement.title, app.said.text, app.said.quiet],
+    ['Nothing changed for alpha.', 'Nothing changed for alpha.', 'Nothing changed for alpha.',
+      'Nothing changed for alpha. beta: installed in Claude Code.', false]);
+
+  // Header holds nothing (first succeeded without reloads or surviving Undo, second changed nothing): status bar leads with the unchanged click so 860 keeps it in sight.
+  start();
+  turnPlugin(entry, 'alpha', 'on');
+  turnPlugin(entry, 'beta', 'on');
+  await settled();
+  await main.answer(undoable('alpha'));
+  await main.answer({ done: [], before: null, back: [] });
+  await settled();
+  assert.deepEqual(pluginsResult(), [], 'header is empty');
+  assert.deepEqual([firstInBar(), visibleInBar(), app.said.text, app.said.quiet],
+    ['Nothing changed for beta.', 'Nothing changed for beta. alpha: installed in Claude Code.',
+      'Nothing changed for beta. alpha: installed in Claude Code.', false]);
+
+  // Whole-switch click after a box click on the same plugin: names the plugin's other tools, never "Nothing changed for alpha." beside "alpha: installed in Codex.".
+  start();
+  (app.home as unknown as { snapshots: unknown[] }).snapshots = [{ harness: 'codex-cli', detection: 'Installed', probe: {} }];
+  market.nav = { ...market.nav, source: '/market', plugin: 'alpha' };
+  turnPlugin(entry, 'alpha', 'let-in', 'codex-cli');
+  turnPlugin(entry, 'alpha', 'on');
+  await settled();
+  await main.answer(undoable('alpha', 'codex-cli', [{ tool: 'codex-cli', kind: 'plugin', plugin: 'alpha', on: true }]));
+  await main.answer({ done: [], before: null, back: [] });
+  await settled();
+  assert.equal(pluginsResult().length > 0, true, 'header holds Codex’s install result');
+  assert.deepEqual([firstInBar(), visibleInBar(), announcement.title, app.said.text],
+    ['Nothing changed for alpha’s other tools.', 'Nothing changed for alpha’s other tools.', 'Nothing changed for alpha’s other tools.',
+      'Nothing changed for alpha’s other tools. alpha: installed in Codex.']);
 });
 
 test('A click that fails in the middle says why on its row, the clicks after it still run, and the list’s end is said as a whole', async () => {

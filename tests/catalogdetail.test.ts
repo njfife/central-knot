@@ -351,14 +351,19 @@ test('The line under a plugin page’s hooks that can add text names each tool t
   } finally { await cleanup(); }
 });
 
-test('limitsIn returns every non-working outcome for one tool, shared by box limit notes and In each tool’s summary', () => {
+test('limitsIn returns non-working outcomes most serious first (fails, ignored, limited, unknown), shared by box limit notes and In each tool’s summary', () => {
   const base: Components = { skills: 1, commands: 0, agents: 0, hooks: false, mcp: 0, mcpRootVariable: false, bin: false, hooksIn: [], startHooksIn: [], promptHooksIn: [], sessionTextHooks: [] };
   assert.deepEqual((['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'] as const).map(tool => limitsIn(tool, base)), [[], [], [], []]);
   const withAgent: Components = { ...base, agents: 1 };
   assert.deepEqual([limitsIn('claude-cli', withAgent).length, limitsIn('copilot-cli', withAgent).length, limitNote(limitsIn('codex-cli', withAgent))], [0, 0, 'Agents are ignored']);
-  const mixed: Components = { ...base, commands: 1, mcp: 1, mcpRootVariable: true, hooks: true, hooksIn: ['claude-cli', 'copilot-cli', 'codex-cli'], startHooksIn: ['claude-cli', 'copilot-cli', 'codex-cli'], sessionTextHooks: ['claude-cli', 'copilot-cli', 'codex-cli'] };
+  const mixed: Components = { ...base, commands: 1, agents: 1, mcp: 1, mcpRootVariable: true, hooks: true, hooksIn: ['claude-cli', 'copilot-cli', 'codex-cli'], startHooksIn: ['claude-cli', 'copilot-cli', 'codex-cli'], sessionTextHooks: ['claude-cli', 'copilot-cli', 'codex-cli'] };
   assert.deepEqual([limitsIn('claude-cli', mixed).length, limitsIn('copilot-cli', mixed).map(o => o.result), limitsIn('codex-cli', mixed).map(o => o.result)],
-    [0, ['limited', 'limited', 'limited'], ['limited', 'limited', 'limited', 'fails']]);
+    [0, ['limited', 'limited', 'limited'], ['fails', 'ignored', 'limited', 'limited', 'limited']]);
+  assert.equal(limitNote(limitsIn('codex-cli', mixed)), 'MCP servers won’t start +4');
+  // Without a failing MCP server (unknown instead), ignored leads ahead of limited and unknown.
+  const noFail: Components = { ...mixed, mcpRootVariable: false };
+  assert.deepEqual(limitsIn('codex-cli', noFail).map(o => o.result), ['ignored', 'limited', 'limited', 'limited', 'unknown']);
+  assert.equal(limitNote(limitsIn('codex-cli', noFail)), 'Agents are ignored +4');
 });
 
 test('A hooks file that is there but can’t be read as JSON is named, so its hooks read as unknown, never as none', async () => {
