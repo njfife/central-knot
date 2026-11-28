@@ -1190,6 +1190,11 @@ async function harnessFlow() {
     })()`);
     same('kept tags (copies differ too) separate from descriptions with ·, plain rows have no ·, neutral tags take stronger text tone, and can’t be added shares copies differ’s warning tone',
       tagVisuals, { clashDot: '"·"', offDot: '"·"', plainDot: 'none', badWarn: true, offStrong: true });
+    await h.click(`#${rowPart('open', 'skills', 'bad-found')}`);
+    same('opening a row that can’t be added omits the repeating status line and shows the tool reason directly',
+      [await h.exists('.details-status'), (await h.text('.details') ?? '').includes('can’t be copied as it is')],
+      [false, true]);
+    await h.click(`#${rowPart('open', 'skills', 'bad-found')}`);
     const waitForEl = async sel => { for (let tries = 0; tries < 40 && !(await h.exists(sel)); tries++) await wait(100); };
     const findText = async typed => { await h.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`); await h.settle(); };
     for (const [query, key, wantTag] of [['found-only', 'found-only', 'not in Central Knot'], ['off-a', 'off-a', 'in Central Knot only'], ['off-switched', 'off-switched', 'in Central Knot · switched off in Codex']]) {
@@ -1272,7 +1277,7 @@ async function harnessFlow() {
     await h.click('#header-refresh');
 
     // Tool tabs (Skills, MCP servers, Agents) while Synchronize everything is Off: keyboard marks on all three headings,
-    // Not in <tool> has no note or mark, Off 4 live line on Skills, and pinned Found 0 on Agents.
+    // Not in <tool> has no note or mark, Off 4 stays quiet on Skills (rows carry their own tags), and pinned Found 0 on Agents.
     await h.click('#nav-harnesses');
     await h.click('button#harness-claude-cli.harness-card-head');
     for (const tab of ['skills', 'mcp', 'agents']) {
@@ -1286,9 +1291,9 @@ async function harnessFlow() {
           { focused: id, opened: true, cardText: wantText, closed: true, keptFocus: id });
       }
       if (tab === 'skills') {
-        same('Claude Code’s Skills tab: Off 4 stays quiet with card closed',
-          [await headingSays(h, 'off'), await h.run(`!document.getElementById('section-off-info-card')?.matches(':popover-open')`)],
-          ['Off4', true]);
+        same('Claude Code’s Skills tab: Off 4 stays quiet with card closed and the row carries its pending-removal tag',
+          [await headingSays(h, 'off'), await h.run(`!document.getElementById('section-off-info-card')?.matches(':popover-open')`), await rowTags('skills', 'off-c')],
+          ['Off4', true, ['still in Codex until sync runs']]);
       }
       if (tab === 'agents') {
         const beforeH = await heightOf('.ov-section[data-section="found"]');
@@ -1577,43 +1582,51 @@ async function harnessFlow() {
       await wait(80);
     }
 
-    // Library keeps all 6 tool marks and folds What the marks mean at the list foot (shut at first, no empty band, 24px target, fits at 860 when open, forgotten on re-entry).
-    await sizeTo(t, ...SMALLEST);
+    // Library keeps all 6 tool marks and pins grouped What the marks mean outside the scroll area (in reach on a long list at 860×528 without scrolling, opens above toggle, both bounds, last row reachable, forgotten on re-entry).
+    await sizeTo(t, 860, 528);
     await openKind(t, 'skills');
     const libShut = await t.run(`(() => {
-      const foot = document.querySelector('.legend-foot'), d = document.getElementById('mark-legend'), s = document.getElementById('mark-legend-toggle');
-      const rows = document.querySelectorAll('.ov-row[data-key]');
-      const last = rows[rows.length - 1]?.getBoundingClientRect(), sr = s?.getBoundingClientRect(), fr = foot?.getBoundingClientRect();
+      const scroller = document.querySelector('.scroll.matrix'), foot = document.querySelector('.legend-foot');
+      const d = document.getElementById('mark-legend'), s = document.getElementById('mark-legend-toggle');
+      const scr = scroller?.getBoundingClientRect(), fr = foot?.getBoundingClientRect(), sr = s?.getBoundingClientRect();
+      const gap = fr && scr ? fr.top - scr.bottom : -99;
       return {
         marks: document.querySelectorAll('.ov-row[data-key="${rowPart('', 'skills', 'skill-01')}"] .tool-mark').length,
-        inFoot: !!foot && !!d && foot.contains(d) && !d.closest('.toolbar'),
+        longList: !!scroller && scroller.scrollHeight > scroller.clientHeight && scroller.scrollTop === 0,
+        pinnedFoot: !!foot && !!d && foot.contains(d) && !d.closest('.scroll') && !d.closest('.toolbar'),
         open: !!d?.open,
         label: s?.textContent?.trim() ?? null,
-        tall: !!sr && sr.height >= 24,
         body: !!document.getElementById('mark-legend-body'),
         items: document.querySelectorAll('.legend-item').length,
-        noEmptyBand: !!last && !!sr && !!fr && (sr.top - last.bottom) <= 12 && fr.height <= 48 && !foot.querySelector('.legend-band, .legend'),
+        shutBounds: !!fr && !!sr && !!scr && sr.height >= 24 && fr.height >= 24 && fr.height <= 30 && gap >= -1 && gap <= 1
+          && sr.top >= fr.top - 1 && sr.bottom <= fr.bottom + 1 && sr.bottom <= window.innerHeight && sr.left >= fr.left - 1 && sr.right <= fr.right + 1 && !foot.querySelector('.legend-band, .legend'),
       };
     })()`);
-    same('Library keeps all 6 tool marks and starts with What the marks mean shut at the list foot with no empty band',
-      libShut, { marks: 6, inFoot: true, open: false, label: 'What the marks mean', tall: true, body: false, items: 0, noEmptyBand: true });
-    await t.run(`document.getElementById('mark-legend-toggle')?.scrollIntoView({ block: 'end' })`);
+    same('Library keeps 6 tool marks and pins shut What the marks mean in reach at the foot of a long list at 860×528 without scrolling',
+      libShut, { marks: 6, longList: true, pinnedFoot: true, open: false, label: 'What the marks mean', body: false, items: 0, shutBounds: true });
     await t.click('#mark-legend-toggle');
-    await t.run(`document.getElementById('mark-legend-body')?.scrollIntoView({ block: 'end' })`);
     const libOpen = await t.run(`(() => {
       const scroller = document.querySelector('.scroll.matrix'), foot = document.querySelector('.legend-foot');
-      const d = document.getElementById('mark-legend'), body = document.getElementById('mark-legend-body');
-      const sr = scroller?.getBoundingClientRect();
+      const d = document.getElementById('mark-legend'), s = document.getElementById('mark-legend-toggle'), body = document.getElementById('mark-legend-body');
+      const scr = scroller?.getBoundingClientRect(), fr = foot?.getBoundingClientRect(), sr = s?.getBoundingClientRect(), br = body?.getBoundingClientRect();
       const items = [...(body?.querySelectorAll('.legend-item') ?? [])];
+      const labels = items.map(el => el.textContent.trim());
+      const rows = [...document.querySelectorAll('.ov-row[data-key]')];
+      const visibleRows = rows.filter(el => { const r = el.getBoundingClientRect(); return r.height > 0 && r.bottom > scr.top + 1 && r.top < scr.bottom - 1; }).length;
+      scroller.scrollTop = scroller.scrollHeight;
+      const last = rows[rows.length - 1]?.getBoundingClientRect();
       return {
         open: !!d?.open,
-        inFoot: !!foot && !!body && foot.contains(body),
-        ungrouped: items.length >= 3 && !items.some(el => el.textContent.includes(' / ')),
-        fits860: !!scroller && !!foot && !!sr && scroller.scrollWidth <= scroller.clientWidth + 1 && foot.scrollWidth <= foot.clientWidth + 1 && items.every(el => el.getBoundingClientRect().right <= sr.right + 1),
+        aboveToggle: !!foot && !!body && !!br && !!sr && !!fr && foot.contains(body) && br.top >= fr.top - 1 && br.bottom <= sr.top + 1,
+        grouped: labels.includes('On there / Has the current version / Has it') && items.length <= 5,
+        inViewBounds: !!fr && !!br && foot.scrollWidth <= foot.clientWidth + 1 && br.top >= 0 && br.bottom <= window.innerHeight
+          && items.every(el => { const r = el.getBoundingClientRect(); return r.left >= fr.left - 1 && r.right <= fr.right + 1 && r.top >= br.top - 1 && r.bottom <= br.bottom + 1 && r.bottom <= window.innerHeight; }),
+        showsRows: !!scr && scr.height >= 120 && visibleRows >= 2,
+        lastRowScrollable: !!last && !!scr && last.top >= scr.top - 1 && last.bottom <= scr.bottom + 1,
       };
     })()`);
-    same('pressing What the marks mean on Library opens ungrouped key entries at the foot with nothing cut off at 860',
-      libOpen, { open: true, inFoot: true, ungrouped: true, fits860: true });
+    same('pressing What the marks mean on Library opens grouped key above toggle in view at 860×528 while list keeps rows and scrolls to the last row',
+      libOpen, { open: true, aboveToggle: true, grouped: true, inViewBounds: true, showsRows: true, lastRowScrollable: true });
     await t.click('#nav-overview');
     await t.click('#nav-library');
     same('re-entering Library forgets open What the marks mean state',
@@ -7555,8 +7568,8 @@ async function openCodeFlow() {
   await p.click(`#${rowPart('add', 'skills', 'oc-only')}`);
   check('adding OpenCode’s own skill copies it to the other tools', readNow(join(practice, '.claude/skills/oc-only/SKILL.md')) === text('oc-only') && readNow(join(practice, '.copilot/skills/oc-only/SKILL.md')) === text('oc-only'), await p.text('.bands'));
   // Turned Off, it leaves the other tools; OpenCode keeps the copy it was found with (left alone as its own while the skill is
-  // off). Its tag says OpenCode has it, as OpenCode's mark does, and so does the Off heading once the list is read again (its
-  // row stays where it was until then). Undo turns it back on.
+  // off). Its tag says OpenCode has it, as OpenCode's mark does, and under Off after a refresh its tag says "another copy in OpenCode"
+  // while the Off heading stays quiet (its row stays where it was until then). Undo turns it back on.
   await p.click(`#${rowPart('switch', 'skills', 'oc-only')}`);
   same('Off, OpenCode keeps the copy it was found with, and the result and the tag say so, as its mark does',
     [existsSync(join(practice, '.claude/skills/oc-only')), existsSync(join(mine, 'skills/oc-only/SKILL.md')), await cellState(p, 'skills', 'oc-only', 'opencode-cli'),
@@ -8663,8 +8676,10 @@ async function sharedCopiesFlow() {
   await a.click('#harness-tab-skills');
   await opened();
   const elsewhere = `Pi ${reads} Copilot CLI ${reads}`;
-  check('the Off heading names the copies still read', (await headingSays(a, 'off')).includes(elsewhere), await headingSays(a, 'off'));
+  same('the Off heading stays quiet without a live note', await headingSays(a, 'off'), 'Off1');
   same('the Off row names the tools that still have it', await a.text(`${row} .row-tag`), 'another copy in Pi and Copilot CLI');
+  const tagTitle = await a.run(`document.querySelector(${JSON.stringify(`${row} .row-tag`)})?.title ?? ''`);
+  check('the Off row tag hover names the copies still read', tagTitle.includes(elsewhere), tagTitle);
   check('the Off status says where the tools read it', (await a.text('.details-status') ?? '').includes(elsewhere), await a.text('.details-status'));
   if (shots) { await sizeTo(a, 1280, 800); await a.shot('pi-skills-off'); await fullSize(a); }
   await openKind(a, 'skills');

@@ -1388,7 +1388,7 @@ function forgetOtherHomes(t: Table, name: keyof typeof views) {
   if (now === was) return;
   tableHomes[name] = now;
   // A view's first table has no other home's to forget (a link may have opened its row before it was drawn).
-  if (was !== undefined) Object.assign(t.view, { comparing: undefined, openFile: undefined, confirmDelete: undefined, from: 'anywhere', unusedCounted: false, legendOpen: false });
+  if (was !== undefined) Object.assign(t.view, { comparing: undefined, openFile: undefined, confirmDelete: undefined, from: 'anywhere', unusedCounted: false });
 }
 
 // ---------- See change: what an edit did, before Undo ----------
@@ -1708,11 +1708,8 @@ function takenInNotice(t: Table, notice: TakenInNotice & Pick<Told, 'of' | 'once
  * shows no chip and gives the Library's back as it was. Asking again for the table on screen changes nothing.
  */
 function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, files = false): Table {
-  // An armed Delete and the open key belong to the visit they were clicked on: another page clears them.
-  if (state.visit !== tablesVisit) {
-    for (const each of Object.values(views)) Object.assign(each, { confirmDelete: undefined, legendOpen: false });
-    tablesVisit = state.visit;
-  }
+  // An armed Delete belongs to the visit it was clicked on: another page disarms it.
+  if (state.visit !== tablesVisit) { for (const each of Object.values(views)) each.confirmDelete = undefined; tablesVisit = state.visit; }
   const asked = views[name].askedOrder;
   if (asked && (asked.visit ??= state.visit) !== state.visit) views[name].askedOrder = undefined;
   const t: Table = { kinds, tool: harness, view: views[name] };
@@ -1747,17 +1744,20 @@ function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, fi
   if (view.openFile) keepOpenFile(t, [...drawn, ...shownCatalog(t, inPlugins)]);
   return t;
 }
-/** The segment the Library was last drawn for (useLibrary), so another one starts its list afresh. */
-let drawnSegment: PageKind | 'all' | undefined;
+/** The segment, visit and home the Library was last drawn for (useLibrary), so another starts its list afresh. */
+let drawnLibrary: { segment: PageKind | 'all'; visit: number; home?: string } | undefined;
 /**
  * The Library's table: its segment's kinds. Another segment than the one drawn last starts its list afresh: at its top (its
  * table's id names the segment: tableId), its pins let go (its list's name names its kinds: listNow), and its armed Delete
- * disarmed (tableOf closes an opened row it no longer lists). Find, the chip and From stay (a chip is offered over every kind: overEveryKind).
+ * disarmed (tableOf closes an opened row it no longer lists). Its open mark key (`legendOpen`) is forgotten on another visit,
+ * another home or another segment (in addition to `startFresh` via `openKind`), without touching a tool tab's view. Find,
+ * the chip and From stay (a chip is offered over every kind: overEveryKind).
  */
 function useLibrary(): Table {
-  const view = views.library, shown = segment(), moved = drawnSegment !== undefined && drawnSegment !== shown;
-  drawnSegment = shown;
-  if (moved) Object.assign(view, { confirmDelete: undefined, legendOpen: false });
+  const view = views.library, now = { segment: segment(), visit: state.visit, home: state.home?.home };
+  if (drawnLibrary && drawnLibrary.segment !== now.segment) view.confirmDelete = undefined;
+  if (drawnLibrary && (drawnLibrary.segment !== now.segment || drawnLibrary.visit !== now.visit || drawnLibrary.home !== now.home)) view.legendOpen = false;
+  drawnLibrary = now;
   return tableOf('library', segmentKinds());
 }
 /** A tool's tab of one kind under Harnesses: that kind alone, with that tool first, in the kind's own view. */
@@ -2077,8 +2077,8 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
     // Its id keeps it where it was scrolled across a redraw (the dock's breakpoint crossed, say): tableId.
     h('div.scroll.matrix', { id: tableId(t) },
       // Library rows keep no column heads; a tool's tab heads its switch column with Every tool (switchColumnHead).
-      nothing ?? withToolCount(h('div.ov.ov-switched', { role: 'table', 'aria-label': `${tool ? nouns[t.kinds[0]!][1] : 'Items'} and where they are on` }, tool ? switchColumnHead(tool) : null, sections), columns(t).length),
-      legend?.foot ?? null)];
+      nothing ?? withToolCount(h('div.ov.ov-switched', { role: 'table', 'aria-label': `${tool ? nouns[t.kinds[0]!][1] : 'Items'} and where they are on` }, tool ? switchColumnHead(tool) : null, sections), columns(t).length)),
+    legend?.foot ?? null];
   // An item's details hold its versions, and a file in a row's details' place is read at length: their dock takes a share of the
   // width that grows with the window (style.css .dock-wide).
   if (openRow) return h(`div.page.ov-page.docked${fileInDetails(view, view.comparing) ? '.dock-wide' : ''}`, {}, h('div.dock-main', {}, table), pluginDock(t, openRow));
@@ -2503,7 +2503,7 @@ function rowMarks(t: Table, skill: ItemRow, size = 14, table = true) {
 const inColumns = (t: Table, holds: Tool[], draw: (tool: Tool) => HTMLElement) =>
   t.tool ? holds.map(draw) : columns(t).map(tool => (holds.includes(tool) ? draw(tool) : h('span.tool-mark.mark-blank', { 'aria-hidden': 'true' })));
 
-/** The key, behind "What the marks mean": at the Library's foot, or in a tool tab's toolbar (grouped by visual look). */
+/** The key, behind "What the marks mean" (grouped by visual look): pinned at the Library's foot, or in a tool tab's toolbar. */
 function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
   if (!columns(t).length) return null;
   const seen = new Map<keyof typeof keyWords, { look: MarkLook; glyph?: IconName }>();
@@ -2511,14 +2511,12 @@ function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
   // A plugin's own rows: on there, or off there (no copy kept: a plugin's item has none of its own).
   for (const row of plugins) for (const each of markTools(t, toolsFor(t, kindOf(row)))) if (row.copies[each as HarnessId]) seen.set(offIn(row, each as HarnessId) ? 'plugin-off' : 'on', { look: offIn(row, each as HarnessId) ? 'off' : 'on' });
   const entries = (Object.keys(keyWords) as (keyof typeof keyWords)[]).filter(key => seen.has(key)).map(key => ({ key, ...seen.get(key)! }));
-  const shown = t.tool
-    ? [...groupBy(entries, item => `${item.look}:${item.glyph ?? ''}`).values()].map(group => ({ ...group[0]!, label: group.map(item => keyWords[item.key]).join(' / ') }))
-    : entries.map(item => ({ ...item, label: keyWords[item.key] }));
+  const shown = [...groupBy(entries, item => `${item.look}:${item.glyph ?? ''}`).values()].map(group => ({ ...group[0]!, label: group.map(item => keyWords[item.key]).join(' / ') }));
   const keyed = h('div.legend', { 'aria-label': 'Key' }, shown.map(item => h('span.legend-item', {}, toolMark(item.look, t.tool, item.glyph, 12), item.label)));
   if (!keyed.childElementCount) return null;
   const toggle = fold({ id: 'mark-legend', toggleId: 'mark-legend-toggle', label: 'What the marks mean', open: t.view.legendOpen, controls: 'mark-legend-body', onToggle: open => { t.view.legendOpen = open; rerender(); } });
   const body = t.view.legendOpen ? h('div.legend-band', { id: 'mark-legend-body' }, keyed) : undefined;
-  return t.tool ? { toggle, body } : { foot: h('div.legend-foot', {}, toggle, body ?? null) };
+  return t.tool ? { toggle, body } : { foot: h('div.legend-foot', {}, body ?? null, toggle) };
 }
 
 /** One row: its switch (in Select's mode, its tick), its name, a mark per tool, and the chevron that opens its details. */

@@ -149,6 +149,7 @@ test('Off heading stays quiet with no live note across plugin-on, pending remova
     ['/heading-off-reader-single', [reader1], {}],
     ['/heading-off-switched-single', [reader2], {}],
     ['/heading-off-plain-leftout', [plainSkill], { leftOut: ['pi-cli'] }],
+    ['/heading-off-two-leftout', [plainSkill], { leftOut: ['pi-cli', 'opencode-cli'] }],
   ];
   for (const [homePath, skills, extra] of cases) {
     app.home = makeHome({ homePath, tools, skills, library: libOf(skills), ...extra });
@@ -158,7 +159,12 @@ test('Off heading stays quiet with no live note across plugin-on, pending remova
     const head = readHeading(tree, 'off');
     assert.equal(head.count, String(skills.length), `${homePath} keeps Off count`);
     assert.equal(head.hasAfter, false, `${homePath} has no live note beside Off heading`);
+    assert.doesNotMatch(head.rawText, /no tool (it manages )?has these/);
     assert.ok(findAll(tree, el => el.attrs?.id === 'section-off-info').length === 1, `${homePath} keeps Off (?) mark`);
+    const card = textOf(findAll(tree, el => el.attrs?.id === 'section-off-info-card')[0]);
+    if (extra.leftOut?.length === 1) assert.equal(card, 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so; Pi, left out, keeps whatever it has.');
+    else if (extra.leftOut?.length === 2) assert.equal(card, 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so; Pi and OpenCode, left out, keep whatever they have.');
+    else assert.equal(card, 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so.');
   }
 });
 

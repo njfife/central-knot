@@ -365,7 +365,7 @@ const outsideCopyIn = (row: LibraryRow, tools: readonly string[], switchedOff: b
 /** The tools that still read an item another way: they have such a copy, and load it. */
 const otherReaders = (row: LibraryRow, tools: readonly string[]) => outsideCopyIn(row, tools, false);
 /** Each of otherReaders' copies as its tool's line in the details describes it. */
-export const otherReadLines = (row: LibraryRow, tools: readonly string[]) => otherReaders(row, tools).map(tool => row.anotherWay![tool]!);
+const otherReadLines = (row: LibraryRow, tools: readonly string[]) => otherReaders(row, tools).map(tool => row.anotherWay![tool]!);
 /** The tools that have such a copy and don't read it, their own switch having it off, as an Off item's result and tag's tooltip say them. */
 export function switchedOffWords(row: LibraryRow, tools: readonly string[]): string[] {
   const held = outsideCopyIn(row, tools, true), one = held.length === 1;
@@ -479,15 +479,15 @@ function offOnWords(item: LibraryItem | undefined, tools: readonly string[], for
 
 /**
  * An opened row's status line: where a found item is and what Add does (and with Synchronize everything on, what the rule does);
- * and where turning an Off item On puts it back (with any still-present or shared copies). Empty on every On row: each tool's line
- * (detailLine, harnessLine) and marks show every On state, including a pending hand deletion.
+ * and where turning an Off item On puts it back (with any still-present or shared copies). Empty on every On row and on a found
+ * row that can't be added (its tag and tool lines already say so).
  */
 export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], everything = false, leftOut: readonly string[] = []): string {
   const where = (...states: HarnessIs[]) => harnessesWhere(row, item, tools, ...states);
   const place = placeOf(item);
   if (place === 'found') {
     const differ = asksWhichCopy(row) ? ', with different copies' : '';
-    if (!canAdd(row)) return 'Not in Central Knot · it can’t be added now (see below).';
+    if (!canAdd(row)) return '';
     const below = where('cannot').length ? ' (see below)' : '';
     const rule = everything && row.takeInAnswers ? ` ${ruleSays(row.takeInAnswers.rule)}` : '';
     return `Not in Central Knot · ${foundWhere(row, item, tools)}${differ}. Add it to keep it in Central Knot${whereAdded(row, item, tools)}${below}.${rule}`;

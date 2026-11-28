@@ -464,7 +464,7 @@ if (wanted('mcp')) {
   await openKind(a, 'mcp'); await refresh();
   await atEverySize('found', 'Clicked "MCP servers". Every server is found: docs in Claude Code, files in Copilot CLI and Codex, each with Add; node_repl belongs to ChatGPT desktop, so its Add is unavailable and its tag says it can’t be added', true);
   await openRow('mcp', 'node_repl');
-  await atEverySize('cannot-take-in', 'Opened node_repl: "Not in Central Knot · it can’t be added now (see below)", and Codex’s line says why: ChatGPT desktop keeps this server for itself', false, '.details');
+  await atEverySize('cannot-take-in', 'Opened node_repl: no repeating status line, and Codex’s line says why: ChatGPT desktop keeps this server for itself', false, '.details');
   await closeRow('mcp', 'node_repl');
   await openRow('mcp', 'files');
   await atEverySize('found-open', 'Opened files while found: what every tool shares of a server and what stays each tool’s own, each tool’s line with its settings file, and Add', true, '.details');
@@ -679,8 +679,7 @@ if (wanted('agents')) {
   for (const count of [2, 5, 7]) { await a.click(`#${rowPart('switch', 'agents', `helper-0${count}`)}`); await a.settle(); }
   await atEverySize('agents-many', 'Fourteen more agents: some on, three off, six found; the three sections, each with its count and line');
   await a.click('#mark-legend-toggle');
-  await a.run(`document.querySelector('#mark-legend-body')?.scrollIntoView({ block: 'end' })`);
-  await shot(a, 'agents-legend', 'Clicked "What the marks mean" at the end of the list: "Kept out", "Off: Central Knot keeps it", "Can’t take it" among the marks this page uses.');
+  await shot(a, 'agents-legend', 'Clicked "What the marks mean" pinned at the foot of the list: grouped key above it ("Kept out", "Off: Central Knot keeps it", "Can’t take it" among the marks this page uses).');
   await a.click('#mark-legend-toggle');
 
   // States added in round 3, after the earlier pictures so their numbers stay. The long name heads its opened panel.

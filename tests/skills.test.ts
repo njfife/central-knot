@@ -296,7 +296,7 @@ test('A found skill whose only copy can’t be copied as it is (a link inside) i
     await mkdir(join(box.home, roots['codex-cli'], 'not-a-skill'), { recursive: true });
     const { fact, item, row } = await seen(box);
     assert.match(fact!.unseen?.['claude-cli'] ?? '', /can’t be copied as it is/);
-    assert.deepEqual([canAdd(row), statusLine(row, item, tools)], [false, 'Not in Central Knot · it can’t be added now (see below).']);
+    assert.deepEqual([canAdd(row), statusLine(row, item, tools)], [false, '']);
     assert.equal((await seen(box, box.context, 'not-a-skill')).fact, undefined);
     // Found only where a tool has it another way (the shared folder), it says so, and can be taken in.
     await rm(folderOf(box, 'claude-cli'), { recursive: true });
