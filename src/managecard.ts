@@ -25,14 +25,16 @@ export function manageLocked(home: HomeView): string | undefined {
 
 /**
  * The switch and its status for an installed tool's card: Managed (with one `(?)` card on the first managed card) or Not
- * managed, whose switch asks first, in the card (askManage). Every switch keeps its tool-named accessible label even when
- * locked; the lock's reason comes from toggle's whyOff (title and aria-description), with no card or question.
+ * managed (with its own `(?)` card explaining why no rows show and that the switch asks first, in the card via askManage).
+ * Every switch keeps its tool-named accessible label even when locked; the lock's reason comes from toggle's whyOff (title
+ * and aria-description), with no card or question.
  */
 export function manageRow(home: HomeView, tool: HarnessId, showInfo = false): HTMLElement {
   const on = home.sync.managed.includes(tool), why = manageLocked(home), name = names[tool];
   const label = on ? `Manage ${name}: on. Click to leave ${name} out: Central Knot then writes nothing there until you turn it on again. Its copies stay, and every item stays as it is.`
-    : `Manage ${name}: off. Click to see what managing it does there, then confirm.`;
-  const mark = on && !why && showInfo ? infoMark('manage-info', 'Managed', MANAGE_INFO) : null;
+    : `Manage ${name}: off. ${leftOutInfo(name)}`;
+  const mark = why ? null : on ? (showInfo ? infoMark('manage-info', 'Managed', MANAGE_INFO) : null)
+    : infoMark(`manage-${tool}-info`, `${name} left out`, leftOutInfo(name));
   return h('div.harness-manage', {},
     h('span.harness-manage-head', mark ? { 'data-info-block': true } : {},
       toggle({ on, label, id: `manage-${tool}`, disabled: why ?? acting(), onchange: next => void (next ? askManage(tool, CARD) : manageTool(tool, false, home.home)) }),
@@ -43,6 +45,9 @@ export function manageRow(home: HomeView, tool: HarnessId, showInfo = false): HT
 
 /** Said behind Managed (?) on the first managed card. */
 const MANAGE_INFO = 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.';
+/** Said behind Not managed (?) and on its switch hover for a left-out tool: why no rows are shown, that copies stay, and that the switch asks first. */
+const leftOutInfo = (name: string) =>
+  `Central Knot doesn’t read or write ${name} while it’s left out, so its copies and every item stay as they are. Its switch asks before managing it again.`;
 /** With Automatic sync off, what brings a tool turned on into line (a click's pass is about its own item: librarypass.ts PassOptions only). */
 const SYNC_OFF = 'With Automatic sync off, Sync once brings it into line; a click on an item brings that item.';
 /** In a home that waits for Resume, what a Manage click also does (its question and History's Leave <tool> out again say it). */

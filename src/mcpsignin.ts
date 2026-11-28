@@ -1,8 +1,9 @@
 // MCP sign-in (MAP.md, "MCP sign-in"): what each tool's own command says of its MCP servers, read and put in words. Here: the
 // command each tool reports with (listCommand; Copilot CLI has none), one reader per tool turning what it printed into what it
 // said of each server it was asked about (readAnswer), the page's rows and cells from the view the Library already has
-// (signinRows), those that need him first (grouped), which cells a check holds for as views come (askedNow, followView,
-// answerFor), a cell's words (cellSays), the time a column shows of its own (ownTime), the line saying what a check does on this
+// (signinRows), the tools a row has a cell in (cellTools), those that need him first (grouped), how many cells need a sign-in now
+// (signinsNeeded, from each cell's need: cellNow), which cells a check holds for as views come (askedNow, followView, answerFor), a
+// cell's words (cellSays), the time a column shows of its own (ownTime; a time in words: model.ts timeOrDay), the line saying what a check does on this
 // computer (checkLine, for the tools whose check can run here: cannotRun), a session-only tool's head (IN_SESSION), the marks'
 // cards (connectedCard, SESSION_CARD, LOCAL_CARD), each tool's own sign-in command, run and copied (signInArgs, signInCommand),
 // the tools whose sign-in Central Knot offers to start on a click (offersSignin), and a cell as the page shows it, a sign-in started
@@ -16,8 +17,8 @@
 import { claudeServerName } from './pluginstatus.ts';
 import { offIn, pageRows, pluginTools } from './pluginrows.ts';
 import { record } from './values.ts';
-import { clockTime } from './model.ts';
-import { andList, toolNames } from './words.ts';
+import { plural, timeOrDay } from './model.ts';
+import { andList, harnessIds, toolNames } from './words.ts';
 import type { HarnessId, HomeView, LibraryFacts, SigninAnswer, SigninEnd, SigninSaid } from './types.ts';
 
 /** The command each tool reports its MCP servers' state with; Copilot CLI's list and get give its configuration only. */
@@ -153,10 +154,30 @@ export function signinRows(home: Pick<HomeView, 'pluginItems' | 'skills' | 'mcp'
   return [...own, ...plugins].filter(row => Object.keys(row.cells).length).sort((first, second) => first.name.localeCompare(second.name));
 }
 
-/** The rows that need him first (a cell that needs a sign-in or says what went wrong: CellSays heed), each group in the order given. */
+/** The tools in which `row` has a cell on the page: each that has the server, and one where a sign-in started there still waits (its Stop stays). */
+export const cellTools = (checks: SigninChecks, row: SigninRow) => harnessIds.filter(tool => !!row.cells[tool] || signinWaits(checks, tool, row));
+/** The rows that need him first, each group in the order given: a cell with a sign-in to make (CellSays need), then one that says what went wrong (heed). */
 export function grouped(rows: SigninRow[], checks: SigninChecks): SigninRow[] {
-  const needed = rows.filter(row => (Object.keys(row.cells) as HarnessId[]).some(tool => cellNow(checks, tool, row, false).heed));
-  return [...needed, ...rows.filter(row => !needed.includes(row))];
+  const ranked = rows.map(row => {
+    const says = cellTools(checks, row).map(tool => cellNow(checks, tool, row, false));
+    return { row, at: says.some(each => each.need) ? 0 : says.some(each => each.heed) ? 1 : 2 };
+  });
+  return [0, 1, 2].flatMap(at => ranked.filter(each => each.at === at).map(each => each.row));
+}
+/**
+ * The head's count (mcpsigninpage.ts): how many of the cells the page draws (cellTools) need a sign-in now (CellSays need), in
+ * words; "At least" while a column whose check can run here (`checkable`) has a cell its check hasn't answered, not checked since
+ * or its check failed, those columns said for its (?) (`stillToCheck`); a session-only tool's, one that can't tell or a server it couldn't
+ * reach never makes it so. None while no cell needs one.
+ */
+export function signinsNeeded(rows: SigninRow[], checks: SigninChecks, checkable: HarnessId[]): { words: string; stillToCheck?: string } | undefined {
+  const cells = rows.flatMap(row => cellTools(checks, row).map(tool => ({ tool, row, need: cellNow(checks, tool, row, false).need })));
+  const count = cells.filter(cell => cell.need).length;
+  if (!count) return undefined;
+  const unanswered = (tool: HarnessId, row: SigninRow) => { const answer = answerFor(checks, tool, row); return !answer || 'failed' in answer || 'unreadable' in answer; };
+  const toCheck = checkable.filter(tool => cells.some(cell => cell.tool === tool && cell.need === undefined && unanswered(tool, cell.row)));
+  const words = `${plural(count, 'sign-in')} needed`;
+  return toCheck.length ? { words: `At least ${words}`, stillToCheck: `Still to check: ${andList(toCheck.map(tool => toolNames[tool]))}` } : { words };
 }
 
 // ---------- Which cells a check holds for ----------
@@ -212,21 +233,27 @@ export function answerFor(checks: SigninChecks, tool: HarnessId, row: SigninRow)
   const column = checks.columns[tool], cell = row.cells[tool];
   return cell && column?.asked.includes(cellKey(row, cell)) ? column.answer : undefined;
 }
-/** The time a column's head shows of its own last check: before a whole Check all, or where its minute (or day) isn't that one's. */
+/** The time a column's head shows of its own last check, in words (model.ts timeOrDay): before a whole Check all, or where they aren't the words of that one's. */
 export function ownTime(checks: SigninChecks, tool: HarnessId): string | undefined {
-  const at = checks.columns[tool]?.at;
-  const minute = (iso: string) => Math.floor(Date.parse(iso) / 60_000);
-  return at && (!checks.all || minute(at) !== minute(checks.all)) ? at : undefined;
+  const at = checks.columns[tool]?.at, own = at && timeOrDay(at);
+  return own && (!checks.all || own !== timeOrDay(checks.all)) ? own : undefined;
 }
 
 // ---------- Words ----------
 
 /**
- * What a cell says, its tone, the line under it (an answer that couldn't be read), the tool's own sign-in command to copy, `heed`
- * where it needs him (a sign-in, or what went wrong: grouped puts its row first), a mark's whole meaning (`title`, its hover),
- * and why a sign-in didn't finish (`why`: what its tool said last, behind a (?) after the words).
+ * What a cell says, its tone, the line under it (an answer that couldn't be read), the tool's own sign-in command to copy, a mark's
+ * whole meaning (`title`, its hover), and its tool's own words behind a (?) after the words (`why`: why it couldn't reach the
+ * server, or what it said last when a sign-in didn't finish).
  */
-export interface CellSays { words: string; tone?: 'muted' | 'warning'; line?: string; command?: string; heed?: true; title?: string; why?: string;
+export interface CellSays { words: string; tone?: 'muted' | 'warning'; line?: string; command?: string; title?: string; why?: string;
+  /** It needs him: a sign-in to make or under way, or what went wrong. Read by grouped alone (with `need`: which rows come first). */
+  heed?: true;
+  /**
+   * Whether it needs a sign-in now: true (one to make, under way or that didn't finish), false (none: it answered, needs none, is
+   * signed in or is off there), absent where that isn't known. Read by signinsNeeded (the count) and grouped (those rows first).
+   */
+  need?: boolean;
   /** A sign-in's button (cellNow): Sign in or Try again, which runs `runs`, or Stop while one waits. */
   act?: { label: 'Sign in' | 'Try again' | 'Stop'; runs?: string } }
 export const SAID = { 'no-sign-in': 'No sign-in needed', 'signed-in': 'Signed in', connected: 'Connected' };
@@ -243,7 +270,7 @@ export const IN_SESSION: Partial<Record<HarnessId, { head: string; hover: (serve
  */
 export function cellSays(tool: HarnessId, row: SigninRow, answer: SigninAnswer | undefined): CellSays {
   const name = toolNames[tool], cell = row.cells[tool]!;
-  if (cell.off) return { words: `Off in ${name}`, tone: 'muted' };
+  if (cell.off) return { words: `Off in ${name}`, tone: 'muted', need: false };
   if (!listCommand[tool]) return { words: '•', tone: 'muted', title: row.transport === 'stdio' ? `In ${name}. Local server.` : IN_SESSION[tool]?.hover(cell.name ?? row.name) };
   if (!answer) return { words: 'Not checked', tone: 'muted' };
   if ('failed' in answer) return { words: answer.failed === 'missing' ? `No ${name} command line here` : `Didn’t answer in ${CHECK_LIMIT_MS / 1000} s`, heed: true };
@@ -251,9 +278,9 @@ export function cellSays(tool: HarnessId, row: SigninRow, answer: SigninAnswer |
   const said = cell.name !== undefined && Object.hasOwn(answer.servers, cell.name) ? answer.servers[cell.name] : undefined;
   if (!said) return { words: `Not reported by ${name}`, heed: true };
   if (said.is === 'unread') return { words: `Couldn’t read ${name}’s answer`, line: said.line, heed: true };
-  if (said.is === 'unreachable') return { words: `Couldn’t reach: ${said.why}`, heed: true };
-  if (said.is === 'needs-sign-in') return { words: 'Needs sign-in', tone: 'warning', command: signInCommand(tool, cell.name!), heed: true };
-  return { words: said.is === 'not-known' ? `${name} can’t tell if it needs a sign-in` : SAID[said.is] };
+  if (said.is === 'unreachable') return { words: 'Couldn’t reach', why: said.why, heed: true };
+  if (said.is === 'needs-sign-in') return { words: 'Needs sign-in', tone: 'warning', command: signInCommand(tool, cell.name!), heed: true, need: true };
+  return said.is === 'not-known' ? { words: `${name} can’t tell if it needs a sign-in` } : { words: SAID[said.is], need: false };
 }
 
 /** The card on the first session-only head. */
@@ -339,14 +366,21 @@ function endWords(tool: HarnessId, end: Exclude<SigninEnd, { signedIn: true }>):
  * column's answer (cellSays), whose need of a sign-in offers Sign in in place of Copy where `offers`.
  */
 export function cellNow(checks: SigninChecks, tool: HarnessId, row: SigninRow, offers: boolean): CellSays {
-  if (signinWaits(checks, tool, row)) return { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true };
+  if (signinWaits(checks, tool, row)) {
+    // Its Stop stays whatever became of the copy. It needs a sign-in while its copy has stayed on there since it started (SigninRun
+    // gone); else the need is the copy's there now: what its column says of it (Off: none), or none where the tool no longer has it.
+    const cell = row.cells[tool], run = checks.signins![signinKey(tool, row.id)]!;
+    const same = !!cell && !cell.off && !run.gone && run.copy === cellKey(row, cell);
+    const need = same || (cell ? cellSays(tool, row, answerFor(checks, tool, row)).need : false);
+    return { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true, ...(need === undefined ? {} : { need }) };
+  }
   const said = cellSays(tool, row, answerFor(checks, tool, row)), cell = row.cells[tool]!, began = checks.columns[tool]?.began;
   const run = checks.signins?.[signinKey(tool, row.id)];
   if (!run?.end || run.gone || run.copy !== cellKey(row, cell) || (began && began > run.at!)) {
-    return said.command && offers ? { words: said.words, tone: said.tone, act: { label: 'Sign in', runs: said.command }, heed: true } : said;
+    return said.command && offers ? { words: said.words, tone: said.tone, act: { label: 'Sign in', runs: said.command }, heed: true, need: true } : said;
   }
-  if ('signedIn' in run.end) return { words: `Signed in ${clockTime(run.at!)}` };
+  if ('signedIn' in run.end) return { words: `Signed in ${timeOrDay(run.at!)}`, need: false };
   const command = signInCommand(tool, cell.name!)!;
   return { words: endWords(tool, run.end), tone: 'warning', ...('unfinished' in run.end && run.end.unfinished ? { why: run.end.unfinished } : {}), command,
-    act: { label: 'Try again', runs: command }, heed: true };
+    act: { label: 'Try again', runs: command }, heed: true, need: true };
 }
