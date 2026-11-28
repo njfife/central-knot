@@ -1168,7 +1168,7 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
   const codexPage = pluginPage(view, entry, 0, entry.plugins[0]);
   const codexText = dom.textOf(codexPage);
   const codexWarn = dom.textOf(dom.findAll(codexPage, n => n.className === 'session-run-warn')[0]);
-  assert.equal(codexWarn, '“Run it” runs a hook’s command to show what it adds; it may change your files.');
+  assert.equal(codexWarn, HOOK_RUN_WARN);
   assert.match(codexText, /Codex: Run it runs a hook even if it isn’t trusted in \/hooks\./);
   assert.match(codexText, /echo codex-installed/);
   assert.match(codexText, /echo market-only/, 'marketplace-only text hook stays listed with View source');
@@ -1269,7 +1269,7 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
     ownHooks: [{ declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, launch: { shell: 'echo mine' } }],
   } as any);
   const warnText = dom.textOf(dom.findAll(withPluginCard, n => n.className === 'session-run-warn')[0]);
-  assert.equal(warnText, '“Run it” runs a hook’s command to show what it adds; it may change your files.');
+  assert.equal(warnText, HOOK_RUN_WARN);
   const cardHelp = dom.findAll(withPluginCard, n => n.attrs?.role === 'tooltip')[0];
   assert.match(dom.textOf(cardHelp), /Plugin hooks can change their installed files and data\./);
 });
