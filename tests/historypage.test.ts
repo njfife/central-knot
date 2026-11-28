@@ -6,13 +6,17 @@ import type { AppPreferences, HarnessId, HistoryEvent, HomeView } from '../src/t
 import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
+let onRestore: ((choice?: string) => void) | undefined;
 const settings: AppPreferences = { appearance: 'system', historyDays: 30, pluginUpdates: true, pluginText: true, signIn: { on: false, available: true } };
 const noop = () => {};
 installDom({
   getSettings: async () => ({ ...settings }),
+  restore: async (_id: string, _home: string, choice?: string) => { onRestore?.(choice); return { results: [], harnessWrites: 1, reloads: [], made: [] }; },
+  refresh: async () => state.home!,
+  history: async () => ({ events: state.history.data ?? [], days: 30 }),
   onPluginTextChanged: noop, onUpdatesChanged: noop, onPluginUpdatesChanged: noop, onNavigate: noop,
   onSettingsChanged: noop, onSyncChanged: noop, onSessionCostsChanged: noop, onSaid: noop,
-}, { byId: id => (rendered ? findById(rendered, id) ?? null : null) });
+}, { byId: id => findById(rendered, id) ?? null });
 
 const { setRenderer, state } = await import('../src/app.ts');
 const { loadSettings } = await import('../src/settingspage.ts');
@@ -82,6 +86,7 @@ test('History folds all-tools and conflict losers, leaves unrecorded and zero-lo
     { id: 'del-five', at, key: 'old-draft', of: 'skill', item: 'old-draft', kind: 'deleted', losers: five.map(tool => ({ tool, hash: 'b' })), orderProved: true },
     { id: 'on-over', at, key: 'draft-over', of: 'skill', item: 'draft-over', kind: 'on', cause: 'switch', losers: five.map(tool => ({ tool, hash: '' })), tookFrom: [{ tool: 'claude-cli', hash: 'old' }], orderProved: true },
     { ...conflictBase, id: 'lib-conflict', key: 'agent:reviewer', of: 'agent', item: 'reviewer', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'opencode-cli', hash: 'z' }] },
+    { ...conflictBase, id: 'lib-conflict-gone', key: 'agent:old-reviewer', of: 'agent', item: 'old-reviewer', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'opencode-cli', hash: 'z' }] },
     { ...conflictBase, id: 'legacy-conflict', key: '', item: 'clash', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'old-cli' as HarnessId, hash: 'z' }] },
     { ...conflictBase, id: 'legacy-no-losers', key: '', item: 'lone-clash', losers: [] },
     { ...conflictBase, id: 'legacy-no-losers-order', key: '', item: 'lone-clash-2', losers: [{ tool: 'claude-cli', hash: 'p' }], orderProved: false },
@@ -95,7 +100,8 @@ test('History folds all-tools and conflict losers, leaves unrecorded and zero-lo
     ['all-six', 'Turned off: removed from all 6 tools', 'Claude Code, Copilot CLI, Codex, Pi, OpenCode and Antigravity'],
     ['del-five', 'Deleted from Central Knot and removed from 5 of 6 tools', 'Claude Code, Copilot CLI, Pi, OpenCode and Antigravity'],
     ['on-over', 'Turned on: put in 5 of 6 tools — Claude Code’s own copy was written over and kept as a version.', 'Claude Code, Copilot CLI, Pi, OpenCode and Antigravity'],
-    ['lib-conflict', 'Codex’s edit was the latest, so it became the current version. Edits from 3 of 6 tools are kept as versions.', 'Copilot CLI, Pi and OpenCode'],
+    ['lib-conflict', 'Codex’s edit was the latest, so it became the current version.'],
+    ['lib-conflict-gone', 'Codex’s edit was the latest, so it became the current version. Edits from 3 of 6 tools are kept as versions.', 'Copilot CLI, Pi and OpenCode'],
     ['legacy-conflict', 'Codex’s edit won over edits in 3 tools', 'Copilot CLI, Pi and old-cli'],
     ['legacy-no-losers', 'Codex’s edit won over another’s.'],
     ['legacy-no-losers-order', 'Codex’s edit won over another’s. Order not proved; the fixed tool order decided.'],
@@ -107,10 +113,97 @@ test('History folds all-tools and conflict losers, leaves unrecorded and zero-lo
       assert.equal(textOf(findById(page, `history-tools-names-${id}-0`)), opened, id);
     }
   }
-  assert.deepEqual(
-    ['copilot-cli', 'pi-cli', 'opencode-cli'].map(tool => textOf(findById(page, `history-lib-conflict-${tool}`))),
-    ['Use Copilot CLI’s version', 'Use Pi’s version', 'Use OpenCode’s version'],
-  );
+  const trigger = findById(page, 'history-versions-lib-conflict');
+  assert.equal(textOf(trigger), 'Use another version…');
+  assert.equal(findById(page, 'history-lib-conflict-copilot-cli'), undefined);
+});
+
+test('History version fold: shared-tool line, file mark per kept version, 1-choice row with mark and no clause, acting() disables Use', () => {
+  forgetHistoryFolds();
+  state.page = 'history';
+  state.busy = undefined;
+  state.home = makeHome(six, six);
+  const madeAt = '2026-11-27T10:00:00.000Z';
+  const versions = (hashes: string[]) => hashes.map(hash => ({ hash, at: madeAt, from: { how: 'edited' as const, harness: 'codex-cli' as HarnessId } }));
+  state.home.agents.library.reviewer = { key: 'reviewer', name: 'reviewer', on: true, hash: 'w', versions: versions(['w', 'x', 'y', 'z', 'p']), except: [], applied: {}, own: {} };
+  const base = { at: madeAt, key: 'agent:reviewer', of: 'agent' as const, item: 'reviewer', orderProved: true };
+  state.history.state = 'ready';
+  state.history.data = [
+    { ...base, id: 'c-dup', kind: 'conflict', winner: { tool: 'codex-cli', hash: 'w' }, previous: 'p', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'x' }, { tool: 'opencode-cli', hash: 'z' }] },
+    { ...base, id: 'c1', kind: 'conflict', winner: { tool: 'codex-cli', hash: 'w' }, previous: 'p', losers: [{ tool: 'pi-cli', hash: 'y' }] },
+  ];
+
+  let page = draw();
+  // 1-choice row has link + file mark beside it and omits kept-versions clause.
+  const row1 = findById(page, 'history-row-c1')!;
+  assert.deepEqual([
+    textOf(findById(row1, 'history-c1-pi-cli')),
+    findNode(findNode(row1, el => el.classList.contains('history-choice-one')), el => el.classList.contains('row-file-btn'))?.attrs.title,
+    textOf(findNode(row1, el => el.classList.contains('history-about'))),
+  ], ['Use Pi’s version', 'Read Pi’s version', 'Codex’s edit was the latest, so it became the current version.']);
+
+  // Shared hash shares one line with combined name, file mark, and Use (accessible name + hover).
+  page = openFold(page, 'history-versions-fold-c-dup');
+  const dupList = findById(page, 'history-versions-list-c-dup')!;
+  const dupLines = dupList.children as FakeNode[];
+  assert.deepEqual(dupLines.map(li => [
+    textOf(findNode(li, el => el.classList.contains('history-version-who'))),
+    findNode(li, el => el.classList.contains('row-file-btn'))?.attrs.title,
+    textOf(findNode(li, el => el.classList.contains('btn'))),
+    findNode(li, el => el.classList.contains('btn'))?.attrs['aria-label'],
+    findNode(li, el => el.classList.contains('btn'))?.attrs.title,
+  ]), [
+    ['Copilot CLI and Pi’s version', 'Read Copilot CLI and Pi’s version', 'Use', 'Use Copilot CLI and Pi’s version', 'Use Copilot CLI and Pi’s version'],
+    ['OpenCode’s version', 'Read OpenCode’s version', 'Use', 'Use OpenCode’s version', 'Use OpenCode’s version'],
+  ]);
+
+  // acting() disables Use with busy title.
+  state.busy = 'Syncing…';
+  page = draw();
+  const busyUse = findById(page, 'history-c-dup-copilot-cli')!;
+  assert.deepEqual(['disabled' in busyUse.attrs, busyUse.attrs.title], [true, 'Syncing…']);
+  state.busy = undefined;
+  forgetHistoryFolds();
+});
+
+test('History keyboard Use moves focus to the same row’s next Use, then surviving single link, then row', async () => {
+  forgetHistoryFolds();
+  state.page = 'history';
+  state.busy = undefined;
+  state.home = makeHome(six, six);
+  const madeAt = '2026-11-27T10:00:00.000Z';
+  const versions = (hashes: string[]) => hashes.map(hash => ({ hash, at: madeAt, from: { how: 'edited' as const, harness: 'codex-cli' as HarnessId } }));
+  state.home.agents.library.reviewer = { key: 'reviewer', name: 'reviewer', on: true, hash: 'w', versions: versions(['w', 'x', 'y', 'z', 'p']), except: [], applied: {}, own: {} };
+  const base = { at: madeAt, key: 'agent:reviewer', of: 'agent' as const, item: 'reviewer', orderProved: true };
+  state.history.state = 'ready';
+  state.history.data = [
+    { ...base, id: 'c3', kind: 'conflict', winner: { tool: 'codex-cli', hash: 'w' }, previous: 'p', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'opencode-cli', hash: 'z' }] },
+    { ...base, id: 'ch2', kind: 'chosen', winner: { tool: 'codex-cli', hash: 'w' }, losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }] },
+  ];
+  const pressKey = (id: string) => { const el = findById(rendered, id)!; el.focus(); el.onclick?.({ detail: 0, stopPropagation() {} }); };
+
+  // 3→2: focuses next Use in same row.
+  openFold(draw(), 'history-versions-fold-c3');
+  onRestore = choice => { if (choice) state.home!.agents.library.reviewer!.hash = choice; };
+  pressKey('history-c3-copilot-cli');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal((document.activeElement as unknown as FakeNode)?.attrs.id, 'history-c3-pi-cli');
+
+  // 2→1: focuses surviving single link; 1→0 (no choice left): focuses row with tabIndex -1.
+  state.home.agents.library.reviewer.hash = 'w';
+  openFold(draw(), 'history-versions-fold-ch2');
+  pressKey('history-ch2-copilot-cli');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal((document.activeElement as unknown as FakeNode)?.attrs.id, 'history-ch2-pi-cli');
+  onRestore = choice => {
+    state.home!.agents.library.reviewer!.hash = choice!;
+    state.home!.agents.library.reviewer!.versions = versions(['w', choice!]);
+  };
+  pressKey('history-ch2-pi-cli');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual([(document.activeElement as unknown as FakeNode)?.attrs.id, findById(rendered, 'history-row-ch2')?.tabIndex], ['history-row-ch2', -1]);
+  onRestore = undefined;
+  forgetHistoryFolds();
 });
 
 const at = '2026-11-27T10:00:00.000Z';
