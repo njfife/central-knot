@@ -337,6 +337,12 @@ test('Add band states the kinds covered, caps long lists, and forecasts an ended
     const bandText = textOf(findNode(rendered, el => el.className.includes('band-text')));
     assert.equal(bandText, 'Added github.com/team/kit-kinds. 1 skill, 1 agent and 1 MCP server (notes, reviewer and relay) are in Central Knot. All 3 are off.');
     assert.equal(textOf(findById(rendered, 'source-turn-made-profile')), 'Everyday would stop being the profile in use');
+    // Everyday the one last switched to (ProfilesView `last`): the band says what every place will then call it, as after the press.
+    state.home!.profiles = { ...state.home!.profiles, last: 'p1' };
+    draw();
+    assert.equal(textOf(findById(rendered, 'source-turn-made-profile')), 'The status bar will say Everyday · changed');
+    state.home!.profiles = { ...state.home!.profiles, last: undefined };
+    draw();
 
     const bandBtn = findById(rendered, 'source-turn-made-on')! as FakeNode & { onmouseenter?: (e: unknown) => void };
     bandBtn.onmouseenter?.({ currentTarget: bandBtn });

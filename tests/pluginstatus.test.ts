@@ -40,13 +40,13 @@ test('A tool the plugin is kept out of is said as not installed there, kept out;
   assert.deepEqual(mark('codex-cli'), { mark: 'cannot', words: 'Codex: other' }, 'Codex holds another marketplace of this name: its box is off, saying why');
 });
 
-test('A tool’s box: ticked where the plugin is; off before the click where its copy can’t be taken out here, saying why on its line; kept out of an absent tool while On has no line of its own', () => {
+test('A tool’s box: ticked where the plugin is; off before the click where its copy can’t be turned off here, saying why on its line; kept out of an absent tool while On has no line of its own', () => {
   const on = (except: HarnessId[] = []): MarketplaceView => ({ ...entry, switches: { p: { entry: { on: true, except }, tools: {} } } });
   const box = (at: MarketplaceView, tool: HarnessId, shown = view) => boxOf(shown, at, 'p', tool, toolMark(shown, at, 'p', tool, owedTo({ on: true, except: at.switches!.p!.entry!.except }, tool, toolNow(shown, at, 'p', tool, undefined, false), shown.tools)));
   assert.deepEqual(box(on(), 'claude-cli'), { ticked: true });
   // The Anthropic Directory's copy, or no command-line tool: the box is off before any click, never a kept-out it can't undo.
   const directory: MarketplaceView = { ...on(), states: { p: { 'claude-cli': { state: 'installed', path: '/x', directory: 'x' } } } };
-  assert.deepEqual(box(directory, 'claude-cli'), { ticked: true, off: FROM_DIRECTORY, line: 'Can’t be taken out here' });
+  assert.deepEqual(box(directory, 'claude-cli'), { ticked: true, off: FROM_DIRECTORY, line: 'Can’t be turned off here' });
   assert.deepEqual(box(on(), 'claude-cli', { ...view, clis: {} }), { ticked: true, off: 'Claude Code’s command-line tool wasn’t found.', line: 'No Claude Code command-line tool here' });
   // Already kept out of a tool holding such a copy: the box says the way out, in words.
   assert.equal(box({ ...directory, switches: { p: { entry: { on: true, except: ['claude-cli'] }, tools: {} } } }, 'claude-cli').off, `${FROM_DIRECTORY} It is kept out of Claude Code: uninstall it in Claude Code itself, then tick to put it back.`);
@@ -173,7 +173,7 @@ test('A copy at the marketplace’s version whose text differs is offered Update
 });
 
 test('A tool’s limits are named in a few words', () => {
-  assert.equal(limitNote([{ component: 'Skills', result: 'works', text: '' }]), '');
+  assert.equal(limitNote([]), '');
   assert.equal(limitNote([{ component: 'Agents', result: 'ignored', text: 'are ignored: copied, never offered' }, { component: 'MCP servers', result: 'fails', text: '' }]), 'Agents are ignored +1');
   assert.equal(limitNote([{ component: 'Commands', result: 'limited', text: 'are turned into skills when installed' }]), 'Commands limited');
 });

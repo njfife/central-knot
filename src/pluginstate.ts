@@ -525,17 +525,32 @@ function runEnded(): void {
   const did = ran.some(click => click.ran?.done.some(step => succeeded(step.report)));
   const profileLine = last && did ? profileEndedLine(lastRan!.run.before) : undefined;
   if (last) last.profileLine = profileLine;
+  const clickName = (click: PluginClick) => {
+    const name = label(click);
+    if (click.tool) return `${name} in ${toolNames[click.tool]}`;
+    const changedSame = ran.some(other => other !== click && other.source === click.source && other.plugin === click.plugin && (other.ran!.stopped || other.ran!.done.length > 0));
+    return changedSame ? `${name}’s other tools` : name;
+  };
+  const unchanged = [...new Set(ran.filter((click, at) => !click.ran!.stopped && !click.ran!.done.length
+    && !ran.slice(at + 1).some(later => later.source === click.source && later.plugin === click.plugin && (!click.tool || later.tool === click.tool) && (later.ran!.stopped || later.ran!.done.length > 0))).map(clickName))];
+  const unchangedText = unchanged.length ? `Nothing changed for ${andList(unchanged)}.` : '';
   const one = ran.length === 1 ? ran[0]!.ran : undefined;
   const oneLines = one ? resultLines(one.done, false) : [];
   const oneFailed = oneLines.filter(line => !line.ok).map(line => `${label(line)}: ${line.text}`).join(' ');
-  const multi = [resultSentence(withNotIn(lines), false, label), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ') || 'Nothing changed.';
   const note = noUndoNote(last, undoOps(place).length > 0);
+  const changedText = [resultSentence(withNotIn(lines), false, label), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ');
+  // Lead with any unchanged click so a narrow status bar keeps the news the header does not hold, and never repeat what the header already shows.
+  const multi = [unchangedText, changedText ? `${changedText}${note}` : ''].filter(Boolean).join(' ') || 'Nothing changed.';
   const oneSaid = one ? resultSentence(withNotIn(oneLines), false, label) : '';
-  const base = one ? (one.stopped ?? (oneSaid ? `${oneSaid}${note}` : oneFailed || `Nothing changed for ${label(ran[0]!)}.`)) : `${multi}${note}`;
+  const base = one ? (one.stopped ?? (oneSaid ? `${oneSaid}${note}` : oneFailed || `Nothing changed for ${clickName(ran[0]!)}.`)) : multi;
+  const full = [base, profileLine].filter(Boolean).join(' ');
   const here = showsPluginsResult(place);
   const { shown, elsewhere } = runDisplay(place);
-  // An irreversible uninstall whose page was left (header shows only "Last change: …") stays visible in the status bar.
-  announce([base, profileLine].filter(Boolean).join(' '), here && !(note && elsewhere) && (one ? !!one.stopped || !!oneFailed || shown : !lines.some(line => !line.ok) && shown));
+  const headerShows = here && shown;
+  // An irreversible uninstall whose page was left (header shows only "Last change: …") stays visible in the status bar;
+  // a multi-click run with an unchanged click stays visible too, showing only the unchanged sentence when the header already holds the rest.
+  const quiet = here && !(note && elsewhere) && (one ? !!one.stopped || !!oneFailed || shown : !lines.some(line => !line.ok) && !unchanged.length && shown);
+  announce(full, quiet, undefined, undefined, !quiet && headerShows && unchangedText && !(note && elsewhere) ? unchangedText : undefined);
   if (here && document.activeElement === document.body && clickedLast) {
     // Undo was drawn off while the list ran, and the list's last draw comes after this: drawn usable first, so it takes the focus.
     if (clickedLast === 'plugins-undo') rerender();
@@ -570,7 +585,8 @@ async function runClick(click: PluginClick, home: string): Promise<void> {
   if (clickList.turns.some(turn => turn.run === click.run && turn.state === 'waiting')) {
     const label = pluginLabeler(result.done), display = runDisplay(click.place), note = noUndoNote(display.last, undoOps(click.place).length > 0);
     const said = resultSentence(resultLines(result.done, false), false, label);
-    announce(result.stopped ?? (said ? `${said}${note}` : `Nothing changed for ${label(click)}.`), showsPluginsResult(click.place) && !result.stopped && !(note && display.elsewhere) && display.shown);
+    const nothing = click.tool ? `${label(click)} in ${toolNames[click.tool]}` : label(click);
+    announce(result.stopped ?? (said ? `${said}${note}` : `Nothing changed for ${nothing}.`), showsPluginsResult(click.place) && !result.stopped && !(note && display.elsewhere) && display.shown);
   }
   rerender();
   showView(await api().plugins().catch(() => null));

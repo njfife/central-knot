@@ -885,15 +885,15 @@ esac
   await panelIs('waiting');
   for (const [width, height] of [[1280, 800], [860, 560]]) { await sizeNow(width, height); await shot(a, `box-waiting-${width}`, `At ${width}×${height}: document-tools is Off; ticked Claude Code’s box on its page while issue-tracker’s install runs: the panel says Waiting to turn on in Claude Code, and the box and the switch are held.`); }
   await sizeNow(1280, 800);
-  await panelIs('ended'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
-  await shot(a, 'box-ticked', 'Its turn came: document-tools is On in Claude Code, the one tool in this folder, its box ticked, and the panel says Installed in Claude Code.');
+  await waitFor(a, `document.body.dataset.busy !== 'true' && !document.querySelector('.plugin-panel .plugin-click') && !!document.querySelector('#plugins-result')`, 60000); await a.settle();
+  await shot(a, 'box-ticked', 'Its turn came: document-tools is On in Claude Code, the one tool in this folder, its box ticked, and the header says Installed in Claude Code.');
   await a.run(`document.querySelector('#pbox-0-document-tools-claude-cli').click()`);
   await panelIs('running');
   for (const [width, height] of [[1280, 800], [860, 560]]) { await sizeNow(width, height); await shot(a, `box-running-${width}`, `At ${width}×${height}: unticked Claude Code’s box: the panel says Turning off in Claude Code… while the stand-in takes its time, and the box shows it working.`); }
   await sizeNow(1280, 800);
   rmSync(slow);
   await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
-  await shot(a, 'box-unticked', 'It ended: the box is empty, and the panel says Turned off in Claude Code, with Undo.');
+  await shot(a, 'box-unticked', 'It ended: the box is empty, and the header says Turned off in Claude Code, with Undo.');
   // The sections after this one start from the Practice copy.
   await fresh();
 }
@@ -1005,7 +1005,7 @@ if (wanted('profiles')) {
   await shot(a, 'skills-with-profile', 'The Library’s skills while Development is in use: each skill is On or Off in Central Knot, as Development has it; nothing marks a profile.');
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`); await a.settle();
   await a.click('#nav-profiles'); await openProfile('Development');
-  await atEverySize('after-hand-click', 'On the Library’s skills, turned standup off by hand, then came back: no profile is in use now (the status bar says No profile), and Development says what switching to it would turn back on', true);
+  await atEverySize('after-hand-click', 'On the Library’s skills, turned standup off by hand, then came back: no profile is in use now, and Development, the one last switched to, is named Development · changed (the status bar, its title; Changed in the list); it says what switching to it would turn back on', true);
   await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
   await a.click('#profile-new'); await name('On call');
   await a.click('#profile-from-now');

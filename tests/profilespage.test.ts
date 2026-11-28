@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { HarnessId, HomeView, InstalledPlugin, PluginsView } from '../src/types.ts';
-import { findById, installDom, textOf, type FakeNode } from './domstub.ts';
+import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
 installDom({}, { byId: id => findById(rendered, id) ?? null });
@@ -78,4 +78,31 @@ test('Where one press can’t clear it, the header says why in view, with the li
   app.home = homeWith([['claude-cli', { off: true }]]);
   putPageData(market.read, viewWith(['claude-cli']));
   assert.deepEqual(drawn().filter(said => said.startsWith('profile-') || said.startsWith('pf-')), []);
+});
+
+test('With no profile in use, the page opens the one last switched to, titled as changed with its (?), and so does Edit profiles… in the status bar’s menu', async () => {
+  const { newItem } = await import('../src/library.ts');
+  const { profileState } = await import('../src/app.ts');
+  const { profileStatus } = await import('../src/profilespage.ts');
+  // notes is On and neither First nor Last has it, so neither is in use; Last was switched to last (ProfilesView `last`).
+  const base = homeWith([]), kind = (library: Record<string, unknown>) => ({ ...base.skills, items: [], library });
+  app.home = { ...base, skills: kind({ notes: { ...newItem('notes', 'notes'), on: true } }), mcp: kind({}), agents: kind({}),
+    profiles: { profiles: [{ id: 'first', name: 'First', items: [], switchesPluginItems: true }, { id: 'last', name: 'Last', items: [], switchesPluginItems: true }], plugins: [], last: 'last' } } as unknown as HomeView;
+  profileState.open = undefined;
+  rendered = profilesPage() as unknown as FakeNode;
+  const title = all(rendered, el => el.tag === 'h2')[0];
+  assert.equal(title?.children.slice(0, 2).map(textOf).join(''), 'Last · changed', 'opened by default, before First');
+  // Nothing is in Last, so it can't be switched to: its card makes no promise of a switch.
+  assert.equal(textOf(findById(rendered, 'profile-changed-title-info-card')), 'What is on differs from Last, the profile you last switched to. Last itself is as you saved it.');
+  // Its row in the list says it as every other place does, its name cut, never the words.
+  const row = findById(rendered, 'profile-row-last');
+  assert.deepEqual([textOf(findNode(row, el => el.className.split(/\s+/).includes('profile-row-head'))), findNode(row, el => el.className.includes('profile-changed '))], ['Last · changed', undefined]);
+  // Edit profiles… opens it too, whichever profile was open.
+  rendered = profileStatus() as unknown as FakeNode;
+  findById(rendered, 'status-profile')?.onclick?.({ stopPropagation() {} });
+  rendered = profileStatus() as unknown as FakeNode;
+  profileState.open = 'first';
+  app.page = 'library';
+  findById(rendered, 'status-profile-edit')?.onclick?.({});
+  assert.deepEqual([app.page, profileState.open], ['profiles', 'last'], 'it lands on Profiles, with Last open');
 });

@@ -127,7 +127,7 @@ export function uninstallControl(entry: MarketplaceView, plugin: PluginView, too
     if (open) readAgainNow(entry.source, plugin.name);
     market.asking = open ? asks : undefined; rerender(); document.getElementById(open ? `${id}-cancel` : id)?.focus();
   };
-  if (market.asking !== asks) return [button({ variant: 'ghost', size: 'small', label: 'Uninstall…', id, disabled: busy, onclick: () => ask(true) }), null];
+  if (market.asking !== asks) return [h('button.text-action.text-danger-quiet.plugin-uninstall', { type: 'button', id, disabled: busy, onclick: () => ask(true) }, 'Uninstall…'), null];
   // A new view drops a read in flight (pluginstate.ts markDetailsStale): the open question asks again, and acts on its answer alone.
   if (!market.details.has(key)) readAgainNow(entry.source, plugin.name);
   const read = market.details.get(key), detail = read && !read.reading ? read.value : undefined, facts = uninstallFacts(entry, plugin, tool, detail);
@@ -177,19 +177,15 @@ export function pluginSwitch(view: PluginsView, entry: MarketplaceView, plugin: 
 }
 
 /**
- * What a plugin's click in the page's list says on its row and its page: its aim while it waits ("Waiting to install") and while
- * main runs it ("Installing…"), then what main returned. On its page, every step whole, a failure starting with its tool (the
- * problems band has each whole too). On the list's row (`onRow`), what fits the row's one line: what it did and where, past one
- * tool counted ("Installed in 3 tools", "Installed in 2 tools, not in Codex", "Not installed in Codex"); each tool's reason and
- * the items put in Pi, OpenCode and Antigravity are in the band above and on its page. It stays until the list's news ends
- * (pluginstate.ts endListNews).
+ * What a plugin's click in the page's list says: its aim while it waits ("Waiting to turn on") and while main runs it
+ * ("Turning on…"), then what fits a list row's one line ("Turned on in 3 tools", "Turned on in 2 tools, not in Codex");
+ * once it ends, the header holds a result with something to act on (and each tool's reason), while a result with nothing
+ * to act on goes to the status bar (pluginspage.ts runLine, app.ts saidInStatusBar). It stays until the list's news ends (pluginstate.ts endListNews).
  */
-export function clickWords(click: PluginClick, onRow = false): { text: string; failed: boolean } {
+export function clickWords(click: PluginClick): { text: string; failed: boolean } {
   if (!click.ran) return { text: click.state === 'waiting' ? click.said.waiting : click.said.running, failed: false };
   const lines = resultLines(click.ran.done), failed = !!click.ran.stopped || lines.some(line => !line.ok);
-  if (onRow) return { text: rowWords(click.what, click.ran), failed };
-  const text = [...lines.map(line => line.short), click.ran.stopped].filter(Boolean).join('; ') || 'Nothing changed';
-  return { text: `${text.charAt(0).toUpperCase()}${text.slice(1)}`, failed };
+  return { text: rowWords(click.what, click.ran), failed };
 }
 /** Each click's verb on a row, and the word before its tools. */
 const ROW_VERBS: Record<PluginTurn, [string, string]> = { on: ['Turned on', 'in'], 'let-in': ['Turned on', 'in'], add: ['Added', 'in'], off: ['Turned off', 'in'], 'keep-out': ['Turned off', 'in'],
@@ -202,11 +198,11 @@ function rowWords(what: PluginTurn, { done, stopped }: NonNullable<PluginClick['
   return `${verb} ${to} ${tools(went)}${missed.length ? `, not ${to} ${tools(missed)}` : ''}`;
 }
 
-/** A plugin's latest click in the page's list, on its row (`onRow`: in one line, clickWords) and its page (its whole words, wrapping: style.css .plugin-click). */
+/** A plugin's latest click in the page's list: on its row (`onRow`), through its ended line; on its page, only while it waits or runs (the ended result is in the header, or in the status bar when there is nothing to act on). */
 export function clickNote(entry: MarketplaceView, plugin: string, onRow = false): HTMLElement | null {
   const click = clickOn(entry.source, plugin);
-  if (!click) return null;
-  const { text, failed } = clickWords(click, onRow);
+  if (!click || (!onRow && (click.ran || click.state === 'ended'))) return null;
+  const { text, failed } = clickWords(click);
   const glyph = click.state === 'waiting' ? icon('clock', 12) : !click.ran ? icon('refresh-cw', 12, 'spin') : icon(failed ? 'triangle-alert' : 'check', 12);
   return h(`span.plugin-click${failed ? '.failed' : ''}`, { 'data-click': click.state }, glyph, h('span', {}, text));
 }

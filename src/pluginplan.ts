@@ -359,7 +359,7 @@ export interface LastRun { done: PluginDone[]; undo: boolean; home: string; /** 
   stop?: ResultLine;
   /** The plugins a run that stopped never reached (pluginstate.ts applyPluginOps). */
   unreached?: { source: string; plugin: string }[];
-  /** Appended profileLeftUse sentence when the run ended every profile in use (pluginstate.ts, pluginspage.ts). */
+  /** Appended app.ts profileEndedLine words (`Everyday · changed`, or profileLeftUse's sentence) when the run ended every profile in use (pluginstate.ts, pluginspage.ts). */
   profileLine?: string;
   /**
    * Set when a plugin's switch made the run (marketplaces.ts turn): the plugin's entry before it (null: none) and its Undo as main gave it (`back`).
