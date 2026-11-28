@@ -560,15 +560,27 @@ function syncEverythingRow(): HTMLElement | null {
     if (told.kind !== 'taken-in' || state.dismissed.has(told.history)) return [];
     const ids = told.histories?.length ? told.histories : [told.history];
     const covered = !!takenBack && ids.every(id => takenBack.has(id));
-    const marks = told.items.map((_, index) => (told.keys?.[index] ? itemFile(settingsFiles, kind, told.keys[index], told.history) : undefined));
-    const text = sentences(libraryWords[kind]).takenInParts(told, { history: !covered, lead: false })
-      .flatMap<Child>(part => (typeof part === 'string' ? [part] : [part.name, marks[part.index]?.mark]));
-    return [{ kind, covered, marks, text }];
+    const marks = told.keys.map(key => itemFile(settingsFiles, kind, key, told.history));
+    const parts = sentences(libraryWords[kind]).takenInParts(told, { history: !covered, lead: false });
+    const historyTail = !covered ? parts.pop() as string : undefined;
+    // Keep each name with its mark and trailing punctuation, and the History link with its sentence, so wrapping leaves none alone.
+    const text = parts.map<Child>((part, at) => {
+      if (typeof part !== 'string') {
+        const next = parts[at + 1], punct = typeof next === 'string' && /^[,.;:]/.test(next) ? next[0] : '';
+        const mark = marks[part.index]?.mark;
+        return mark ? h('span.setting-added-name', {}, part.name, mark, punct) : `${part.name}${punct}`;
+      }
+      const prev = parts[at - 1];
+      return prev && typeof prev !== 'string' && /^[,.;:]/.test(part) ? part.slice(1) : part;
+    });
+    if (historyTail) text.push(' ', h('span.setting-added-tail', {}, historyTail.trimStart(),
+      h('button.text-action', { type: 'button', id: `setting-sync-everything-added-${kind}-action`, onclick: () => showPage('history') }, 'History')));
+    return [{ kind, marks, text }];
   }));
   const file = placePanel(settingsFiles, entries.flatMap(entry => entry.marks));
-  const added = entries.flatMap(({ kind, covered, marks, text }) => {
+  const added = entries.flatMap(({ kind, marks, text }) => {
     const panel = file && marks.includes(file.mark) ? file.panel : null;
-    const line = messageLine({ text, tone: 'done', action: covered ? undefined : { label: 'History', run: () => showPage('history') } }, { id: `setting-sync-everything-added-${kind}`, anchored: !!panel });
+    const line = messageLine({ text, tone: 'done' }, { id: `setting-sync-everything-added-${kind}`, anchored: !!panel });
     return panel ? [line, panel] : [line];
   });
   const hint = cannot ?? 'Also adds what turns up in a tool; Automatic sync in the status bar keeps what’s already in Central Knot in step.';

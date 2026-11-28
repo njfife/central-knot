@@ -355,8 +355,8 @@ test('editing a taken-in skill in its tool restores History on its line while th
       ...emptyKind(),
       library: { notes: live('notes', 'v1'), edited: live('edited', 'v2') },
       notices: [
-        { kind: 'taken-in', items: ['notes'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes'] },
-        { kind: 'taken-in', items: ['edited'], from: ['claude-cli'], history: 'take-edited', histories: ['take-edited'] },
+        { kind: 'taken-in', items: ['notes'], keys: ['notes'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes'] },
+        { kind: 'taken-in', items: ['edited'], keys: ['edited'], from: ['claude-cli'], history: 'take-edited', histories: ['take-edited'] },
       ],
     },
   });
@@ -397,16 +397,19 @@ test('Synchronize everything marks added items Central Knot holds, opens the fil
   // Held items get marks (by key even when name differs), deleted/found-only gets none, same item on two lines gets distinct ids.
   assert.deepEqual(['file-skills-notes-take-1', 'file-skills-gone-take-1', 'file-skills-notes-take-2', 'file-skills-lint-take-2'].map(id => !!findById(rendered, id)), [true, false, true, true]);
   assert.equal(textOf(kids()[0]), 'Added 2 skills from Claude Code: Notes and Gone. History can undo each.History');
+  const partsOf = (node: unknown): string[] => (typeof node === 'string' ? (node ? [node] : []) : !node || typeof node !== 'object' ? []
+    : (node as FakeNode).tag === 'button' ? [`[${(node as FakeNode).attrs.id}]`] : ((node as FakeNode).children ?? []).flatMap(partsOf));
+  assert.deepEqual(partsOf(kids()[1].querySelector('.setting-message-text')),
+    ['Added 2 skills from Claude Code and Codex: ', 'Notes', '[file-skills-notes-take-2]', ' and ', 'lint', '[file-skills-lint-take-2]', '.', ' ', 'History can undo each.', '[setting-sync-everything-added-skills-action]']);
   findById(rendered, 'file-skills-notes-take-1')!.click();
   assert.deepEqual(kids().map(el => [el.attrs.id, el.classList.contains('file-anchored')]), [['setting-sync-everything-added-skills', true], ['file-panel-settings', false], ['setting-sync-everything-added-skills', false]]);
   findById(rendered, 'file-skills-notes-take-2')!.click();
   assert.deepEqual(kids().map(el => [el.attrs.id, el.classList.contains('file-anchored')]), [['setting-sync-everything-added-skills', false], ['setting-sync-everything-added-skills', true], ['file-panel-settings', false]]);
-  findById(rendered, 'file-skills-lint-take-2')!.click();
-  assert.deepEqual([findById(rendered, 'file-skills-notes-take-2')?.attrs['aria-pressed'], findById(rendered, 'file-skills-lint-take-2')?.attrs['aria-pressed'], findById(rendered, 'file-panel-settings')?.attrs['aria-label']], ['false', 'true', 'File for lint']);
   // Clearing notices (and drawing without a home) calls placePanel and drops the open file.
   const savedHome = state.home, savedNotices = savedHome.skills.notices;
   for (const clear of [() => { savedHome.skills.notices = []; }, () => { state.home = undefined; }]) {
     findById(rendered, 'file-skills-lint-take-2')!.click();
+    assert.ok(findById(rendered, 'file-panel-settings'), 'clearing case starts with the file open');
     clear();
     draw();
     state.home = savedHome;

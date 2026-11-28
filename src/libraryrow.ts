@@ -24,7 +24,10 @@ import { clockTimesApart, dayAndTime } from './model.ts';
 import { agentsKeptIn } from './presence.ts';
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import type { Change, HarnessId, ItemNotice, LibraryFacts, PluginItemNotice, TakenInNotice } from './types.ts';
-import { andList, deletedIn, harnessIds, kindNouns, pageNames, readsIt, sentence, toolName, toolsPhrase } from './words.ts';
+import { andList, andParts, deletedIn, harnessIds, kindNouns, pageNames, readsIt, sentence, toolName, toolsPhrase } from './words.ts';
+
+/** One part of a sentence naming items (`sentences().takenInParts`): plain text, or an item's name with its index in `notice.items`. */
+export type NamedPart = string | { index: number; name: string };
 
 // ---------- What a kind supplies ----------
 
@@ -800,17 +803,21 @@ export function sentences(words: RowWords) {
   /**
    * What Synchronize everything's notice says (types.ts TakenInNotice), split at each item's name (with its index in
    * `notice.items`), so Settings can put a file mark after each name while `takenInWords` joins the same parts into one
-   * sentence. `lead: false` omits the repeated "Synchronize everything" lead under Settings' own row.
+   * sentence. `history: false` drops the trailing "History can undo it/each." sentence (as on Settings while the band holds
+   * Undo); `lead: false` omits the repeated "Synchronize everything" lead under Settings' own row.
    */
-  function takenInParts(notice: Pick<TakenInNotice, 'items' | 'from' | 'settingsChanged'>, options?: { history?: boolean; lead?: boolean }): (string | { index: number; name: string })[] {
+  function takenInParts(notice: Pick<TakenInNotice, 'items' | 'from' | 'settingsChanged'>, options?: { history?: boolean; lead?: boolean }): NamedPart[] {
     const { history = true, lead = true } = options ?? {};
     const count = notice.items.length, from = andList(notice.from.map(toolName));
-    const names = notice.items.flatMap<string | { index: number; name: string }>((name, index) => (index === 0 ? [{ index, name }] : [index === count - 1 ? ' and ' : ', ', { index, name }]));
-    const head = lead ? [`Synchronize everything took in ${count} ${count === 1 ? noun : words.many}, found in ${from}: `, ...names, '.']
+    const names = andParts(notice.items.map((name, index) => ({ index, name })));
+    const head: NamedPart[] = lead ? [`Synchronize everything took in ${count} ${count === 1 ? noun : words.many}, found in ${from}: `, ...names, '.']
       : count === 1 ? [`Added ${noun} `, { index: 0, name: notice.items[0] ?? '' }, ` from ${from}.`]
       : [`Added ${count} ${words.many} from ${from}: `, ...names, '.'];
-    const tail = `${notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : ''}${history ? ` History can undo ${count === 1 ? 'it' : 'each'}.` : ''}`;
-    return tail ? [...head, tail] : head;
+    return [
+      ...head,
+      ...(notice.settingsChanged ? [` ${notice.settingsChanged.join(' ')}`] : []),
+      ...(history ? [` History can undo ${count === 1 ? 'it' : 'each'}.`] : []),
+    ];
   }
 
   /** The same sentence as plain text (the Library's notice). */
