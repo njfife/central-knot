@@ -4797,10 +4797,10 @@ async function practiceFlow() {
   const focusAfterUndo = await a.run(`document.activeElement?.id ?? ''`);
   same('keyboard Undo on Claude Code’s Plugins tab turns the plugin back on, restores the record and focus to its switch, shows the reload line, and stays on the tab',
     [readNow(tabCalls).trim(), await a.run(`document.querySelector(${JSON.stringify(tabSwitch)})?.getAttribute('aria-checked')`),
-      await a.exists(`.harness-plugin:has(${tabSwitch}) .harness-plugin-state`), readNow(pluginsJson) === pluginsRecBefore,
+      (await a.text(`.harness-plugin:has(${tabSwitch}) .harness-plugin-state`))?.trim() ?? '', readNow(pluginsJson) === pluginsRecBefore,
       (await a.text('#plugins-result .toolbar-result-text'))?.trim() ?? '', await a.exists('#header .result-reloads'),
       await a.exists('#harness-tab-plugins[aria-selected="true"]'), focusAfterUndo],
-    ['plugin enable issue-tracker@ck-test-market --scope user', 'true', false, true, 'Undone: issue-tracker back on in Claude Code.', true, true, 'harness-plugin-switch-ck-test-market-issue-tracker']);
+    ['plugin enable issue-tracker@ck-test-market --scope user', 'true', 'Still installed', true, 'Undone: issue-tracker back on in Claude Code.', true, true, 'harness-plugin-switch-ck-test-market-issue-tracker']);
   // A problem made on Plugin marketplaces stays off Codex's Plugins tab and reappears on Plugin marketplaces.
   await a.click('#nav-plugins');
   if (!(await a.exists('#marketplace-source'))) await a.click('#open-add-marketplace');
@@ -10439,10 +10439,14 @@ esac
   await a.click('#header-refresh'); await done();
   // An option saved after the home was last read: the question's own read, as it opens, finds it.
   writeFileSync(settingsPath, JSON.stringify({ ...jsonOrNothing(settingsPath), pluginConfigs: { [id]: { options: { endpoint: 'https://issues.example.test' } } } }));
+  const tabPageLink = '#harness-plugin-ck-test-market-issue-tracker';
+  const linkLeftBefore = await a.run(`document.querySelector(${JSON.stringify(tabPageLink)})?.getBoundingClientRect().left ?? -1`);
   const question = 'Uninstall issue-tracker from Claude Code? Installing it again gives the marketplace’s copy; the edits to this one are lost. Its saved options there are deleted for good.';
   await a.click(`#${uninstallFrom}`);
   same('Uninstall… asks in its row first, naming the edited copy and the options saved since the last look, the focus on Cancel', [await asked(), await a.run(`document.activeElement?.id`)],
     [question, `${uninstallFrom}-cancel`]);
+  const linkLeftOpen = await a.run(`document.querySelector(${JSON.stringify(tabPageLink)})?.getBoundingClientRect().left ?? -1`);
+  check('Its page stays put horizontally while Uninstall… asks', Math.abs(linkLeftOpen - linkLeftBefore) < 1, [linkLeftBefore, linkLeftOpen]);
   const callsAsked = calls().length;
   await a.press('Escape');
   same('Escape closes the question, runs nothing, and gives the focus back to Uninstall…', [await a.exists('.uninstall-ask'), calls().length, await a.run(`document.activeElement?.id`)], [false, callsAsked, uninstallFrom]);
@@ -10454,12 +10458,29 @@ esac
   await done();
   same('confirmed: Claude Code’s own uninstall with --keep-data, its data folder as it was, Claude Code kept out, the row gone, the focus on Undo, which says what it brings back',
     [calls().at(-1), treeOf(join(home, '.claude/plugins/data')), entry()?.on, entry()?.except, await a.exists(`#${tabSwitch}`), await a.run(`document.activeElement?.id`), await a.text('#plugins-result .toolbar-result-text'), await a.run(`document.querySelector('#plugins-undo')?.title`)],
-    ['plugin uninstall issue-tracker@ck-test-market --scope user --keep-data', dataBefore, false, ['pi-cli'], false, 'plugins-undo', 'issue-tracker: uninstalled from Claude Code.',
+    ['plugin uninstall issue-tracker@ck-test-market --scope user --keep-data', dataBefore, false, ['pi-cli'], false, 'plugins-undo', 'issue-tracker: uninstalled from Claude Code; its saved options were deleted.',
       'Installs issue-tracker again in Claude Code, from the marketplace, without its saved options.']);
   await a.click('#plugins-undo');
   await done();
   same('Undo installs it in Claude Code again, the record as before, the focus on the row’s switch, and says what was not brought back', [calls().at(-1), installed(), entry()?.on, entry()?.except, await a.run(`document.activeElement?.id`), await a.text('#plugins-result .toolbar-result-text')],
     ['plugin install issue-tracker@ck-test-market --scope user', true, true, ['pi-cli'], tabSwitch, 'Undone: issue-tracker reinstalled in Claude Code, without its saved options.']);
+  // At 860×600 (sidebar open, light and dark): the consequential Undo keeps #366's Row 2 reload chip and Show all in the 48px header,
+  // stays quiet in the status bar, and opening Show all reveals the whole sentence and reload row without covering the tool switcher or tabs.
+  await sizeTo(a, ...SMALLEST);
+  if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+  for (const look of ['light', 'dark']) {
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+    await themeSettled();
+    const fit = await a.run(`(() => { const h = document.querySelector('#header'), more = document.querySelector('#problems-show-all'), bar = document.querySelector('#announcement'); return [h?.offsetHeight ?? 0, document.querySelector('#header .result-reloads #outcome-copy-claude-cli')?.dataset.copy ?? '', !more?.hidden ? more?.textContent?.trim() ?? '' : '', !!bar?.classList.contains('visually-hidden')]; })()`);
+    same(`consequential Undo keeps 48px header with reload chip, Show all, and quiet status bar at 860 (${look})`, fit, [48, '/reload-plugins', 'Show all', true]);
+  }
+  await a.click('#problems-show-all');
+  same('Show all opens the whole sentence and Claude Code’s reload row without covering the tool switcher or tabs',
+    await a.run(`(() => { const w = document.querySelector('#header #result-whole.result-whole')?.getBoundingClientRect(), b = document.querySelector('.harness-bar')?.getBoundingClientRect(), t = document.querySelector('#result-whole .toolbar-result-text'); return [!!w && !!b && w.bottom <= b.top + 1, !!t && t.scrollHeight <= t.clientHeight + 1 && t.scrollWidth <= t.clientWidth + 1, document.querySelector('#problems-show-all')?.textContent?.trim() ?? '', document.querySelector('#result-whole #outcome-copy-claude-cli')?.dataset.copy ?? '']; })()`),
+    [true, true, 'Show less', '/reload-plugins']);
+  await a.click('#problems-show-all');
+  await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+  await fullSize(a);
   await a.click('#nav-plugins');
   if (!(await a.exists(box('claude-cli')))) await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 50 && (await boxIs('claude-cli'))?.[2] !== 'installed'; tries++) await wait(100);
@@ -10577,8 +10598,218 @@ esac
   same('On removes only the added rule, restoring his file byte for byte', readFileSync(codexConfig, 'utf8'), codexBoth);
   same('no page errors, a plugin’s switch', a.pageErrors, []);
   await a.quit();
+  await toolPluginsTabCases();
   await nameClashPage();
   await rootSkillPage();
+}
+
+/**
+ * Tool Plugins tab legibility cases (STEP-TOOLPAGE-T3): ambiguous titles showing marketplace inline only, real-identity
+ * unlisted dedupe, queued/running live switch states, Copilot CLI live/off, Sequence 3 (kept-off older copy uninstall,
+ * failed reinstall keeping record + Undo the rest hover, retry), unread Claude settings prompt, no-Undo completion with
+ * another tool tab open during completion, and 860 light/dark fit.
+ */
+async function toolPluginsTabCases() {
+  const home = join(scratch, 'home-t3'), data = join(scratch, 't3-data'), tools = join(scratch, 't3-tools');
+  const alphaM = join(scratch, 'market-t3-alpha'), betaM = join(scratch, 'market-t3-beta'), officialM = join(scratch, 'market-t3-official');
+  const writeMini = (root, name, plugins) => {
+    mkdirSync(join(root, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name, plugins: plugins.map(p => ({ name: p.name, description: p.description, ...(p.version ? { version: p.version } : {}), source: p.source ?? `./plugins/${p.name}` })) }, null, 2));
+    for (const p of plugins) {
+      if (p.source) continue;
+      mkdirSync(join(root, `plugins/${p.name}/skills/${p.name}`), { recursive: true });
+      writeFileSync(join(root, `plugins/${p.name}/skills/${p.name}/SKILL.md`), `---\nname: ${p.name}\ndescription: ${p.description}\n---\n\n${p.name} body.\n`);
+    }
+  };
+  writeMini(alphaM, 'alpha-market', [
+    { name: 'shared-kit', description: 'Alpha shared kit.', version: '2.0.0' },
+    { name: 'solo-kit', description: 'Unique plugin.', version: '1.0.0' },
+  ]);
+  writeMini(betaM, 'beta-market', [{ name: 'shared-kit', description: 'Beta shared kit.', version: '1.0.0' }]);
+  writeMini(officialM, 'official-market', [{ name: 'incident-io', description: 'Matched directory plugin.', source: { source: 'git-subdir', url: 'https://github.com/incident-io/skills.git', path: 'plugins/incident-io' } }]);
+
+  for (const dir of ['.claude/plugins', '.copilot', '.codex']) mkdirSync(join(home, dir), { recursive: true });
+  const cacheCopy = (market, name, ver, description = `${name}.`) => {
+    const dir = join(home, `.claude/plugins/cache/${market}/${name}/${ver}`);
+    mkdirSync(join(dir, `skills/${name}`), { recursive: true });
+    writeFileSync(join(dir, `skills/${name}/SKILL.md`), `---\nname: ${name}\ndescription: ${description}\n---\n\n${name} body.\n`);
+    return dir;
+  };
+  const sharedAlpha1 = cacheCopy('alpha-market', 'shared-kit', '1.0.0', 'Alpha shared kit.');
+  const sharedAlpha2 = cacheCopy('alpha-market', 'shared-kit', '2.0.0', 'Alpha shared kit.');
+  const sharedBeta1 = cacheCopy('beta-market', 'shared-kit', '1.0.0', 'Beta shared kit.');
+  const soloAlpha1 = cacheCopy('alpha-market', 'solo-kit', '1.0.0', 'Unique plugin.');
+  const dirIncident = cacheCopy('anthropic-plugin-directory', 'incident-io', '1.0.0');
+  const dirLone = cacheCopy('anthropic-plugin-directory', 'lone-dir', '1.0.0');
+  const privShared = cacheCopy('private-market', 'shared-kit', '1.0.0');
+
+  const claudeInstalled = join(home, '.claude/plugins/installed_plugins.json');
+  const claudeSettings = join(home, '.claude/settings.json');
+  writeFileSync(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({
+    'alpha-market': { source: { source: 'git', url: alphaM } },
+    'beta-market': { source: { source: 'git', url: betaM } },
+    'official-market': { source: { source: 'git', url: officialM } },
+  }, null, 2));
+  writeFileSync(claudeInstalled, JSON.stringify({
+    version: 2,
+    plugins: {
+      'shared-kit@alpha-market': [{ scope: 'user', installPath: sharedAlpha1, version: '1.0.0' }],
+      'shared-kit@beta-market': [{ scope: 'user', installPath: sharedBeta1, version: '1.0.0' }],
+      'solo-kit@alpha-market': [{ scope: 'user', installPath: soloAlpha1, version: '1.0.0' }],
+      'incident.io@anthropic-plugin-directory': [{ scope: 'user', installPath: dirIncident, version: '1.0.0', directoryRepositoryKey: 'github.com/incident-io/skills#plugins/incident-io' }],
+      'shared-kit@private-market': [{ scope: 'user', installPath: privShared, version: '1.0.0' }],
+      'lone-dir@anthropic-plugin-directory': [{ scope: 'user', installPath: dirLone, version: '1.0.0' }],
+    },
+  }, null, 2));
+  writeFileSync(claudeSettings, JSON.stringify({ enabledPlugins: {} }, null, 2));
+  writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({
+    extraKnownMarketplaces: { 'alpha-market': { source: { source: 'directory', path: alphaM } } },
+    enabledPlugins: { 'solo-kit@alpha-market': true },
+  }, null, 2));
+
+  mkdirSync(join(tools, '.local/bin'), { recursive: true });
+  writeFileSync(join(tools, '.local/bin/claude'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0
+[ "$1" = "plugin" ] || exit 9
+act="$2"; id="$3"
+case "$act" in
+  disable|enable)
+    [ -f "$HOME/slow" ] && sleep 2
+    "${process.execPath}" -e 'const fs=require("fs"),f=process.argv[1],id=process.argv[2],on=process.argv[3]==="enable";const j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};j.enabledPlugins={...j.enabledPlugins,[id]:on};fs.writeFileSync(f,JSON.stringify(j,null,2));' "$HOME/.claude/settings.json" "$id" "$act"
+    ;;
+  uninstall)
+    [ -f "$HOME/slow-uninstall" ] && sleep 2
+    "${process.execPath}" -e 'const fs=require("fs"),fi=process.argv[1],fs2=process.argv[2],id=process.argv[3];const i=JSON.parse(fs.readFileSync(fi,"utf8"));delete i.plugins[id];fs.writeFileSync(fi,JSON.stringify(i,null,2));try{const s=JSON.parse(fs.readFileSync(fs2,"utf8"));delete s.enabledPlugins?.[id];delete s.pluginConfigs?.[id];fs.writeFileSync(fs2,JSON.stringify(s,null,2));}catch{}' "$HOME/.claude/plugins/installed_plugins.json" "$HOME/.claude/settings.json" "$id"
+    ;;
+  install)
+    [ -f "$HOME/fail-install" ] && echo "Marketplace unreachable." >&2 && exit 9
+    "${process.execPath}" -e 'const fs=require("fs"),fi=process.argv[1],id=process.argv[2],p=process.argv[3];const i=JSON.parse(fs.readFileSync(fi,"utf8"));i.plugins[id]=[{scope:"user",installPath:p,version:"2.0.0"}];fs.writeFileSync(fi,JSON.stringify(i,null,2));' "$HOME/.claude/plugins/installed_plugins.json" "$id" '${sharedAlpha2}'
+    ;;
+  *) exit 9 ;;
+esac
+`, { mode: 0o755 });
+  writeFileSync(join(tools, '.local/bin/copilot'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0
+[ "$1" = "plugin" ] && { [ "$2" = "uninstall" ] || [ "$2" = "install" ]; } || exit 9
+"${process.execPath}" -e 'const fs=require("fs"),f=process.argv[1],id=process.argv[2],on=process.argv[3]==="install";const j=JSON.parse(fs.readFileSync(f,"utf8"));j.enabledPlugins={...j.enabledPlugins,[id]:on};fs.writeFileSync(f,JSON.stringify(j,null,2));' "$HOME/.copilot/settings.json" "$3" "$2"
+`, { mode: 0o755 });
+  writeFileSync(join(tools, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.143.0" && exit 0\nexit 9\n', { mode: 0o755 });
+
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  const a = await launch(data, [], tools);
+  const done = async () => { for (let tries = 0; tries < 120 && (await a.run(`document.body.dataset.busy === 'true' || !!document.querySelector('.plugin-click')`)); tries++) await wait(100); await a.settle(); };
+  const asked = async () => { for (let tries = 0; tries < 100 && (await a.run(`document.querySelector('.uninstall-ask .delete-now')?.disabled !== false`)); tries++) await wait(100); return a.text('.uninstall-ask .band-text'); };
+
+  for (const m of [alphaM, betaM, officialM]) same(`added ${m}`, await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(m)}).then(r => r.problem ?? 'added')`), 'added');
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 60 && !(await a.exists('#harness-plugin-alpha-market-shared-kit')); tries++) await wait(100);
+
+  // 1. Ambiguous titles show marketplace inline; unique titles do not.
+  same('ambiguous plugin titles show marketplace inline while unique titles stay bare',
+    await a.run(`(() => { const m = id => document.querySelector('.harness-plugin:has(#' + id + ') .harness-plugin-market')?.textContent ?? null; return [m('harness-plugin-alpha-market-shared-kit'), m('harness-plugin-beta-market-shared-kit'), m('harness-plugin-alpha-market-solo-kit'), m('harness-plugin-official-market-incident-io')]; })()`),
+    [' · alpha-market', ' · beta-market', null, null]);
+
+  // 2. Real installed identity for #harness-plugins-unlisted: matched Anthropic Directory install excluded; distinct same-name and unmatched directory survive.
+  const unlisted = await a.text('#harness-plugins-unlisted') ?? '';
+  check('unlisted notice excludes matched Anthropic Directory install and keeps distinct same-name and unmatched directory installs',
+    !/incident\.io/.test(unlisted) && unlisted.includes('shared-kit (private-market)') && unlisted.includes('lone-dir (anthropic-plugin-directory)'), unlisted);
+
+  // 3. Queued and running live states on Claude Code's Plugins tab switches.
+  writeFileSync(join(home, 'slow'), '');
+  await a.run(`document.getElementById('harness-plugin-switch-beta-market-shared-kit').click(); document.getElementById('harness-plugin-switch-alpha-market-solo-kit').click();`);
+  for (let tries = 0; tries < 50 && !(await a.exists('[data-click="running"]')); tries++) await wait(50);
+  const liveSnap = await a.run(`(() => { const row = id => document.querySelector('.harness-plugin:has(#' + id + ')'); const r1 = row('harness-plugin-beta-market-shared-kit'), r2 = row('harness-plugin-alpha-market-solo-kit'); return [r1?.querySelector('.plugin-click')?.dataset.click ?? null, r1?.querySelector('.plugin-click')?.textContent?.trim() ?? '', r2?.querySelector('.plugin-click')?.dataset.click ?? null, r2?.querySelector('.plugin-click')?.textContent?.trim() ?? '']; })()`);
+  same('queued and running clicks show live state on their rows', liveSnap,
+    ['running', 'Turning off in Claude Code…', 'waiting', 'Waiting to turn off in Claude Code']);
+  rmSync(join(home, 'slow'));
+  await done();
+  same('after settling, turned-off row shows Off, kept installed',
+    await a.run(`document.querySelector('.harness-plugin:has(#harness-plugin-alpha-market-solo-kit) .harness-plugin-state')?.textContent?.trim() ?? ''`),
+    'Off, kept installed');
+  await a.click('#harness-plugin-switch-alpha-market-solo-kit');
+  await done();
+
+  // 4. Copilot CLI live/off on Copilot CLI's Plugins tab: no Uninstall…, switch turns off (Off, kept installed) and Undo restores.
+  await a.click('#harness-switch-copilot-cli');
+  for (let tries = 0; tries < 50 && !(await a.exists('#harness-plugin-switch-alpha-market-solo-kit')); tries++) await wait(100);
+  const copilotHasUninstall = await a.exists('#harness-plugin-uninstall-alpha-market-solo-kit');
+  await a.click('#harness-plugin-switch-alpha-market-solo-kit');
+  await done();
+  const copilotLiveOff = await a.run(`document.querySelector('.harness-plugin:has(#harness-plugin-alpha-market-solo-kit) .harness-plugin-state')?.textContent?.trim() ?? ''`);
+  await a.click('#plugins-undo');
+  await done();
+  same('Copilot CLI live copy has no Uninstall…, turns off to Off, kept installed, and Undo turns it back on',
+    [copilotHasUninstall, copilotLiveOff, await a.run(`document.getElementById('harness-plugin-switch-alpha-market-solo-kit')?.getAttribute('aria-checked')`)],
+    [false, 'Off, kept installed', 'true']);
+
+  // 5. Sequence 3: turn shared-kit@alpha-market (1.0.0 vs catalog 2.0.0) off, uninstall older copy (question names marketplace for shared title), fail reinstall on Undo, then retry Undo.
+  await a.click('#harness-switch-claude-cli');
+  for (let tries = 0; tries < 50 && !(await a.exists('#harness-plugin-switch-alpha-market-shared-kit')); tries++) await wait(100);
+  await a.click('#harness-plugin-switch-alpha-market-shared-kit');
+  await done();
+  await a.click('#harness-plugin-uninstall-alpha-market-shared-kit');
+  same('older kept-off copy uninstall prompt names the marketplace for a shared title and the lost version', await asked(),
+    'Uninstall shared-kit (alpha-market) from Claude Code? Installing it again gives 2.0.0; this 1.0.0 can’t be brought back.');
+  await a.click('#harness-plugin-uninstall-alpha-market-shared-kit-confirm');
+  await done();
+  const recAfterUninstall = readFileSync(join(home, '.central-knot/plugins.json'), 'utf8');
+  same('uninstall of kept-off copy gives Undo hover naming marketplace and off as it was', await a.run(`document.getElementById('plugins-undo')?.title ?? ''`),
+    'Installs shared-kit (alpha-market) again in Claude Code, from the marketplace, off as it was.');
+  writeFileSync(join(home, 'fail-install'), '');
+  await a.click('#plugins-undo');
+  await done();
+  same('failed reinstall on Undo keeps record as uninstall left it, keeps row absent, shows failure, and Undo the rest keeps accurate hover',
+    [readFileSync(join(home, '.central-knot/plugins.json'), 'utf8') === recAfterUninstall, await a.exists('#harness-plugin-alpha-market-shared-kit'), await a.exists('#header .plugin-problems'),
+      (await a.text('#plugins-undo'))?.trim() ?? '', await a.run(`document.getElementById('plugins-undo')?.title ?? ''`)],
+    [true, false, true, 'Undo the rest', 'Installs shared-kit (alpha-market) again in Claude Code, from the marketplace, off as it was.']);
+  rmSync(join(home, 'fail-install'));
+  await a.click('#plugins-undo');
+  await done();
+  same('retrying Undo the rest brings shared-kit back off as it was',
+    [await a.exists('#harness-plugin-alpha-market-shared-kit'), await a.run(`document.querySelector('.harness-plugin:has(#harness-plugin-alpha-market-shared-kit) .harness-plugin-state')?.textContent?.trim() ?? ''`)],
+    [true, 'Off, kept installed']);
+
+  // 6. Unread Claude Code settings.json when opening Uninstall… warns settings couldn't be read instead of promising nothing is lost.
+  const validClaudeSettings = readFileSync(claudeSettings, 'utf8');
+  writeFileSync(claudeSettings, '{broken');
+  await a.click('#harness-plugin-uninstall-alpha-market-solo-kit');
+  const unreadAsk = await asked();
+  await a.press('Escape');
+  writeFileSync(claudeSettings, validClaudeSettings);
+  same('unreadable settings.json warns record couldn’t be read instead of promising nothing is lost', unreadAsk,
+    'Uninstall solo-kit from Claude Code? It can be installed again. Claude Code’s record of its plugins couldn’t be read, so it isn’t known whether its saved options will be deleted.');
+
+  // 7. No-longer-offered plugin (irreversible uninstall, no Undo) with Codex tab open during completion.
+  writeMini(alphaM, 'alpha-market', [{ name: 'shared-kit', description: 'Alpha shared kit.', version: '2.0.0' }]);
+  await a.click('#header-refresh');
+  await done();
+  await a.click('#harness-plugin-uninstall-alpha-market-solo-kit');
+  same('no-longer-offered uninstall prompt says there is no Undo', await asked(),
+    'Uninstall solo-kit from Claude Code? It is no longer offered, so it can’t be installed again: there is no Undo.');
+  writeFileSync(join(home, 'slow-uninstall'), '');
+  await a.run(`document.getElementById('harness-plugin-uninstall-alpha-market-solo-kit-confirm').click(); document.getElementById('harness-switch-codex-cli').click();`);
+  for (let tries = 0; tries < 100 && JSON.parse(readFileSync(claudeInstalled, 'utf8')).plugins['solo-kit@alpha-market']; tries++) await wait(100);
+  await done();
+  rmSync(join(home, 'slow-uninstall'));
+  same('Codex tab open during Claude Code’s irreversible uninstall neither shows its result nor offers Undo',
+    [await a.exists('#plugins-result'), await a.exists('#plugins-undo')], [false, false]);
+  await a.click('#harness-switch-claude-cli');
+  for (let tries = 0; tries < 50 && !(await a.exists('#plugins-result')); tries++) await wait(100);
+  same('returning to Claude Code’s Plugins tab shows the irreversible completion in the header without Undo and says Can’t be undone',
+    [(await a.text('#plugins-result .toolbar-result-text'))?.trim() ?? '', await a.exists('#plugins-undo'), await a.run(`document.getElementById('header')?.offsetHeight ?? 0`)],
+    ['solo-kit: uninstalled from Claude Code. Can’t be undone.', false, 48]);
+
+  // 8. Check both 860 themes fit without overflow or clipping.
+  for (const look of ['light', 'dark']) {
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+    await fitsAtMinimum(a, `Claude Code Plugins tab (${look})`);
+  }
+  await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+  same('no page errors, tool Plugins tab legibility cases', a.pageErrors, []);
+  await a.quit();
 }
 
 /**

@@ -21,7 +21,7 @@ import { harnessIds } from './harnesses.ts';
 import { errorCode, liftFirst, syncGate, writeDurably, type ShareContext } from './share.ts';
 import type { Listed } from './plugintext.ts';
 import { readRecord as readPartsRecord, type PartsRecord, type PluginNow } from './partsmigrate.ts';
-import { MARKET_UNREAD, NO_LONGER_OFFERED, SKILL_SWITCH_TESTED_FROM, blocked, cantInstallAgain, copyDiffers, partWords, firstReadWaits, heldReason, inUseIn, keptOff, keptReason, marketTitle, notCarried, recordUnread, stateOf, toolNow, unavailable, uninstallsWhole, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
+import { MARKET_UNREAD, NO_LONGER_OFFERED, SKILL_SWITCH_TESTED_FROM, blocked, cantInstallAgain, copyDiffers, partWords, firstReadWaits, heldReason, inUseIn, installId, keptOff, keptReason, marketTitle, notCarried, recordUnread, stateOf, toolNow, unavailable, uninstallsWhole, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
 import { readLink } from './sourcelink.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
 import { leftOutSentence, pageNames, toPluginsLabel, toolName } from './words.ts';
@@ -202,9 +202,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     for (const plugin of plugins) {
       const pairs = await Promise.all(tools.map(async tool => {
         const read = held.get(tool) ?? await engine.installState(ctx, tool, catalog.name, plugin.name, plugin.entry);
-        const own: InstallState = read.state === 'installed' && offIn.get(tool)?.has(`${plugin.name}@${catalog.name}`) ? { ...read, off: true } : read;
-        // Claude Code may have this same plugin from the Anthropic Directory instead.
-        return [tool, own.state === 'not-installed' && tool === 'claude-cli' ? (await engine.fromDirectory(ctx, catalog, plugin)) ?? own : own] as const;
+        // Claude Code may have this same plugin from the Anthropic Directory instead; check its Off flag by its real install id.
+        const found = read.state === 'not-installed' && tool === 'claude-cli' ? (await engine.fromDirectory(ctx, catalog, plugin)) ?? read : read;
+        const id = found.state === 'installed' && found.directory ? found.directory : installId(plugin.name, catalog.name);
+        return [tool, found.state === 'installed' && offIn.get(tool)?.has(id) ? { ...found, off: true } : found] as const;
       }));
       states[plugin.name] = Object.fromEntries(pairs);
     }
@@ -257,7 +258,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
       if (state?.state !== 'installed') return undefined;
       const { skills, commands, agents, instructions } = await installedContents(tool as HarnessId, state.path, item.entry, !!item.isMarketplaceRoot);
-      return [tool, { skills, commands, agents, instructions, version: state.version, ...(state.ownSettings ? { ownSettings: true as const } : {}) }] as const;
+      return [tool, { skills, commands, agents, instructions, version: state.version, ...(state.ownSettings ? { ownSettings: state.ownSettings } : {}) }] as const;
     }));
     return Object.fromEntries(copies.filter(copy => !!copy));
   }
@@ -808,7 +809,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     // Uninstall's Undo puts it back as it was: the marketplace's copy installed (what the uninstall deleted with it staying deleted:
     // `deleted`), then turned off again where it was off; none where it can't be installed again (cantInstallAgain).
     const reversed = reverse(ran.done), copy = tool ? stateOf(entry, plugin, tool) : undefined, was = copy?.state === 'installed' ? copy : undefined;
-    const reinstall = reversed.map(op => (was?.ownSettings ? { ...op, deleted: true as const } : op));
+    if (what === 'uninstall' && was?.ownSettings) for (const step of ran.done) if (step.action === 'remove' && step.report.changed) step.deleted = was.ownSettings;
+    const reinstall = reversed.map(op => (was?.ownSettings ? { ...op, deleted: was.ownSettings } : op));
     const offAgain = was?.off ? reversed.map(op => ({ ...op, action: 'plugin-off' as const })) : [];
     const back = what !== 'uninstall' ? reversed : cantInstallAgain(entry, plugin) ? [] : [...reinstall, ...offAgain];
     // Pi, OpenCode and Antigravity: its items (pluginlibrary.ts).
@@ -846,7 +848,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const done: PluginDone[] = [];
     for (const op of items) if (id && host.share) done.push(...(await itemsBack(host.share(), tools, id, op.items ?? [], op, itemTools(tools))).done);
     const installs = await runPlan(back.filter(op => op.action === 'install'), ownApi, String(home));
-    for (const step of installs.done) if (back.some(op => op.action === 'install' && op.tool === step.tool && op.deleted)) step.deleted = true;
+    for (const step of installs.done) {
+      const deleted = back.find(op => op.action === 'install' && op.tool === step.tool && op.deleted)?.deleted;
+      if (deleted) step.deleted = deleted;
+    }
     if (installs.stopped || !installs.done.every(step => succeeded(step.report))) {
       await changeRecord(String(home), now => withEntry(now, source, plugin, current));
       return { ...installs, done: [...done, ...installs.done] };
@@ -1067,7 +1072,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
     const step = record(op);
     return !!step && step.source === source && step.plugin === plugin && isName(step.marketName) && harnessIds.includes(step.tool as HarnessId)
       && ['install', 'remove', 'plugin-off', 'plugin-on', 'items-back'].includes(step.action as string)
-      && (step.keptOff === undefined || step.keptOff === true) && (step.deleted === undefined || step.deleted === true)
+      && (step.keptOff === undefined || step.keptOff === true) && (step.deleted === undefined || step.deleted === true || step.deleted === 'unknown')
       && (step.items === undefined || (step.action === 'items-back' && Array.isArray(step.items) && step.items.length <= 5000 && step.items.every(isItemState)));
   };
   const isEntry = (source: string, plugin: string) => (value: unknown): value is PluginEntry => {
