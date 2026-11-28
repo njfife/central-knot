@@ -1,5 +1,5 @@
 // The page's element builder (h) and the small controls every page draws with: buttons, switches (toggle), checkboxes, icons,
-// collapsible folds (fold), info marks and their top-layer detail cards (infoMark, infoCardId, cardPlace, closeInfoCard, syncInfoCard), empty states,
+// collapsible folds (fold), menu keyboard navigation (menuKeys), info marks and their top-layer detail cards (infoMark, infoCardId, cardPlace, placePopover, closeInfoCard, syncInfoCard), empty states,
 // section headings, shortened paths and file blocks, the layout steps run after a render (afterLayout); a press and its release
 // (the pointer's, or Space's on a button) counting as one click when a redraw replaced the control between them
 // (keepClicksAcrossRedraws), and whether a press on a text was a click or a drag, which every click on a text asks
@@ -449,6 +449,34 @@ export function closeInfoCard(): boolean {
   if (card?.matches(':popover-open')) card.hidePopover();
   return true;
 }
+/** Places a top-layer popover below `anchor` (or above when short of room), clear of `#status` and any `.scroll` bar; returns false when `checkView` finds `anchor` out of view. */
+export function placePopover(anchor: HTMLElement, box: HTMLElement, block: { top: number; bottom: number } = anchor.getBoundingClientRect(), checkView = false): boolean {
+  if (checkView && !markInView(anchor)) return false;
+  // Reset to 0 before measuring so a popover placed near the right edge measures its natural width after a narrower resize.
+  box.style.left = box.style.top = '0px';
+  const status = document.getElementById('status')?.getBoundingClientRect();
+  const height = status && status.height > 0 && status.top > 0 ? Math.min(window.innerHeight, status.top) : window.innerHeight;
+  const scroller = anchor.closest('.scroll');
+  const width = scroller ? Math.min(window.innerWidth, scroller.getBoundingClientRect().left + scroller.clientWidth) : window.innerWidth;
+  const { left, top } = cardPlace(anchor.getBoundingClientRect(), box.getBoundingClientRect(), { width, height }, block);
+  Object.assign(box.style, { left: `${left}px`, top: `${top}px` });
+  return true;
+}
+/** Arrow keys, Home and End move between enabled menu items inside `event.currentTarget`; Escape cancels and calls `close`. */
+export function menuKeys(event: KeyboardEvent, close: () => void): void {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    close();
+    return;
+  }
+  const choices = [...(event.currentTarget as Element).querySelectorAll<HTMLElement>('button[role^="menuitem"]:not(:disabled)')];
+  const at = choices.indexOf(document.activeElement as HTMLElement);
+  const to = { ArrowDown: at + 1, ArrowUp: at <= 0 ? choices.length - 1 : at - 1, Home: 0, End: choices.length - 1 }[event.key];
+  if (to === undefined || !choices.length) return;
+  event.preventDefault();
+  choices[to % choices.length]!.focus();
+}
 /** Reopens and places the active info card (renderer.ts renderWindow, scroll, resize); clears it when gone or out of view. */
 export function syncInfoCard(checkView = false): void {
   if (!openCard) return;
@@ -456,19 +484,7 @@ export function syncInfoCard(checkView = false): void {
   const card = document.getElementById(infoCardId(openCard.id));
   if (!mark || !card || (checkView && !markInView(mark))) { closeInfoCard(); return; }
   if (!card.matches(':popover-open')) card.showPopover();
-  // Reset to 0 before measuring so a card placed near the right edge measures its natural width after a narrower resize.
-  card.style.left = card.style.top = '0px';
-  const block = (mark.closest('[data-info-block]') ?? mark).getBoundingClientRect();
-  // No card covers the status bar: the height cards are placed in ends at #status's top when shown.
-  const status = document.getElementById('status')?.getBoundingClientRect();
-  const height = status && status.height > 0 && status.top > 0 ? Math.min(window.innerHeight, status.top) : window.innerHeight;
-  // Nor a scroll bar: the width they are placed in ends where the page's scrolling area's own scroll bar begins.
-  const scroller = mark.closest('.scroll');
-  const width = scroller ? Math.min(window.innerWidth, scroller.getBoundingClientRect().left + scroller.clientWidth) : window.innerWidth;
-  const { left, top } = cardPlace(
-    mark.getBoundingClientRect(), card.getBoundingClientRect(), { width, height }, block,
-  );
-  Object.assign(card.style, { left: `${left}px`, top: `${top}px` });
+  placePopover(mark, card, (mark.closest('[data-info-block]') ?? mark).getBoundingClientRect());
 }
 function openInfoCard(id: string, pinned: boolean): void {
   clearInfoTimer(id);

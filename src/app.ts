@@ -1377,7 +1377,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
     return;
   }
   const did = !result.stopped && (!!result.made?.length || result.harnessWrites > 0);
-  if (past && libraryEntry(past)) { sayLibraryAction(page, past, result, did); return; }
+  if (past && libraryEntry(past)) { sayLibraryAction(page, past, result, did, choice); return; }
   if (past?.kind === 'everything') { sayEverything(page, past, result, switchesOn, did); return; }
   // A Pull's change to an agent's Claude Code settings alone (gitrepo.ts undoSettingsChange): the one entry with an Undo of its own,
   // an agent's (its row flashes in the Library).
@@ -1391,19 +1391,23 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
  * After a History action on a library item, a skill, an MCP server or an agent (historyactions.ts): what it did, in the words of the entry
  * it made, with that entry's own action as the way back. A refusal is said on the page, where the action was clicked.
  */
-function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult, did = true) {
+function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult, did = true, choice?: string) {
   const entry = libraryEntry(past)!, rows = [entry];
   // Refused whole (it waits for the shared skills folder, say: librarypass.ts click), it is said as a stop: nothing was done.
   const refused = result.stopped ?? (result.made?.length ? undefined : result.results.find(heldWhole)?.message);
   if (refused) { tell({ page, item: past.item, rows, text: `${past.item}: ${refused}`, warn: true, history: true, refused: true }); return; }
   const view = state.home?.[entry.kind];
-  const made = state.history.data?.find(event => event.id === past.undoneBy);
+  const made = choice
+    ? state.history.data?.find(event => result.made?.includes(event.id) && event.kind === 'current' && event.version === choice
+      && libraryEntry(event)?.kind === entry.kind && libraryEntry(event)?.key === entry.key)
+    : state.history.data?.find(event => event.id === past.undoneBy);
   const item = view?.library[entry.key];
-  const said = made && librarySentence(made, libraryWords[entry.kind], view?.tools ?? [], item, true)?.text;
+  const said = made && librarySentence(made, libraryWords[entry.kind], view?.tools ?? [], item, !choice)?.text;
   const back = made && libraryAction(made, item, entriesNow(state.home!)(made).now);
   const notDone = result.results.filter(keptBack).map(entry => entry.message);
   const text = [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...notDone].filter(Boolean).join(' ');
-  tellWritten({ page, item: past.item, rows, warn: notDone.length > 0, text, undo: back && made ? { id: made.id, label: back.label } : undefined }, result.reloads, did);
+  tellWritten({ page, item: past.item, rows, warn: notDone.length > 0, historyBand: !!choice && !!made, text,
+    undo: back && made ? { id: made.id, label: back.label } : undefined }, result.reloads, did);
   flashRow(entry);
 }
 
@@ -1479,7 +1483,7 @@ export interface Outcome {
   settingsBand?: boolean;
   /** Switch-on History entry id whose Undo this Settings band holds, so only covered take-in lines drop History (settingspage.ts). */
   everythingUndo?: string;
-  /** Shown as a band on History even without warn, reloads or profileLine: a tool's Manage click (managecard.ts, historypage.ts). */
+  /** Shown as a band on History even without warn, reloads or profileLine: a tool's Manage click or a version choice (managecard.ts, app.ts, historypage.ts). */
   historyBand?: boolean;
   /** Appended profileEndedLine words (`Everyday · changed`, or profileLeftUse's sentence) when an act ended every profile in use; keeps the result in a band (saidInStatusBar) and whole on Row 2 (matrix.ts listResult, profileSpan). */
   profileLine?: string;

@@ -18,7 +18,7 @@ import { launched, scratchFolder, tempPlaces } from './scratch.ts';
 import { standInApp, standInMac } from '../tests/macstandins.ts';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
-import { managedNow } from '../src/share.ts';
+import { managedNow, readTree } from '../src/share.ts';
 import { writesRealHome } from '../src/machine.ts';
 import { executableCandidates } from '../src/platform.ts';
 import { DEBOUNCE_MS, STANDARD_BUILD } from '../src/values.ts';
@@ -18303,12 +18303,33 @@ async function libraryFlow() {
   const sixIds = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
   const fiveIds = ['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
   const sFold = JSON.parse(readFileSync(oSkillRec, 'utf8'));
+  const seedVersion = async (key, body) => {
+    const tmp = join(O.home, '.central-knot/items/skills', key, 'versions', `_seed-${randomInt(1e9)}`);
+    mkdirSync(tmp, { recursive: true });
+    writeFileSync(join(tmp, 'SKILL.md'), text(key, body));
+    const { hash } = await readTree(tmp);
+    const dst = join(O.home, '.central-knot/items/skills', key, 'versions', hash);
+    if (existsSync(dst)) rmSync(tmp, { recursive: true, force: true });
+    else renameSync(tmp, dst);
+    return hash;
+  };
   const clashItem = sFold.items['active-skill'];
+  const clashP = await seedVersion('active-skill', 'Previous version before clash.');
+  const clashX = await seedVersion('active-skill', 'Copilot CLI conflict edit.');
+  const clashY = await seedVersion('active-skill', 'Pi conflict edit.');
+  const clashZ = await seedVersion('active-skill', 'OpenCode conflict edit.');
   clashItem.versions.push(
-    { hash: 'p', at: foldAt(20), from: { how: 'found', tool: 'claude-cli' } },
-    { hash: 'x', at: foldAt(1), from: { how: 'edited', tool: 'copilot-cli', replacedBy: clashItem.hash } },
-    { hash: 'y', at: foldAt(1), from: { how: 'edited', tool: 'pi-cli', replacedBy: clashItem.hash } },
-    { hash: 'z', at: foldAt(1), from: { how: 'edited', tool: 'opencode-cli', replacedBy: clashItem.hash } },
+    { hash: clashP, at: foldAt(20), from: { how: 'found', harness: 'claude-cli' } },
+    { hash: clashX, at: foldAt(3), from: { how: 'edited', harness: 'copilot-cli', replacedBy: clashItem.hash } },
+    { hash: clashY, at: foldAt(2), from: { how: 'edited', harness: 'pi-cli', replacedBy: clashItem.hash } },
+    { hash: clashZ, at: foldAt(1), from: { how: 'edited', harness: 'opencode-cli', replacedBy: clashItem.hash } },
+  );
+  const legacyItem = sFold.items['legacy-skill'];
+  const chosenX = await seedVersion('legacy-skill', 'Copilot CLI chosen copy.');
+  const chosenY = await seedVersion('legacy-skill', 'Pi chosen copy.');
+  legacyItem.versions.push(
+    { hash: chosenX, at: foldAt(4), from: { how: 'was-in', harness: 'copilot-cli', replacedBy: legacyItem.hash } },
+    { hash: chosenY, at: foldAt(3), from: { how: 'was-in', harness: 'pi-cli', replacedBy: legacyItem.hash } },
   );
   // The long-named entry's skill is one Central Knot holds (Off, legacy-skill's text), so its name on History has its mark.
   const longKey = 'cross-workspace-release-migration-checklist-v2';
@@ -18322,6 +18343,9 @@ async function libraryFlow() {
   skill(join(O.home, `.central-knot/items/skills/${retired}/versions`), retiredHash, text(retired, 'Kept from the last planning review.'));
   sFold.items['lapsed-notes'] = { ...structuredClone(sFold.items['legacy-skill']), key: 'lapsed-notes', name: 'lapsed-notes', on: false, applied: {}, deleted: { at: foldAt(1.05) } };
   writeFileSync(oSkillRec, `${JSON.stringify(sFold, null, 2)}\n`);
+  hFold.events.unshift(
+    { id: 'fold-foot', at: foldAt(25), key: 'active-skill', of: 'skill', item: 'active-skill', kind: 'conflict', winner: { tool: 'codex-cli', hash: clashItem.hash }, version: clashItem.hash, previous: clashP, losers: [{ tool: 'copilot-cli', hash: clashX }, { tool: 'pi-cli', hash: clashY }], orderProved: true },
+  );
   hFold.events.push(
     { id: 'fold-legacy', at: foldAt(7), key: 'instructions:old', item: 'old', kind: 'edit', winner: { tool: 'claude-cli', hash: 'a' }, losers: ['claude-cli', 'codex-cli', 'old-cli'].map(tool => ({ tool, hash: 'a' })), orderProved: true },
     { id: 'fold-two-groups', at: foldAt(6), key: 'instructions:legacy', item: 'legacy', kind: 'switched', switched: [{ tool: 'claude-cli', disabled: true }, { tool: 'copilot-cli', disabled: true }, { tool: 'codex-cli', disabled: true }, { tool: 'pi-cli', disabled: false }, { tool: 'opencode-cli', disabled: false }, { tool: 'antigravity-cli', disabled: false }], losers: [], orderProved: true },
@@ -18335,7 +18359,9 @@ async function libraryFlow() {
     { id: 'fold-gone', at: foldAt(1.1), key: retired, of: 'skill', item: retired, kind: 'deleted', losers: [], orderProved: true },
     { id: 'fold-lapsed', at: foldAt(1.05), key: 'lapsed-notes', of: 'skill', item: 'lapsed-notes', kind: 'deleted', losers: [], orderProved: true },
     { id: 'fold-five', at: foldAt(1), key: 'draft-rfc', of: 'skill', item: 'draft-rfc', kind: 'off', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: 'b' })), orderProved: true },
-    { id: 'fold-clash', at: foldAt(0.5), key: 'active-skill', of: 'skill', item: 'active-skill', kind: 'conflict', winner: { tool: 'codex-cli', hash: clashItem.hash }, version: clashItem.hash, previous: 'p', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'opencode-cli', hash: 'z' }], orderProved: true },
+    { id: 'fold-one-choice', at: foldAt(0.7), key: 'legacy-skill', of: 'skill', item: 'legacy-skill', kind: 'conflict', winner: { tool: 'codex-cli', hash: legacyItem.hash }, version: legacyItem.hash, previous: chosenX, losers: [{ tool: 'pi-cli', hash: chosenY }], orderProved: true },
+    { id: 'fold-chosen', at: foldAt(0.6), key: 'legacy-skill', of: 'skill', item: 'legacy-skill', kind: 'chosen', winner: { tool: 'codex-cli', hash: legacyItem.hash }, losers: [{ tool: 'copilot-cli', hash: chosenX }, { tool: 'pi-cli', hash: chosenY }], orderProved: true },
+    { id: 'fold-clash', at: foldAt(0.5), key: 'active-skill', of: 'skill', item: 'active-skill', kind: 'conflict', winner: { tool: 'codex-cli', hash: clashItem.hash }, version: clashItem.hash, previous: clashP, losers: [{ tool: 'claude-cli', hash: clashP }, { tool: 'copilot-cli', hash: clashX }, { tool: 'pi-cli', hash: clashY }, { tool: 'opencode-cli', hash: clashZ }], orderProved: true },
   );
   writeFileSync(hPath, `${JSON.stringify(hFold, null, 2)}\n`);
   await o.click('#header-refresh');
@@ -18402,9 +18428,9 @@ async function libraryFlow() {
         const nr = name?.getBoundingClientRect(), ar = about?.getBoundingClientRect(), br = acts?.getBoundingClientRect();
         return { buttons: [...(acts?.querySelectorAll('button') ?? [])].map(b => b.textContent?.trim()), nameW: Math.round(nr?.width ?? 0), nameWhole: !!(name && nr && nr.width > 0 && name.scrollWidth <= name.clientWidth + 1), underAbout: !!(ar && br && br.top >= ar.bottom - 1 && Math.abs(br.left - ar.left) <= 2) };
       })()`);
-      same('at 860 with five conflict buttons, the item name keeps its width in sight and actions sit under the sentence',
+      same('at 860 with conflict version menu button, the item name keeps its width in sight and actions sit under the sentence',
         [clash860.buttons, clash860.nameW >= 50, clash860.nameWhole, clash860.underAbout],
-        [['See change', 'Undo', 'Use Copilot CLI’s version', 'Use Pi’s version', 'Use OpenCode’s version'], true, true, true]);
+        [['See change', 'Undo', 'Use another version…'], true, true, true]);
     } else {
       const long1316 = await o.run(`(() => {
         const name = document.querySelector('#history-row-fold-long .history-what strong');
@@ -18499,6 +18525,135 @@ async function libraryFlow() {
   same('at 1316, bench-runner’s file opens under its row, nothing cut off', [wide.row, await o.run(CUT_OFF)], [benchFirst, []]);
   await historyShot('history-file-open-1316-dark', 'dark');
   await o.click(benchMark(benchFirst));
+  // History version-choices menu: 3 choices at 1316 fit in 1–2 lines, keys & Escape, Escape over open file panel, second row closes first,
+  // foot placement flips above, pressing a choice writes all tools + shows band with Undo (byte-for-byte back), 2→1 becomes link, and redraw closes menu focusing trigger.
+  await o.run(`document.getElementById('history-scroll').scrollTop = 0`);
+  const clash1316 = await o.run(`(() => {
+    const row = document.getElementById('history-row-fold-clash'), acts = row?.querySelector('.history-actions');
+    const one = document.getElementById('history-row-fold-one-choice');
+    return {
+      buttons: [...(acts?.querySelectorAll('button') ?? [])].map(b => b.textContent?.trim()),
+      actsH: Math.round(acts?.getBoundingClientRect().height ?? 0),
+      about: row?.querySelector('.history-about')?.textContent?.trim(),
+      folds: row?.querySelectorAll('details.fold').length ?? 0,
+      oneButtons: [...(one?.querySelectorAll('.history-actions button') ?? [])].map(b => b.textContent?.trim()),
+      oneAbout: one?.querySelector('.history-about')?.textContent?.trim(),
+    };
+  })()`);
+  same('at 1316, 3-choice conflict shows Use another version… in 1–2 lines without second sentence; 1-choice row keeps link and sentence',
+    [clash1316.buttons, clash1316.actsH <= 46, clash1316.about, clash1316.folds, clash1316.oneButtons, clash1316.oneAbout],
+    [['See change', 'Undo', 'Use another version…'], true, 'Codex’s edit was the latest, so it became the current version.', 0,
+      ['See change', 'Undo', 'Use Pi’s version'], 'Codex’s edit was the latest, so it became the current version. Pi’s is kept as a version.']);
+  await historyShot('hh2-row-1316-dark', 'dark');
+  await o.click('#history-versions-fold-clash');
+  await until(() => o.exists('#history-versions-menu-fold-clash'));
+  const menu1316 = await o.run(`(() => {
+    const m = document.getElementById('history-versions-menu-fold-clash'), t = document.getElementById('history-versions-fold-clash');
+    const mr = m.getBoundingClientRect(), tr = t.getBoundingClientRect();
+    return {
+      below: mr.top >= tr.bottom - 1,
+      head: m.querySelector('.history-menu-head')?.textContent?.trim(),
+      items: [...m.querySelectorAll('button[role="menuitem"]')].map(b => b.textContent?.trim()),
+    };
+  })()`);
+  same('at 1316, version menu opens below with provenance and 3 items, nothing cut off',
+    [menu1316, await o.run(CUT_OFF)],
+    [{ below: true, head: 'Edits from 3 of 6 tools are kept as versions.', items: ['Copilot CLI’s version', 'Pi’s version', 'OpenCode’s version'] }, []]);
+  await historyShot('hh2-menu-1316-dark', 'dark');
+  const menuKeyIds = [await o.run(`document.activeElement?.id`)];
+  for (const key of ['ArrowDown', 'End', 'Home', 'ArrowUp']) {
+    await o.press(key);
+    menuKeyIds.push(await o.run(`document.activeElement?.id`));
+  }
+  await o.press('Escape');
+  same('version menu keys cycle enabled items and Escape returns focus to trigger',
+    [menuKeyIds, await o.exists('.history-menu'), await o.run(`document.activeElement?.id`)],
+    [['history-fold-clash-copilot-cli', 'history-fold-clash-pi-cli', 'history-fold-clash-opencode-cli', 'history-fold-clash-copilot-cli', 'history-fold-clash-opencode-cli'], false, 'history-versions-fold-clash']);
+  // Second row's menu closes the first.
+  await o.click('#history-versions-fold-clash');
+  await o.click('#history-versions-fold-chosen');
+  same('opening a second row’s version menu closes the first',
+    [await o.all('.history-menu', 'e.id'), await o.run(`document.getElementById('history-versions-fold-clash')?.getAttribute('aria-expanded')`)],
+    [['history-versions-menu-fold-chosen'], 'false']);
+  await o.press('Escape');
+  // Menu open with row's file panel open: Escape closes menu first, next Escape closes file panel.
+  await o.click('#history-row-fold-clash .row-file-btn');
+  await until(() => o.exists('.file-open-box'));
+  await o.click('#history-versions-fold-clash');
+  await until(() => o.exists('#history-versions-menu-fold-clash'));
+  await o.press('Escape');
+  const afterEsc1 = [await o.exists('.history-menu'), await o.run(`document.activeElement?.id`), await o.exists('.file-open-box')];
+  await o.press('Escape');
+  same('with file panel open, first Escape closes version menu and focuses trigger, second closes file panel',
+    [afterEsc1, await o.exists('.file-open-box')],
+    [[false, 'history-versions-fold-clash', true], false]);
+  // 860 light: row picture, menu picture, 1-choice picture, foot-row menu flips above.
+  await sizeTo(o, ...SMALLEST);
+  await sidebarOpen();
+  await o.run(`document.getElementById('history-scroll').scrollTop = 0; document.activeElement?.blur?.()`);
+  await historyShot('hh2-row-860-light', 'light');
+  await o.click('#history-versions-fold-clash');
+  await until(() => o.exists('#history-versions-menu-fold-clash'));
+  same('at 860, open version menu fits without clipping', await o.run(CUT_OFF), []);
+  await historyShot('hh2-menu-860-light', 'light');
+  await o.press('Escape');
+  await o.run(`document.getElementById('history-row-fold-one-choice').scrollIntoView({ block: 'center' }); document.activeElement?.blur?.()`);
+  await historyShot('hh2-one-choice-860-light', 'light');
+  await o.run(`document.getElementById('history-row-fold-foot').scrollIntoView({ block: 'end' })`);
+  await o.click('#history-versions-fold-foot');
+  await until(() => o.exists('#history-versions-menu-fold-foot'));
+  const footMenu = await o.run(`(() => {
+    const m = document.getElementById('history-versions-menu-fold-foot'), t = document.getElementById('history-versions-fold-foot');
+    const mr = m.getBoundingClientRect(), tr = t.getBoundingClientRect();
+    return { above: mr.bottom <= tr.top + 1 && mr.top >= 0 };
+  })()`);
+  same('button at the window’s foot opens its version menu above without clipping', [footMenu.above, await o.run(CUT_OFF)], [true, []]);
+  await o.press('Escape');
+  // Press a menu item: makes Copilot CLI's version current in every written tool, gains current entry, shows band with Undo, clicked row keeps its menu (naming Copilot CLI as Also counted), and Undo restores byte for byte.
+  await o.run(`document.getElementById('history-scroll').scrollTop = 0`);
+  const activeDirs = oSkillDirs.filter(rel => existsSync(join(O.home, rel, 'active-skill')));
+  const snapActive = () => Object.fromEntries(oSkillDirs.map(rel => [rel, existsSync(join(O.home, rel, 'active-skill')) ? tree(join(O.home, rel, 'active-skill')) : null]));
+  const activeBefore = snapActive();
+  await o.click('#history-versions-fold-clash');
+  await o.click('#history-fold-clash-copilot-cli');
+  await done(o);
+  const afterPick = await o.run(`(() => {
+    const top = document.querySelector('.history-row');
+    return {
+      topKind: top?.dataset.kind,
+      topItem: top?.querySelector('.history-what strong')?.textContent?.trim(),
+      band: document.querySelector('[data-outcome] .band-text')?.textContent?.trim() ?? '',
+      undo: document.getElementById('outcome-undo')?.textContent?.trim() ?? '',
+      stillMenu: document.getElementById('history-versions-fold-clash')?.textContent?.trim() ?? '',
+    };
+  })()`);
+  same('picking a version writes every tool copy, logs current entry, shows History band with Undo, and keeps row’s menu',
+    [activeDirs.length === 5, activeDirs.every(rel => readFileSync(join(O.home, rel, 'active-skill/SKILL.md'), 'utf8').includes('Copilot CLI conflict edit.')),
+      afterPick.topKind, afterPick.topItem, /^active-skill: the version edited in Copilot CLI \(.*\) was made current, in Claude Code, Copilot CLI, Codex, Pi and Antigravity\.$/.test(afterPick.band),
+      afterPick.undo, afterPick.stillMenu],
+    [true, true, 'current', 'active-skill', true, 'Undo', 'Use another version…']);
+  await historyShot('hh2-band-860-light', 'light');
+  await o.click('#history-versions-fold-clash');
+  same('after picking Copilot CLI’s version, row’s menu still names Copilot CLI under the 3-of-6 provenance line and offers the remaining 2',
+    [await o.text('#history-versions-menu-fold-clash .history-menu-also'), await o.all('#history-versions-menu-fold-clash button[role="menuitem"]', 'e.textContent')],
+    ['Also counted: Copilot CLI', ['Pi’s version', 'OpenCode’s version']]);
+  await o.press('Escape');
+  await o.click('#outcome-undo');
+  await done(o);
+  same('band Undo puts active-skill back byte for byte in every tool', snapActive(), activeBefore);
+  // 2→1 transition: picking one of 2 choices on fold-chosen turns the row into a single link and restores its clause.
+  await o.click('#history-versions-fold-chosen');
+  await o.click('#history-fold-chosen-copilot-cli');
+  await done(o);
+  same('after choosing one of 2 choices, row draws a single link and restores its kept-versions clause',
+    [await o.exists('#history-versions-fold-chosen'), await o.text('#history-fold-chosen-pi-cli'), await o.text('#history-row-fold-chosen .history-about')],
+    [false, 'Use Pi’s version', 'You chose Codex’s copy; Copilot CLI and Pi’s are kept as versions.']);
+  // History redrawing for a new entry while a menu is open closes the menu and focuses its button.
+  await o.click('#history-versions-fold-clash');
+  await until(() => o.exists('#history-versions-menu-fold-clash'));
+  writeFileSync(join(O.home, '.claude/skills/active-skill/SKILL.md'), text('active-skill', 'Edited while version menu open.'));
+  check('redraw for a new entry closes open version menu and focuses its trigger button',
+    await until(async () => !(await o.exists('.history-menu')) && (await o.run(`document.activeElement?.id`)) === 'history-versions-fold-clash'));
   await fullSize(o);
   // With OpenCode not managed: neither the opened Off row nor History after clicking Claude Code mentions OpenCode.
   await o.click('#nav-harnesses');
@@ -18516,6 +18671,7 @@ async function libraryFlow() {
   await done(o);
   await o.click('#nav-history');
   await until(() => o.exists('.history-row'));
+  check('leaving History and returning clears the finished version-choice band', !(await o.exists('[data-outcome]')));
   const latestUnmanaged = await o.run(`(() => { const row = [...document.querySelectorAll('.history-row')].find(el => el.querySelector('.history-what strong')?.textContent === 'bench-runner'); return { about: row?.querySelector('.history-about')?.textContent?.trim(), act: row?.querySelector('.history-actions button')?.textContent?.trim() }; })()`);
   same('with OpenCode not managed, History entry omits OpenCode reads it too',
     [latestUnmanaged.about, latestUnmanaged.act], ['Turned on in Claude Code; kept out of every other tool.', 'Undo']);

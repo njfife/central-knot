@@ -6,15 +6,18 @@ import type { AppPreferences, HarnessId, HistoryEvent, HomeView } from '../src/t
 import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
+const restoreCalls: [string, string, string | undefined][] = [];
 const settings: AppPreferences = { appearance: 'system', historyDays: 30, pluginUpdates: true, pluginText: true, signIn: { on: false, available: true } };
 const noop = () => {};
 installDom({
   getSettings: async () => ({ ...settings }),
+  restore: async (id: string, home: string, choice?: string) => { restoreCalls.push([id, home, choice]); return { results: [], harnessWrites: 0, reloads: [] }; },
   onPluginTextChanged: noop, onUpdatesChanged: noop, onPluginUpdatesChanged: noop, onNavigate: noop,
   onSettingsChanged: noop, onSyncChanged: noop, onSessionCostsChanged: noop, onSaid: noop,
-}, { byId: id => (rendered ? findById(rendered, id) ?? null : null) });
+}, { byId: id => findById(rendered, id) ?? findById(document.body as unknown as FakeNode, id) ?? null });
 
 const { setRenderer, state } = await import('../src/app.ts');
+const { runAfterLayout } = await import('../src/dom.ts');
 const { loadSettings } = await import('../src/settingspage.ts');
 const { forgetHistoryFolds, historyPage } = await import('../src/historypage.ts');
 
@@ -82,6 +85,7 @@ test('History folds all-tools and conflict losers, leaves unrecorded and zero-lo
     { id: 'del-five', at, key: 'old-draft', of: 'skill', item: 'old-draft', kind: 'deleted', losers: five.map(tool => ({ tool, hash: 'b' })), orderProved: true },
     { id: 'on-over', at, key: 'draft-over', of: 'skill', item: 'draft-over', kind: 'on', cause: 'switch', losers: five.map(tool => ({ tool, hash: '' })), tookFrom: [{ tool: 'claude-cli', hash: 'old' }], orderProved: true },
     { ...conflictBase, id: 'lib-conflict', key: 'agent:reviewer', of: 'agent', item: 'reviewer', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'opencode-cli', hash: 'z' }] },
+    { ...conflictBase, id: 'lib-conflict-gone', key: 'agent:old-reviewer', of: 'agent', item: 'old-reviewer', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'opencode-cli', hash: 'z' }] },
     { ...conflictBase, id: 'legacy-conflict', key: '', item: 'clash', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'old-cli' as HarnessId, hash: 'z' }] },
     { ...conflictBase, id: 'legacy-no-losers', key: '', item: 'lone-clash', losers: [] },
     { ...conflictBase, id: 'legacy-no-losers-order', key: '', item: 'lone-clash-2', losers: [{ tool: 'claude-cli', hash: 'p' }], orderProved: false },
@@ -95,7 +99,8 @@ test('History folds all-tools and conflict losers, leaves unrecorded and zero-lo
     ['all-six', 'Turned off: removed from all 6 tools', 'Claude Code, Copilot CLI, Codex, Pi, OpenCode and Antigravity'],
     ['del-five', 'Deleted from Central Knot and removed from 5 of 6 tools', 'Claude Code, Copilot CLI, Pi, OpenCode and Antigravity'],
     ['on-over', 'Turned on: put in 5 of 6 tools — Claude Code’s own copy was written over and kept as a version.', 'Claude Code, Copilot CLI, Pi, OpenCode and Antigravity'],
-    ['lib-conflict', 'Codex’s edit was the latest, so it became the current version. Edits from 3 of 6 tools are kept as versions.', 'Copilot CLI, Pi and OpenCode'],
+    ['lib-conflict', 'Codex’s edit was the latest, so it became the current version.'],
+    ['lib-conflict-gone', 'Codex’s edit was the latest, so it became the current version. Edits from 3 of 6 tools are kept as versions.', 'Copilot CLI, Pi and OpenCode'],
     ['legacy-conflict', 'Codex’s edit won over edits in 3 tools', 'Copilot CLI, Pi and old-cli'],
     ['legacy-no-losers', 'Codex’s edit won over another’s.'],
     ['legacy-no-losers-order', 'Codex’s edit won over another’s. Order not proved; the fixed tool order decided.'],
@@ -107,10 +112,67 @@ test('History folds all-tools and conflict losers, leaves unrecorded and zero-lo
       assert.equal(textOf(findById(page, `history-tools-names-${id}-0`)), opened, id);
     }
   }
-  assert.deepEqual(
-    ['copilot-cli', 'pi-cli', 'opencode-cli'].map(tool => textOf(findById(page, `history-lib-conflict-${tool}`))),
-    ['Use Copilot CLI’s version', 'Use Pi’s version', 'Use OpenCode’s version'],
-  );
+  const trigger = findById(page, 'history-versions-lib-conflict');
+  assert.equal(textOf(trigger), 'Use another version…');
+  assert.deepEqual([trigger?.attrs['aria-haspopup'], trigger?.attrs['aria-expanded']], ['menu', 'false']);
+  assert.equal(findById(page, 'history-lib-conflict-copilot-cli'), undefined);
+});
+
+test('History version menu: kept-edit/on keep row text, shared hash names unlisted tool, acting() blocks item, redraw falls back to row when button goes', () => {
+  forgetHistoryFolds();
+  state.page = 'history';
+  state.busy = undefined;
+  state.home = makeHome(six, six);
+  const madeAt = '2026-11-27T10:00:00.000Z';
+  state.home.agents.library.reviewer = {
+    key: 'reviewer', name: 'reviewer', on: true, hash: 'w',
+    versions: ['w', 'x', 'y', 'z', 'p'].map(hash => ({ hash, at: madeAt, from: { how: 'edited', harness: 'codex-cli' } })),
+    except: [], applied: {}, own: {},
+  };
+  const base = { at: madeAt, key: 'agent:reviewer', of: 'agent' as const, item: 'reviewer', orderProved: true };
+  state.history.state = 'ready';
+  state.history.data = [
+    { ...base, id: 'c-dup', kind: 'conflict', winner: { tool: 'codex-cli', hash: 'w' }, previous: 'p', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'x' }, { tool: 'opencode-cli', hash: 'z' }] },
+    { ...base, id: 'ch2', kind: 'chosen', winner: { tool: 'codex-cli', hash: 'w' }, losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }] },
+    { ...base, id: 'ke2', kind: 'kept-edit', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }] },
+    { ...base, id: 'on2', kind: 'on', cause: 'switch', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }], tookFrom: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }] },
+  ];
+
+  const rowAbout = (page: FakeNode, id: string) => textOf(findNode(findById(page, `history-row-${id}`), el => el.classList.contains('history-about')));
+  const openMenus = () => (document.body as unknown as FakeNode).querySelectorAll('.history-menu');
+  let page = draw();
+
+  // kept-edit and on keep their row explanations and open menus with no provenance header; chosen moves its clause into the menu.
+  assert.equal(rowAbout(page, 'ke2'), 'Edited in Copilot CLI and Pi, not taken in yet; it gave way to the current version and is kept as a version.');
+  assert.match(rowAbout(page, 'on2'), /Copilot CLI and Pi’s own copies were written over and kept as a version\./);
+  findById(page, 'history-versions-ke2')!.click();
+  assert.equal(openMenus()[0]?.querySelector('.history-menu-head'), null);
+  findById(page, 'history-versions-on2')!.click();
+  assert.equal(openMenus()[0]?.querySelector('.history-menu-head'), null);
+  findById(page, 'history-versions-ch2')!.click();
+  assert.equal(textOf(openMenus()[0]?.querySelector('.history-menu-head')), 'Copilot CLI and Pi’s are kept as versions.');
+
+  // Redraw when choices drop below 2 closes the open menu and falls back focus to the row.
+  state.home.agents.library.reviewer.hash = 'x';
+  page = draw();
+  runAfterLayout();
+  assert.deepEqual([openMenus().length, (document.activeElement as unknown as FakeNode)?.attrs.id], [0, 'history-row-ch2']);
+
+  // Shared hash in conflict: Pi shares Copilot CLI's hash -> Pi is named under Also counted; acting() keeps item inert and disables trigger.
+  state.home.agents.library.reviewer.hash = 'w';
+  page = draw();
+  findById(page, 'history-versions-c-dup')!.click();
+  const dupMenu = findById(document.body as unknown as FakeNode, 'history-versions-menu-c-dup')!;
+  assert.deepEqual([textOf(dupMenu.querySelector('.history-menu-also')), dupMenu.querySelectorAll('button[role^="menuitem"]').map(textOf)],
+    ['Also counted: Pi', ['Copilot CLI’s version', 'OpenCode’s version']]);
+  restoreCalls.length = 0;
+  state.busy = 'Syncing…';
+  findById(dupMenu, 'history-c-dup-copilot-cli')!.click();
+  assert.deepEqual(restoreCalls, []);
+  page = draw();
+  assert.deepEqual(['disabled' in (findById(page, 'history-versions-c-dup')?.attrs ?? {}), findById(page, 'history-versions-c-dup')?.attrs.title], [true, 'Syncing…']);
+  state.busy = undefined;
+  forgetHistoryFolds();
 });
 
 const at = '2026-11-27T10:00:00.000Z';

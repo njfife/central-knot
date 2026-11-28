@@ -460,7 +460,7 @@ ul { list-style: none; }
 #unread-plugins-info-card { white-space: pre-line; }
 .info-line { display: block; }
 .info-line + .info-line { margin-top: 5px; }
-@media (prefers-color-scheme: dark) { .info-card { background: color-mix(in oklab, var(--surface) 84%, white); border-color: var(--cell-line); box-shadow: 0 10px 24px rgb(0 0 0 / 70%); } }
+@media (prefers-color-scheme: dark) { .info-card, .history-menu { background: color-mix(in oklab, var(--surface) 84%, white); border-color: var(--cell-line); box-shadow: 0 10px 24px rgb(0 0 0 / 70%); } }
 /* Collapsible fold (dom.ts fold): one look on every page. */
 .fold > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; margin-left: -6px; border-radius: 6px; font-size: 12.5px; color: var(--accent-ink); cursor: pointer; }
 .fold > summary::-webkit-details-marker { display: none; }
@@ -1310,6 +1310,12 @@ span.ins-confirm { margin-top: 0; }
 .history-undone .history-what strong, .history-what > strong.history-gone { color: var(--ink-soft); }
 .history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 12px; text-align: right; }
 .history-actions .btn.link { flex: 0 1 auto; min-width: 0; height: auto; padding: 0; white-space: normal; text-align: right; }
+/* Top-layer popover menu for rows with two or more kept version choices (historypage.ts openVersionMenu). */
+.history-menu { position: fixed; inset: auto; margin: 0; width: max-content; min-width: 190px; max-width: min(300px, calc(100vw - 16px)); max-height: 60vh; overflow-y: auto; padding: 4px; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: var(--overlay); color: var(--ink); text-align: left; }
+.history-menu:popover-open { display: flex; }
+.history-menu-head { padding: 4px 8px; font-size: 12px; line-height: 16px; color: var(--ink-soft); white-space: normal; overflow-wrap: break-word; }
+.history-menu-also { margin-top: 2px; color: var(--ink-faint); }
+.history-menu-item { cursor: pointer; min-height: 30px; padding: 5px 8px; }
 /* The question before a tool left out is managed again, in its History row and in its Harnesses card (managecard.ts manageQuestion). */
 .history-row > .manage-question { grid-column: 1 / -1; }
 /* An item's file, opened at its name's mark (historypage.ts fileMark), spans the row under the sentence and the actions. */

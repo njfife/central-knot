@@ -18,7 +18,7 @@ import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileD
 import { brandMark, kindGlyph, lineFacts, openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
 import { lineControl } from './pluginline.ts';
 import { lineBusy, market, turnFromLine, viewCurrent, type LineAim } from './pluginstate.ts';
-import { button, checkbox, emptyState, findInput, h, icon, infoMark } from './dom.ts';
+import { button, checkbox, emptyState, findInput, h, icon, infoMark, menuKeys } from './dom.ts';
 import { claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, itemRowState, nameNow, nowLead, profileNow, keptOn, leftOut, listedChangeCount, listedChanges, listedPlugins, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, statusMenuRows, switchable, switchOffer, switchPlan, switchPreview, switchSaid, takenWhole, toolsOf, withTool, wholeTurns, type LiveItem, type MenuRow, type PluginCopy, type PluginLive, type PluginTurn, type ProfileNow } from './profileplan.ts';
 import { DIRECTORY, noSingleSwitch, pageOfPart } from './pluginstatus.ts';
 import { counted } from './pluginswitch.ts';
@@ -526,17 +526,11 @@ export function profilesPage(): HTMLElement {
     h('div.page.split.profiles-split', { id: 'profiles-split' }, listColumn(open), open ? profileDetail(open) : h('div.detail-column')));
 }
 
-/** Arrow keys, Home and End move between the menu's items; Escape closes it, and only it; Tab closes it once focus has moved on. */
-function menuKeys(event: KeyboardEvent, close: () => void) {
-  if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+/** Arrow keys, Home, End and Escape via dom.ts menuKeys; Tab closes the menu once focus has moved on. */
+function profileMenuKeys(event: KeyboardEvent, close: () => void) {
   // A click elsewhere already closes it (the document listener below); Tab leaving it does too, after focus has moved.
   if (event.key === 'Tab') { setTimeout(() => { if (menuOpen && !document.activeElement?.closest('.pf-menu')) { menuOpen = false; rerender(); } }); return; }
-  const choices = [...document.querySelectorAll<HTMLElement>('.pf-menu-item:not(:disabled)')];
-  const at = choices.indexOf(document.activeElement as HTMLElement);
-  const to = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: choices.length - 1 }[event.key];
-  if (to === undefined || !choices.length) return;
-  event.preventDefault();
-  choices[(to + choices.length) % choices.length].focus();
+  menuKeys(event, close);
 }
 
 /** Closes the status bar menu and switches to `id` (shared by a profile row and Switch back). */
@@ -589,7 +583,7 @@ export function profileStatus(): HTMLElement | null {
   const close = () => { menuOpen = false; rerender(); document.getElementById('status-profile')?.focus(); };
   const rows = statusMenuRows(list, named, all, plugged, canEditProfiles()), sep = () => h('div.pf-menu-sep', { role: 'separator' });
   // Separators frame the changed profile's heading and acts apart from other profiles, and Edit profiles… below.
-  const menu = menuOpen ? h('div.pf-menu', { role: 'menu', 'aria-label': 'Switch profile', onkeydown: (event: KeyboardEvent) => menuKeys(event, close) },
+  const menu = menuOpen ? h('div.pf-menu', { role: 'menu', 'aria-label': 'Switch profile', onkeydown: (event: KeyboardEvent) => profileMenuKeys(event, close) },
     rows.flatMap((row, at) => [...(row.kind === 'changed-heading' && at > 0 ? [sep()] : []), menuRow(row, named, all, plugged),
       ...((row.kind === 'switch-back' || row.kind === 'see-changes') && rows[at + 1]?.kind === 'profile' ? [sep()] : [])]),
     sep(),

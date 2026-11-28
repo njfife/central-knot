@@ -1,5 +1,5 @@
 // History's entries about items in Central Knot's library (skills, MCP servers and agents), in one place: whose they are (libraryEntry),
-// what each says (librarySentence), what it still offers (libraryAction, versionChoices), and what its row shows once its
+// what each says (librarySentence, keptVersionsNote), what it still offers (libraryAction, versionChoices), and what its row shows once its
 // action was used (doneWords). Read by History's page (the row and its buttons), by app.ts (what is said after a click), by
 // librarypass.ts restore (the click an action runs, through each kind's Kind.historyAction) and by the tests. Pure: no
 // files, no DOM. The entries of profiles, the base instructions and a tool's Manage switch are historypage.ts's own.
@@ -113,8 +113,19 @@ export function keptOver(name: string, tools: readonly string[]): string {
   return tools.length === 1 ? `Your newer ${name} from ${where} is kept as a version.` : `Your newer copies of ${name} in ${where} are kept as versions.`;
 }
 
-/** Optional row-display overrides for librarySentence (historypage.ts): a custom tool-list formatter and History's shorter wording. */
-export interface SentenceOptions { tools?: (touched: string[], inHome: string[]) => string; row?: boolean }
+/** Optional row-display overrides for librarySentence (historypage.ts): a custom tool-list formatter, shorter wording, and choices moved into the versions menu. */
+export interface SentenceOptions { tools?: (touched: string[], inHome: string[]) => string; row?: boolean; choicesInMenu?: boolean }
+
+/** The kept-versions clause of a conflict or chosen entry and the tools it counts (shared by librarySentence and History's versions menu). */
+export function keptVersionsNote(event: HistoryEvent, homeTools: string[], formatTools: (touched: string[], inHome: string[]) => string = toolsPhrase): { text: string; tools: HarnessId[] } | undefined {
+  if (event.kind !== 'conflict' && event.kind !== 'chosen') return undefined;
+  const raw = event.kind === 'conflict' ? event.losers.filter(loser => loser.hash !== event.previous && loser.hash !== event.winner?.hash) : event.losers;
+  const tools = [...new Set(raw.map(loser => loser.tool))];
+  if (!tools.length) return undefined;
+  const text = event.kind === 'chosen' ? `${andList(tools.map(toolName))}’s ${tools.length === 1 ? 'is kept as a version' : 'are kept as versions'}.`
+    : tools.length > 2 ? `Edits from ${formatTools(tools, homeTools)} are kept as versions.` : `${formatTools(tools, homeTools)}’s is kept as a version.`;
+  return { tools, text };
+}
 
 /**
  * What a library item's entry says happened, in its kind's words (libraryrow.ts RowWords), or undefined for a kind from before
@@ -256,16 +267,14 @@ export function librarySentence(
       return { glyph: 'diff', text: `Edited in ${where}, not taken in yet; it gave way to the current version and is kept as a version.` };
     }
     case 'conflict': {
-      const gaveWay = [...new Set(event.losers.filter(loser => loser.hash !== event.previous && loser.hash !== event.winner?.hash).map(loser => loser.tool))];
-      const others = gaveWay.length ? formatTools(gaveWay, homeTools) : '';
       // "The latest" only where times proved it (types.ts HistoryEvent orderProved); an entry stored before the library may say so too.
       const chosen = event.orderProved ? `${from}’s edit was the latest, so it became the current version` : `${from}’s edit became the current version, though ${noTimeTells}`;
-      const lost = !gaveWay.length ? '' : gaveWay.length > 2 ? ` Edits from ${others} are kept as versions.` : ` ${others}’s is kept as a version.`;
-      return { glyph: 'diff', text: `${chosen}.${lost}` };
+      const kept = options?.choicesInMenu ? undefined : keptVersionsNote(event, homeTools, formatTools);
+      return { glyph: 'diff', text: kept ? `${chosen}. ${kept.text}` : `${chosen}.` };
     }
     case 'chosen': {
-      const gave = [...new Set(event.losers.map(loser => toolName(loser.tool)))];
-      return { glyph: 'check', text: `You chose ${from}’s copy; ${andList(gave)}’s ${gave.length === 1 ? 'is kept as a version' : 'are kept as versions'}.` };
+      const kept = options?.choicesInMenu ? undefined : keptVersionsNote(event, homeTools, formatTools);
+      return { glyph: 'check', text: kept ? `You chose ${from}’s copy; ${kept.text}` : `You chose ${from}’s copy.` };
     }
     default: return undefined;
   }
