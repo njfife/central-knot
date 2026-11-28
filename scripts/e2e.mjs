@@ -13447,8 +13447,9 @@ async function mcpSigninFlow() {
   /** Claude Code's servers (notes a local one), with `more` added or changed. */
   const claudeFile = (more = {}) => JSON.stringify({ mcpServers: { ...remote(claudeServers), notes: { type: 'stdio', command: server }, ...more } });
   write('.claude.json', claudeFile());
+  const copilotDir = 'enterprise-platform-engineering-settings/copilot-config', copilotPath = `${copilotDir}/mcp-config.json`;
   const copilotFile = JSON.stringify({ mcpServers: Object.fromEntries(Object.entries(remote(['plain', 'oauth', 'github'])).map(([name, entry]) => [name, { ...entry, tools: ['*'] }])) });
-  write('.copilot/mcp-config.json', copilotFile);
+  write(copilotPath, copilotFile);
   write('.codex/config.toml', ['plain', 'oauth', 'down', 'silent', 'docs', 'calendar'].map((name, index) => `[mcp_servers.${name}]\nurl = "${P(47201 + index)}"\n${name === 'docs' ? 'enabled = false\n' : ''}`).join('\n'));
   /** Pi's servers (tickets a local one), with `more` added or changed. */
   const piFile = (more = {}) => JSON.stringify({ mcpServers: { ...Object.fromEntries(['plain', 'oauth', 'down', 'silent', 'tickets', 'calendar'].map((name, index) => [name, { url: P(47201 + index) }])), tickets: { command: server }, ...more } });
@@ -13529,7 +13530,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   const started = () => called().filter(([what]) => what === 'start');
   // A check's limit of 4 s here (main.ts CK_SIGNIN_LIMIT_MS), so "Didn’t answer" comes without waiting 70 s; a sign-in's of 6 s
   // (CK_SIGNIN_START_LIMIT_MS), so "Not finished in 3 minutes" comes without waiting three minutes.
-  const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), CK_SIGNIN_LIMIT_MS: '4000', BROWSER: 'ck-browser', CK_SIGNIN_START_LIMIT_MS: '6000' });
+  const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), COPILOT_HOME: join(home, copilotDir), CK_SIGNIN_LIMIT_MS: '4000', BROWSER: 'ck-browser', CK_SIGNIN_START_LIMIT_MS: '6000' });
   await a.click('#home-actual');
   /** The page as drawn: the tools' columns, and each row's name, plugin and cells' words (a mark and a Copy's label aside). */
   const page = async () => {
@@ -13683,6 +13684,23 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('at 860 pressing a server’s mark opens its entry in a full-width row under it, nothing cut off',
     [oauthEntry.anchored, oauthEntry.colspan, oauthEntry.boxes, oauthEntry.text.includes('http://127.0.0.1:47202/mcp'), ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)],
     [true, '7', 1, true]);
+  const ghEntry = await openEntry('github', 'http://127.0.0.1:47203/mcp');
+  const ghFoot = await a.run(`(() => {
+    const scroll = document.getElementById('mcpsignin-scroll'), panel = document.getElementById('file-panel-mcpsignin');
+    const td = panel?.closest('td'), foot = panel?.querySelector('.file-open-foot');
+    const head = foot?.querySelector('.middle-head'), tail = foot?.querySelector('.middle-tail');
+    return {
+      pathLen: ((head?.textContent ?? '') + (tail?.textContent ?? '')).length,
+      fullWidth: !!td && !!panel && Math.abs(panel.getBoundingClientRect().width - (td.getBoundingClientRect().width - 20)) <= 2,
+      noScrollX: scroll.scrollWidth <= scroll.clientWidth,
+      footOneLine: !!foot && Math.round(foot.getBoundingClientRect().height) <= 42,
+      tail: tail?.textContent ?? '',
+      tailUncut: !!tail && tail.scrollWidth <= tail.clientWidth,
+    };
+  })()`);
+  same('at 860 a 50+ char settings path keeps every column width unchanged, no horizontal scroll, a 1-line foot and an uncut filename',
+    [ghEntry.anchored, ghFoot.pathLen >= 50, ghFoot.fullWidth, (await markMetrics()).ths, ghFoot.noScrollX, ghFoot.footOneLine, ghFoot.tail, ghFoot.tailUncut, ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)],
+    [true, true, true, colsBefore, true, true, '/mcp-config.json', true]);
   const fsEntry = await openEntry('Filesystem', 'http://127.0.0.1:47215/mcp');
   same('at 860 pressing a second capitalised server’s mark moves the panel under it with that server’s entry',
     [fsEntry.anchored, fsEntry.colspan, fsEntry.boxes, fsEntry.text.includes('http://127.0.0.1:47215/mcp')], [true, '7', 1, true]);
@@ -14257,7 +14275,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('OpenCode of a version not known: it may do either', await top(), ['Check starts local servers in Claude Code, Pi and OpenCode; OpenCode may leave a service running or add $schema to its config files (its version isn’t known).', true]);
   await owners('version-not-known');
   // And the tools there: Codex and Pi, then Codex alone, then only the two whose sign-in shows inside a session.
-  for (const path of ['.claude.json', '.copilot/mcp-config.json', '.config/opencode/opencode.json', '.gemini/config/mcp_config.json']) write(path, '{}');
+  for (const path of ['.claude.json', copilotPath, '.config/opencode/opencode.json', '.gemini/config/mcp_config.json']) write(path, '{}');
   rmSync(join(home, '.claude/plugins'), { recursive: true, force: true });
   await a.click('#header-refresh');
   same('Codex and Pi: Pi starts its local server, Codex starts none', [(await page()).tools, ...await top()], [['codex-cli', 'pi-cli'], 'Check starts local servers in Pi.', true]);
@@ -14265,14 +14283,14 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   await a.click('#header-refresh');
   same('Codex alone: it contacts its remote servers', [(await page()).tools, ...await top()], [['codex-cli'], 'Check contacts remote servers in Codex.', true]);
   write('.codex/config.toml', '');
-  write('.copilot/mcp-config.json', copilotFile);
+  write(copilotPath, copilotFile);
   write('.gemini/config/mcp_config.json', antigravityFile);
   await a.click('#header-refresh');
   same('only Copilot CLI and Antigravity: no line and no Check all; Antigravity’s head names no command', [(await page()).tools, ...await top(), await head('antigravity-cli')],
     [['copilot-cli', 'antigravity-cli'], null, false, 'Antigravity\nSign in inside a session']);
   await owners('session-only');
   // No server in any tool: the page says so.
-  for (const path of ['.copilot/mcp-config.json', '.gemini/config/mcp_config.json']) write(path, '{}');
+  for (const path of [copilotPath, '.gemini/config/mcp_config.json']) write(path, '{}');
   await a.click('#header-refresh');
   same('with no server in any tool the page says so, in one line', [await a.text('.empty-title'), await a.exists('.empty-body')], ['No MCP servers in your tools.', false]);
   await owners('no-servers');

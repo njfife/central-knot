@@ -838,7 +838,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .file-open-foot > .path-text > .middle-tail { flex: none; max-width: 100%; }
 /* The item's name first, where nothing beside the panel names it (filepanel.ts FilePlace named: the Overview's). */
 .file-open-named { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; min-width: 0; overflow-x: clip; }
-.file-open-item { font-weight: 600; overflow-wrap: break-word; }
+.file-open-item { font-weight: 600; overflow-wrap: anywhere; }
 /* A page's panel says which version it shows (filepanel.ts versionWords); hanging dots sit in the gap and clip on wrap so none ends or starts a line. */
 .file-open-now { display: inline-flex; align-items: center; }
 .file-open-now > .icon { margin-right: 4px; }
@@ -1368,6 +1368,8 @@ span.ins-confirm { margin-top: 0; }
 .signin-table tbody tr.file-anchored > * { background: var(--picked); padding-bottom: 9px; border-bottom: 0; }
 .signin-table tbody tr.file-anchored > :first-child, .signin-table tbody tr.signin-file > td { box-shadow: inset 3px 0 0 var(--accent); }
 .signin-table tbody tr.signin-file > td { padding: 4px 10px 10px; background: var(--picked); overflow-wrap: normal; }
+/* Spanning the whole auto-layout table: the panel contributes no intrinsic width so a long one-line path shortens instead of widening the columns. */
+.signin-table tbody tr.signin-file > td > .details-file-only { width: 0; min-width: 100%; }
 .signin-table tbody tr:last-child > :first-child { border-bottom-left-radius: 9px; }
 .signin-table tbody tr:last-child > :last-child { border-bottom-right-radius: 9px; }
 .signin-plugin { display: block; font-size: 11.5px; color: var(--ink-soft); }
