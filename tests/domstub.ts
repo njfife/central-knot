@@ -56,7 +56,7 @@ export const makeElement = (tag = 'div'): FakeNode => {
     },
     setAttribute(key: string, value: string) {
       this.attrs[key] = value;
-      if (key.startsWith('data-')) this.dataset[key.slice(5)] = value;
+      if (key.startsWith('data-')) this.dataset[key.slice(5).replace(/-([a-z])/g, (_, ch: string) => ch.toUpperCase())] = value;
     },
     addEventListener() {},
     replaceChildren(...kids: unknown[]) {

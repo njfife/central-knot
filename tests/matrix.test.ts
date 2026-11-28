@@ -46,7 +46,7 @@ const makeFact = (key: string, overrides: Partial<LibraryFacts> = {}): LibraryFa
 function makeFiveToolHome(skills: LibraryFacts[], library: Record<string, LibraryItem>, pluginItems: HomeView['pluginItems'] = []): HomeView {
   const empty = { tools: FIVE, items: [] as LibraryFacts[], library: {} as Record<string, LibraryItem>, access: { allowed: true }, gate: { state: 'ready' as const }, problems: [], notices: [], unread: [] };
   return {
-    home: '/toolpage-t1-unit',
+    home: '/tool-page-unit',
     mode: 'actual',
     label: 'Test home',
     syncOn: true,
@@ -60,23 +60,7 @@ function makeFiveToolHome(skills: LibraryFacts[], library: Record<string, Librar
   } as unknown as HomeView;
 }
 
-test('usedCellWords shows the Sort’s figure (recency in the unused filter), keeps no-use and use unknown, and drops hover when blank', () => {
-  const usedAt = new Date(Date.now() - 2 * DAY_MS - 3_600_000).toISOString();
-  const sinceAt = new Date(Date.now() - 18 * DAY_MS).toISOString();
-  const since = dayWords(sinceAt);
-  const usedBy = (sessions: string): Record<RowOrder, string> => ({ 'most-used': sessions, used: '2 days ago', name: '', updated: '' });
-  for (const order of ['most-used', 'used', 'name', 'updated'] as RowOrder[]) {
-    const pluralText = usedBy('28 sessions')[order], singleText = usedBy('1 session')[order];
-    assert.deepEqual(usedCellWords({ used: usedAt, sessions: 28 }, order), { text: pluralText, hover: pluralText ? 'Used 2 days ago · 28 sessions.' : '' });
-    assert.deepEqual(usedCellWords({ used: usedAt, sessions: 1 }, order), { text: singleText, hover: singleText ? 'Used 2 days ago · 1 session.' : '' });
-    assert.deepEqual(usedCellWords({ used: usedAt, sessions: 28 }, order, true), { text: '2 days ago', hover: 'Used 2 days ago · 28 sessions.' });
-    assert.deepEqual(usedCellWords({ noneSeen: true }, order), { text: 'no use seen', hover: 'No use seen in 30 days.' });
-    assert.deepEqual(usedCellWords({ noneSeen: true, since: sinceAt }, order), { text: 'no use seen', hover: `No use seen · records from ${since}.` });
-    assert.deepEqual(usedCellWords(undefined, order), { text: 'use unknown', hover: 'No tool that has it on can tell whether it was used.' });
-  }
-});
-
-test('tool tab shows only this tool’s mark, folds the key behind Mark key, keeps global switch labels and full details, while Library and Files keep all tool marks', () => {
+function installFiveToolFixture() {
   setRenderer(() => {});
   const onSkill = makeFact('alpha', {
     on: true,
@@ -106,43 +90,110 @@ test('tool tab shows only this tool’s mark, folds the key behind Mark key, kee
     { tool: 'claude-cli', plugin: 'kit', source: '/market', marketName: 'team', off: false, listed: true, items: [{ kind: 'skill', name: 'triage', description: 'Triages.' }] },
     { tool: 'copilot-cli', plugin: 'kit', source: '/market', marketName: 'team', off: false, listed: true, items: [{ kind: 'skill', name: 'triage', description: 'Triages.' }] },
   ];
-
   app.home = makeFiveToolHome([onSkill, foundSkill, awaySkill, offSkill], library, pluginItems);
   unpin();
+  return { onSkill, library };
+}
 
-  // Tool tab (Claude Code): 1 mark per ordinary and plugin row, Mark key disclosure closed, global switch labels intact.
+test('usedCellWords shows the Sort’s figure (recency in the unused filter), keeps no-use and use unknown, and drops hover when blank', () => {
+  const usedAt = new Date(Date.now() - 2 * DAY_MS - 3_600_000).toISOString();
+  const sinceAt = new Date(Date.now() - 18 * DAY_MS).toISOString();
+  const since = dayWords(sinceAt);
+  const usedBy = (sessions: string): Record<RowOrder, string> => ({ 'most-used': sessions, used: '2 days ago', name: '', updated: '' });
+  for (const order of ['most-used', 'used', 'name', 'updated'] as RowOrder[]) {
+    const pluralText = usedBy('28 sessions')[order], singleText = usedBy('1 session')[order];
+    assert.deepEqual(usedCellWords({ used: usedAt, sessions: 28 }, order), { text: pluralText, hover: pluralText ? 'Used 2 days ago · 28 sessions.' : '' });
+    assert.deepEqual(usedCellWords({ used: usedAt, sessions: 1 }, order), { text: singleText, hover: singleText ? 'Used 2 days ago · 1 session.' : '' });
+    assert.deepEqual(usedCellWords({ used: usedAt, sessions: 28 }, order, true), { text: '2 days ago', hover: 'Used 2 days ago · 28 sessions.' });
+    assert.deepEqual(usedCellWords({ noneSeen: true }, order), { text: 'no use seen', hover: 'No use seen in 30 days.' });
+    assert.deepEqual(usedCellWords({ noneSeen: true, since: sinceAt }, order), { text: 'no use seen', hover: `No use seen · records from ${since}.` });
+    assert.deepEqual(usedCellWords(undefined, order), { text: 'use unknown', hover: 'No tool that has it on can tell whether it was used.' });
+  }
+});
+
+test('tool tab shows only this tool’s mark on ordinary and plugin rows and keeps global switch labels', () => {
+  installFiveToolFixture();
   const tabTree = itemsTable('skills', 'claude-cli') as unknown as FakeNode;
   const alphaRow = findAll(tabTree, el => el.attrs['data-key'] === 'skills-alpha')[0]!;
   const pluginRow = findAll(tabTree, el => el.className.split(/\s+/).includes('ov-plugin-row'))[0]!;
   assert.deepEqual(findAll(alphaRow, el => el.className.split(/\s+/).includes('tool-mark')).map(el => el.dataset.tool), ['claude-cli']);
   assert.deepEqual(findAll(pluginRow, el => el.className.split(/\s+/).includes('tool-mark')).map(el => el.dataset.tool), ['claude-cli']);
-  const alphaSwitch = findById(tabTree, 'switch-skills-alpha')!;
-  assert.equal(alphaSwitch.attrs['aria-label'], 'alpha: on in 4 of 5 tools. Click to take it out of every tool; Central Knot keeps it.');
+  assert.equal(findById(tabTree, 'switch-skills-alpha')!.attrs['aria-label'], 'alpha: on in 4 of 5 tools. Click to take it out of every tool; Central Knot keeps it.');
   const pluginSwitch = findAll(pluginRow, el => el.attrs.role === 'switch')[0]!;
   assert.match(pluginSwitch.attrs['aria-label'] ?? '', /every tool that can switch it/);
+});
 
-  const legendFold = findById(tabTree, 'mark-legend');
-  assert.ok(legendFold && legendFold.tag === 'details', 'tool tab wraps key in a <details id="mark-legend"> disclosure');
-  assert.equal('open' in legendFold.attrs, false, 'Mark key starts closed');
-  assert.equal(textOf(findById(tabTree, 'mark-legend-toggle')), 'Mark key');
-  const legendItems = findAll(legendFold, el => el.className.split(/\s+/).includes('legend-item')).map(el => textOf(el));
-  assert.ok(legendItems.includes('Has the current version') && legendItems.includes('No copy') && legendItems.includes('Off: Central Knot keeps it') && legendItems.includes('On there'));
-  assert.equal(legendItems.includes('Has it another way, not from Central Knot'), false, 'only states drawn on this tool tab appear in its key');
+test('tool tab switch column head states Every tool with its info mark and Library omits it', () => {
+  installFiveToolFixture();
+  const tabTree = itemsTable('skills', 'claude-cli') as unknown as FakeNode;
+  const head = findAll(tabTree, el => el.className.split(/\s+/).includes('ov-tab-head'))[0];
+  assert.ok(head, 'tool tab renders its switch column head');
+  assert.ok(textOf(head).includes('Every tool'));
+  assert.ok(findById(head, 'tab-switch-info'), 'Every tool carries its (?) info mark');
+  assert.match(textOf(findById(head, 'tab-switch-info-card')), /every managed tool/i);
 
-  // Opening a row on the tool tab still shows all 5 tools' lines, with Claude Code first.
+  openKind('skills');
+  const libTree = libraryTable() as unknown as FakeNode;
+  assert.equal(findAll(libTree, el => el.className.split(/\s+/).includes('ov-tab-head')).length, 0);
+});
+
+test('tool tab places What the marks mean by the toolbar with one entry per visual look and keeps every tool in opened details', () => {
+  installFiveToolFixture();
+  const tabTree = itemsTable('skills', 'claude-cli') as unknown as FakeNode;
+  const toolbar = findAll(tabTree, el => el.className.split(/\s+/).includes('toolbar'))[0]!;
+  const legendFold = findById(toolbar, 'mark-legend');
+  assert.ok(legendFold && legendFold.tag === 'details', 'What the marks mean disclosure sits in the toolbar');
+  assert.equal('open' in legendFold.attrs, false, 'What the marks mean starts closed');
+  const toggleEl = findById(legendFold, 'mark-legend-toggle')!;
+  assert.equal(textOf(toggleEl), 'What the marks mean');
+  assert.equal(toggleEl.attrs['aria-controls'], 'mark-legend-body');
+  assert.equal(findById(tabTree, 'mark-legend-body'), undefined, 'legend body stays hidden while closed');
+
+  // Toggle open through fold's ontoggle handler and verify one entry per visual look directly under toolbar.
+  (legendFold as unknown as { open: boolean; ontoggle: (e: { currentTarget: { open: boolean } }) => void }).ontoggle({ currentTarget: { open: true } });
+  const openTree = itemsTable('skills', 'claude-cli') as unknown as FakeNode;
+  const body = findById(openTree, 'mark-legend-body');
+  assert.ok(body, 'opening What the marks mean draws #mark-legend-body below the toolbar');
+  const legendItems = findAll(body, el => el.className.split(/\s+/).includes('legend-item')).map(el => textOf(el));
+  assert.deepEqual(legendItems, ['Has it', 'No copy', 'Off here']);
+  // Close again to leave view clean for later tests.
+  const openFold = findById(openTree, 'mark-legend') as unknown as { ontoggle: (e: { currentTarget: { open: boolean } }) => void };
+  openFold.ontoggle({ currentTarget: { open: false } });
+
+  // Opening a row on the tool tab still lists all 5 tools in order, Claude Code first.
   findById(tabTree, 'open-skills-alpha')!.click();
   const openedTabTree = itemsTable('skills', 'claude-cli') as unknown as FakeNode;
-  const detailTools = findAll(openedTabTree, el => el.className.split(/\s+/).includes('details-tool-label')).map(el => textOf(el));
-  assert.deepEqual(detailTools, ['Claude Code', 'Copilot CLI', 'Codex', 'Pi', 'OpenCode']);
+  assert.deepEqual(findAll(openedTabTree, el => el.className.split(/\s+/).includes('details-tool-label')).map(el => textOf(el)),
+    ['Claude Code', 'Copilot CLI', 'Codex', 'Pi', 'OpenCode']);
   findById(openedTabTree, 'open-skills-alpha')!.click();
+});
 
-  // Section jump derives its labels and counts from drawn sections (5 sections -> 5 buttons).
+test('tool tab section jump uses Jump to: plain links with data-section on plugins, hides first section, and omits jump for a single section', () => {
+  const { onSkill, library } = installFiveToolFixture();
+  const tabTree = itemsTable('skills', 'claude-cli') as unknown as FakeNode;
+  const pluginHead = findAll(tabTree, el => el.className.split(/\s+/).includes('ov-section-plugins'))[0]!;
+  assert.equal(pluginHead.dataset.section, 'plugins', 'pluginSection sets data-section="plugins"');
+
   const jump = findAll(tabTree, el => el.className.split(/\s+/).includes('section-jump'))[0];
   assert.ok(jump, 'tool tab renders section jump when multiple sections are drawn');
-  assert.deepEqual(findAll(jump, el => el.className.split(/\s+/).includes('section-jump-btn')).map(el => textOf(el)),
-    ['On1', 'Found1', 'Only through a plugin1', 'Not in Claude Code1', 'Off1']);
+  assert.equal(textOf(findAll(jump, el => el.className.split(/\s+/).includes('section-jump-lead'))[0]), 'Jump to:');
+  const links = findAll(jump, el => el.className.split(/\s+/).includes('section-jump-link'));
+  assert.deepEqual(links.map(el => [el.attrs.id, textOf(el), 'hidden' in el.attrs]), [
+    ['jump-on', 'On1', true],
+    ['jump-found', 'Found1', false],
+    ['jump-plugins', 'Only through a plugin1', false],
+    ['jump-away', 'Not in Claude Code1', false],
+    ['jump-off', 'Off1', false],
+  ]);
 
-  // Library keeps all 5 tool marks, open key (no Mark key fold), and no section jump.
+  // Single-section tool tab omits the section jump.
+  app.home = makeFiveToolHome([onSkill], { alpha: library.alpha });
+  const singleTree = itemsTable('skills', 'claude-cli') as unknown as FakeNode;
+  assert.equal(findAll(singleTree, el => el.className.split(/\s+/).includes('section-jump')).length, 0);
+});
+
+test('Library and its Files view keep all tool marks, open legend, and no section jump', () => {
+  installFiveToolFixture();
   openKind('skills');
   const libTree = libraryTable() as unknown as FakeNode;
   const libAlpha = findAll(libTree, el => el.attrs['data-key'] === 'skills-alpha')[0]!;
@@ -153,52 +204,68 @@ test('tool tab shows only this tool’s mark, folds the key behind Mark key, kee
   assert.ok(findAll(libTree, el => el.className.split(/\s+/).includes('legend-item')).map(el => textOf(el)).includes('Has it another way, not from Central Knot'));
   assert.equal(findAll(libTree, el => el.className.split(/\s+/).includes('section-jump')).length, 0);
 
-  // Files view (rowMarks second caller) keeps all 5 tool marks.
   const filesTree = skillsBrowser(() => ({ where: [], contents: [] }), () => {}) as unknown as FakeNode;
   const firstListRow = findAll(filesTree, el => el.className.split(/\s+/).includes('list-row'))[0]!;
   assert.equal(findAll(firstListRow, el => el.className.split(/\s+/).includes('tool-mark')).length, 5);
-
-  // Single-section tool tab omits the section jump.
-  app.home = makeFiveToolHome([onSkill], { alpha: library.alpha });
-  const singleTree = itemsTable('skills', 'claude-cli') as unknown as FakeNode;
-  assert.equal(findAll(singleTree, el => el.className.split(/\s+/).includes('section-jump')).length, 0);
 });
 
-test('settleDescriptions prioritizes full filenames over descriptions when docked, while keeping name-cut on undocked tables', () => {
+test('domstub maps hyphenated data-* attributes to camelCase dataset keys', () => {
+  const probe = document.createElement('div') as unknown as FakeNode;
+  probe.setAttribute('data-foo-bar', 'ok');
+  assert.equal(probe.dataset.fooBar, 'ok');
+});
+
+test('settleDescriptions hides only the long-name row’s description when docked, while keeping name-cut on undocked tables', () => {
   const runSettle = (docked: boolean) => {
     const tableClasses = new Set<string>();
-    const cellClasses = new Set<string>();
-    const main = { offsetWidth: 320 };
-    const cell = {
-      clientWidth: 460,
-      classList: {
-        add: (name: string) => cellClasses.add(name),
-        remove: (name: string) => cellClasses.delete(name),
-      },
-      querySelector: (sel: string) => (sel === '.ov-name-main' ? main : null),
+    const makeRow = (mainWidth: number, cutAboutWidth: number, rawAboutWidth: number) => {
+      const classes = new Set<string>();
+      const cell = {
+        clientWidth: 460,
+        classList: {
+          add: (...names: string[]) => names.forEach(n => classes.add(n)),
+          remove: (...names: string[]) => names.forEach(n => classes.delete(n)),
+          contains: (name: string) => classes.has(name),
+        },
+        querySelector: (sel: string) => (sel === '.ov-name-main' ? { offsetWidth: mainWidth } : null),
+      };
+      const about = {
+        offsetTop: 0,
+        offsetHeight: 40,
+        get clientWidth() { return classes.has('name-cut') ? cutAboutWidth : rawAboutWidth; },
+        parentElement: cell,
+      };
+      return { classes, cell, about };
     };
-    const about = {
-      offsetTop: 0,
-      offsetHeight: 40,
-      get clientWidth() { return cellClasses.has('name-cut') ? 210 : 60; },
-      parentElement: cell,
-    };
+    const longRow = makeRow(320, 210, 60);
+    const shortRow = makeRow(120, 260, 260);
+    const rows = [longRow, shortRow];
     const table = {
       classList: {
-        remove: (name: string) => tableClasses.delete(name),
+        remove: (...names: string[]) => names.forEach(n => tableClasses.delete(n)),
         toggle: (name: string, on: boolean) => { if (on) tableClasses.add(name); else tableClasses.delete(name); },
         contains: (name: string) => tableClasses.has(name),
       },
       closest: (sel: string) => (docked && sel === '.docked' ? {} : null),
-      querySelectorAll: (sel: string) => (sel === '.ov-name-about' ? [about] : sel === '.name-cut' ? (cellClasses.has('name-cut') ? [cell] : []) : []),
+      querySelectorAll: (sel: string) => {
+        if (sel === '.ov-name-about') return rows.map(r => r.about);
+        if (sel === '.name-cut') return rows.filter(r => r.classes.has('name-cut')).map(r => r.cell);
+        if (sel === '.name-cut, .no-about') return rows.filter(r => r.classes.has('name-cut') || r.classes.has('no-about')).map(r => r.cell);
+        return [];
+      },
     };
     const prevAll = document.querySelectorAll;
     (document as unknown as { querySelectorAll: (sel: string) => unknown[] }).querySelectorAll = (sel: string) => (sel === '.ov' ? [table] : []);
     try { runAfterLayout(); } finally { (document as unknown as { querySelectorAll: typeof prevAll }).querySelectorAll = prevAll; }
-    return { nameCut: cellClasses.has('name-cut'), noAbout: tableClasses.has('no-about') };
+    return {
+      tableNoAbout: tableClasses.has('no-about'),
+      longNameCut: longRow.classes.has('name-cut'),
+      longCellNoAbout: longRow.classes.has('no-about'),
+      shortCellNoAbout: shortRow.classes.has('no-about'),
+    };
   };
-  assert.deepEqual(runSettle(false), { nameCut: true, noAbout: false });
-  assert.deepEqual(runSettle(true), { nameCut: false, noAbout: true });
+  assert.deepEqual(runSettle(false), { tableNoAbout: false, longNameCut: true, longCellNoAbout: false, shortCellNoAbout: false });
+  assert.deepEqual(runSettle(true), { tableNoAbout: false, longNameCut: false, longCellNoAbout: true, shortCellNoAbout: false });
 });
 
 const emptyKind = (tools: HarnessId[]) => ({ tools, items: [], library: {}, notices: [], gate: { state: 'open' }, unread: [], problems: [], access: { allowed: true } });

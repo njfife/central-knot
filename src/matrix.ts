@@ -265,7 +265,7 @@ function pluginRowEl(t: Table, row: PluginRow) {
 function pluginSection(t: Table, list: PluginRow[]) {
   if (!list.length) return null;
   return h('div', { role: 'rowgroup' },
-    h('div.ov-section.ov-section-plugins', { role: 'row', 'data-info-block': true },
+    h('div.ov-section.ov-section-plugins', { role: 'row', 'data-section': 'plugins', 'data-info-block': true },
       h('div.ov-section-label', { role: 'cell' },
         headingTick(t, 'plugins', 'Only through a plugin', list),
         h('strong.ov-section-title', {}, 'Only through a plugin'),
@@ -1932,8 +1932,14 @@ export function emptyList(empty: HTMLElement, tab?: { kind: PageKind; tool: Tool
  * segment whose kind has none here, `none` of that kind (pages.ts kindEmpty).
  */
 export const libraryTable = (none?: (kind: PageKind) => HTMLElement) => drawTable(useLibrary(), none);
-/** A tool's tab of one kind under Harnesses: its column first, and the rows it doesn't have under their own heading. */
+/** A tool's tab of one kind under Harnesses: its own mark on each row (opened details keep every tool, this tool first), and the rows it doesn't have under their own heading. */
 export const itemsTable = (which: PageKind, harness: Tool) => drawTable(useTab(which, harness));
+
+const EVERY_TOOL_CARD = 'Each switch turns an item on or off in every managed tool. Open a row to change one tool alone.';
+/** Column head on a tool's tab: states that each row's switch acts in every tool, opposite this tool's single mark column. */
+const switchColumnHead = (tool: Tool) => h('div.ov-tab-head', { role: 'row', 'data-info-block': true },
+  h('div.ov-tab-head-switch', { role: 'columnheader' }, 'Every tool', infoMark('tab-switch-info', 'Every tool', EVERY_TOOL_CARD)),
+  h('div.ov-tab-head-mark', { role: 'columnheader' }, names[tool]));
 
 /**
  * A table: its toolbar, bands and rows, under the headings On, Found, Only through a plugin, (on a tab) Not in it, and Off; on the
@@ -1972,18 +1978,23 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   // With no hit at all, the group's line on the reading goes under those words, in view.
   const said = nothing && inPlugins && coverageLine();
   if (said) nothing!.append(h('p.catalog-coverage', {}, said[0], ' · ', said[1]));
+  const legend = markLegend(t, all, plugins);
   const table = [
-    h('div.toolbar.fit-bar', {}, kindSwitch(t), h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(t), fromChoice(t), orderChoice(t), h('div.toolbar-end', {}, selectControl(t), toolbarState(t), usageControls(t))),
+    h('div.toolbar.fit-bar', {}, kindSwitch(t), h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(t), fromChoice(t), orderChoice(t), h('div.toolbar-end', {}, selectControl(t), toolbarState(t), usageControls(t), legend?.toggle ?? null)),
+    legend?.body ?? null,
     t.selectable ? selectBar(t, rowsDrawn) : null,
     usageBand(t),
     view.filter === 'unused' ? unusedBand(t, unusedShown) : null,
     bands(t),
     sectionJump(t, sections),
     // Its id keeps it where it was scrolled across a redraw (the dock's breakpoint crossed, say): tableId.
-    h('div.scroll.matrix', { id: tableId(t) },
-      // No column heads: each row's switch comes first, and its marks name their tools.
-      nothing ?? withToolCount(h('div.ov.ov-switched', { role: 'table', 'aria-label': `${tool ? nouns[t.kinds[0]!][1] : 'Items'} and where they are on` }, sections), columns(t).length),
-      markLegend(t, all, plugins))];
+    h('div.scroll.matrix', { id: tableId(t), onscroll: tool ? (event: Event) => {
+      const list = event.currentTarget as HTMLElement, jump = list.parentElement?.querySelector<HTMLElement>(':scope > .section-jump');
+      if (jump && !jump.hidden) syncJumpFirst(jump, list);
+    } : undefined },
+      // Library rows keep no column heads; a tool's tab heads its switch column with Every tool (switchColumnHead).
+      nothing ?? withToolCount(h('div.ov.ov-switched', { role: 'table', 'aria-label': `${tool ? nouns[t.kinds[0]!][1] : 'Items'} and where they are on` }, tool ? switchColumnHead(tool) : null, sections), columns(t).length),
+      legend?.foot ?? null)];
   // An item's details hold its versions, and a file in a row's details' place is read at length: their dock takes a share of the
   // width that grows with the window (style.css .dock-wide).
   if (openRow) return h(`div.page.ov-page.docked${fileInDetails(view, view.comparing) ? '.dock-wide' : ''}`, {}, h('div.dock-main', {}, table), pluginDock(t, openRow));
@@ -2397,22 +2408,28 @@ function rowMarks(t: Table, skill: ItemRow, size = 14, table = true) {
       return mark;
     }));
 }
-/** A row's marks in the table's columns (columns): `draw`'s for each tool its kind can be in, a blank of a mark's size in the others. */
+/** A row's marks: on a tool's tab, only the marks in `holds`; elsewhere, in the table's columns with a blank where its kind cannot be in a tool. */
 const inColumns = (t: Table, holds: Tool[], draw: (tool: Tool) => HTMLElement) =>
-  (t.tool ? holds : columns(t)).map(tool => (holds.includes(tool) ? draw(tool) : h('span.tool-mark.mark-blank', { 'aria-hidden': 'true' })));
+  t.tool ? holds.map(draw) : columns(t).map(tool => (holds.includes(tool) ? draw(tool) : h('span.tool-mark.mark-blank', { 'aria-hidden': 'true' })));
 
-/** The key under the table: the marks it shows, folded behind "Mark key" on a tool's tab. */
+/** One label per visual mark look on a tool's tab where multiple underlying states share a mark. */
+const TOOL_LOOK_WORDS: Record<string, string> = { 'on:': 'Has it', 'off:': 'Off here', 'none:': 'No copy', 'waits:clock': 'Waiting for sync' };
+
+/** The key: under the Library table, or toggled from the tool tab's toolbar ("What the marks mean") with one entry per visual look. */
 function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
   if (!columns(t).length) return null;
   const seen = new Map<keyof typeof keyWords, { look: MarkLook; glyph?: IconName }>();
   for (const skill of list) for (const each of markTools(t, toolsFor(t, skill.kind))) { const { look, glyph, key } = markOf(skill, each); seen.set(key, { look, glyph }); }
   // A plugin's own rows: on there, or off there (no copy kept: a plugin's item has none of its own).
   for (const row of plugins) for (const each of markTools(t, toolsFor(t, kindOf(row)))) if (row.copies[each as HarnessId]) seen.set(offIn(row, each as HarnessId) ? 'plugin-off' : 'on', { look: offIn(row, each as HarnessId) ? 'off' : 'on' });
-  const keyed = h('div.legend', { 'aria-label': 'Key' }, (Object.keys(keyWords) as (keyof typeof keyWords)[]).filter(key => seen.has(key))
-    .map(key => h('span.legend-item', {}, toolMark(seen.get(key)!.look, t.tool, seen.get(key)!.glyph, 12), keyWords[key])));
+  const entries = (Object.keys(keyWords) as (keyof typeof keyWords)[]).filter(key => seen.has(key)).map(key => ({ key, ...seen.get(key)! }));
+  const shown = t.tool ? [...new Map(entries.map(item => [`${item.look}:${item.glyph ?? ''}`, { ...item, label: TOOL_LOOK_WORDS[`${item.look}:${item.glyph ?? ''}`] ?? keyWords[item.key] }])).values()]
+    : entries.map(item => ({ ...item, label: keyWords[item.key] }));
+  const keyed = h('div.legend', { 'aria-label': 'Key' }, shown.map(item => h('span.legend-item', {}, toolMark(item.look, t.tool, item.glyph, 12), item.label)));
   if (!keyed.childElementCount) return null;
-  if (!t.tool) return keyed;
-  return h('div.legend-fold', {}, fold({ id: 'mark-legend', toggleId: 'mark-legend-toggle', label: 'Mark key', open: t.view.legendOpen, onToggle: open => { t.view.legendOpen = open; rerender(); } }, keyed));
+  if (!t.tool) return { foot: keyed };
+  const toggle = fold({ id: 'mark-legend', toggleId: 'mark-legend-toggle', label: 'What the marks mean', open: t.view.legendOpen, controls: 'mark-legend-body', onToggle: open => { t.view.legendOpen = open; rerender(); } });
+  return { toggle, body: t.view.legendOpen ? h('div.legend-band', { id: 'mark-legend-body' }, keyed) : undefined };
 }
 
 /** One row: its switch (in Select's mode, its tick), its name, a mark per tool, and the chevron that opens its details. */
@@ -2837,19 +2854,35 @@ function section(t: Table, role: Role, rows: ItemRow[], truly: ItemRow[]) {
     rows.flatMap(skill => row(t, skill)));
 }
 
+/** Hides the jump link for whichever section heading is already first in sight at the top of the list. */
+function syncJumpFirst(jump: HTMLElement, list: HTMLElement): void {
+  const { top, bottom } = list.getBoundingClientRect();
+  const first = [...list.querySelectorAll<HTMLElement>('.ov-section')].find(head => {
+    const box = head.getBoundingClientRect();
+    return box.bottom > top + 2 && box.top < bottom - 2;
+  });
+  for (const link of jump.querySelectorAll<HTMLElement>('.section-jump-link')) link.hidden = !!first && link.id === `jump-${first.dataset.section}`;
+}
+
 /** Small jump to the drawn sections on a long tool tab; counts come from the drawn headings and nothing is stored. */
 function sectionJump(t: Table, sections: (HTMLElement | null | false | undefined)[]) {
   if (!t.tool) return null;
   const heads = sections.map(group => group && group.querySelector<HTMLElement>('.ov-section')).filter((head): head is HTMLElement => !!head);
   if (heads.length < 2) return null;
-  const jump = (head: HTMLElement) => {
-    const list = head.closest<HTMLElement>('.scroll');
-    if (list) list.scrollTop += head.getBoundingClientRect().top - list.getBoundingClientRect().top;
-  };
-  return h('nav.section-jump', { 'aria-label': 'Jump to section', hidden: true }, heads.map(head =>
-    h('button.section-jump-btn', { type: 'button', id: `jump-${head.dataset.section || 'plugins'}`, onclick: () => jump(head) },
-      head.querySelector('.ov-section-title')?.textContent ?? '',
-      h('span.section-jump-count', {}, head.querySelector('.ov-section-count')?.textContent ?? ''))));
+  const nav = h('nav.section-jump', { 'aria-label': 'Jump to section', hidden: true }, h('span.section-jump-lead', {}, 'Jump to:'),
+    heads.map((head, index) => h('button.section-jump-link', {
+      type: 'button', id: `jump-${head.dataset.section}`, hidden: index === 0,
+      onclick: () => {
+        const list = head.closest<HTMLElement>('.scroll');
+        if (list) list.scrollTop = index === 0 ? 0 : list.scrollTop + head.getBoundingClientRect().top - list.getBoundingClientRect().top;
+        head.classList.remove('section-flash');
+        void head.offsetWidth;
+        head.classList.add('section-flash');
+        head.addEventListener('animationend', () => head.classList.remove('section-flash'), { once: true });
+        if (list) syncJumpFirst(nav, list);
+      },
+    }, head.querySelector('.ov-section-title')?.textContent ?? '', h('span.section-jump-count', {}, head.querySelector('.ov-section-count')?.textContent ?? ''))));
+  return nav;
 }
 
 /** The card behind the Found heading's mark: what Add does, or what Synchronize everything skips. */
@@ -3175,23 +3208,23 @@ const ABOUT_MIN = 90;
 const NAME_CUT_MIN = 280;
 
 /**
- * A table's descriptions are all shown or all left out, so rows never differ: when the narrowest one has room for fewer
- * than about twelve characters, every row leaves its description out (.no-about); its name's tooltip still has it.
- * A description pushed onto the cell's hidden second line, after a tag or pill that took the room, has none. A name that
- * takes more than half its name cell (and NAME_CUT_MIN) is cut first (.name-cut), so one very long name doesn't take every
- * description away; once every description is left out, the cut is taken off again and the name has its whole cell.
- * Run after layout (dom.ts afterLayout).
+ * Undocked tables keep every row's description on or off together (.no-about on the table), cutting a long name past half
+ * its cell and NAME_CUT_MIN (.name-cut) first so one long name doesn't drop every description. Docked tables never cut a
+ * name for its description; only a row whose own description lacks room hides it (.no-about on its .ov-name cell), while
+ * other rows keep theirs (full text stays on the cell's tooltip). Run after layout (dom.ts afterLayout).
  */
 function settleDescriptions(): void {
   const short = (about: HTMLElement) => about.offsetTop >= about.offsetHeight || about.clientWidth < ABOUT_MIN;
   for (const table of document.querySelectorAll<HTMLElement>('.ov')) {
     table.classList.remove('no-about');
-    for (const cut of table.querySelectorAll('.name-cut')) cut.classList.remove('name-cut');
+    for (const node of table.querySelectorAll('.name-cut, .no-about')) node.classList.remove('name-cut', 'no-about');
     const abouts = [...table.querySelectorAll<HTMLElement>('.ov-name-about')];
-    if (!table.closest('.docked')) {
-      for (const cell of abouts.filter(short).map(about => about.parentElement!)) {
-        if (cell.querySelector<HTMLElement>('.ov-name-main')!.offsetWidth > Math.max(cell.clientWidth / 2, NAME_CUT_MIN)) cell.classList.add('name-cut');
-      }
+    if (table.closest('.docked')) {
+      for (const about of abouts.filter(short)) about.parentElement!.classList.add('no-about');
+      continue;
+    }
+    for (const cell of abouts.filter(short).map(about => about.parentElement!)) {
+      if (cell.querySelector<HTMLElement>('.ov-name-main')!.offsetWidth > Math.max(cell.clientWidth / 2, NAME_CUT_MIN)) cell.classList.add('name-cut');
     }
     table.classList.toggle('no-about', abouts.some(short));
     if (table.classList.contains('no-about')) for (const cut of table.querySelectorAll('.name-cut')) cut.classList.remove('name-cut');
@@ -3199,15 +3232,16 @@ function settleDescriptions(): void {
 }
 afterLayout(settleDescriptions);
 
-/** Shows a tool tab's section jump only when its collapsed rows overflow the list height. */
+/** Shows a tool tab's section jump only when its collapsed rows overflow the list height (subtracting opened details and inline file panels, both .details). */
 function settleSectionJump(): void {
   const jump = document.querySelector<HTMLElement>('.harness-page .section-jump');
   const scroller = jump?.parentElement?.querySelector<HTMLElement>(':scope > .scroll.matrix');
   const table = scroller?.querySelector<HTMLElement>('.ov');
   if (!jump || !scroller || !table || !scroller.clientHeight) return;
   jump.hidden = true;
-  const open = [...table.querySelectorAll<HTMLElement>(':scope > [role="rowgroup"] > :is(.details, .file-panel)')].reduce((sum, panel) => sum + panel.offsetHeight, 0);
+  const open = [...table.querySelectorAll<HTMLElement>(':scope > [role="rowgroup"] > .details')].reduce((sum, panel) => sum + panel.offsetHeight, 0);
   jump.hidden = table.offsetHeight - open <= scroller.clientHeight + 1;
+  if (!jump.hidden) syncJumpFirst(jump, scroller);
 }
 afterLayout(settleSectionJump);
 
