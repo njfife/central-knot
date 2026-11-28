@@ -16536,8 +16536,9 @@ async function libraryFlow() {
   const visibleChips = () => r.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].filter(e => !e.hidden).map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`);
   const allChips = () => r.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`);
   const moreChip = () => r.run(`(m => m && !m.hidden ? m.textContent?.trim() : null)(document.querySelector('#outcome-reload-more'))`);
+  const moreLabel = n => (n > 0 ? `+${n} more ${n === 1 ? 'step' : 'steps'}` : null);
   const visibleTools = () => r.run(`new Set([...document.querySelectorAll('#header .result-reloads .result-copies > *')].filter(e => !e.hidden).map(e => e.dataset.reloadTool)).size`);
-  const wholeLines = () => r.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => [...row.children].map(el => el.tagName === 'BUTTON' ? [el.textContent?.trim(), el.dataset.copy] : el.textContent?.trim()))`);
+  const wholeLines = () => r.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => [...row.querySelectorAll('button, .reload-row-text, .reload-row-note')].map(el => el.tagName === 'BUTTON' ? [el.textContent?.trim(), el.dataset.copy] : el.textContent?.trim()))`);
   const headerHeight = () => r.run(`document.querySelector('#header').offsetHeight`);
   const row1Text = () => r.text('#header [data-outcome] .band-text');
   const rShots = async (name, size, railMode) => {
@@ -16650,7 +16651,7 @@ async function libraryFlow() {
   for (const [label, size, railMode] of [['reload-two-chip-860', SMALLEST, undefined], ['reload-two-chip-1316-open', [1316, 819], false], ['reload-two-chip-1316-rail', [1316, 819], true]]) {
     await sizeTo(r, ...size);
     if (railMode !== undefined && await r.run(`document.body.classList.contains('rail')`) !== railMode) await r.click('#sidebar-toggle');
-    same(`two-chip folded fits at ${label} with 48px header and +1 more for chipless Codex`, [await r.run(CUT_OFF), await headerHeight(), await visibleTools(), await moreChip()], [[], 48, 2, '+1 more']);
+    same(`two-chip folded fits at ${label} with 48px header and +1 more step for chipless Codex`, [await r.run(CUT_OFF), await headerHeight(), await visibleTools(), await moreChip()], [[], 48, 2, '+1 more step']);
     await rShots(label, size, railMode);
     await r.click('#outcome-reload-more');
     same(`two-chip Show all at ${label} lists Copilot CLI, Codex conditional and Pi once each in order`, [await r.run(CUT_OFF), await wholeLines()], [[], [
@@ -16685,16 +16686,20 @@ async function libraryFlow() {
     await sizeTo(r, ...size);
     if (railMode !== undefined && await r.run(`document.body.classList.contains('rail')`) !== railMode) await r.click('#sidebar-toggle');
     const vis = await visibleTools(), more = await moreChip();
-    same(`five-chip folded stays 48px without clipping at ${label} and counts unshown rows once per tool`, [await r.run(CUT_OFF), await headerHeight(), more], [[], 48, 5 - vis > 0 ? `+${5 - vis} more` : null]);
+    same(`five-chip folded stays 48px without clipping at ${label} and counts unshown rows once per tool`, [await r.run(CUT_OFF), await headerHeight(), more], [[], 48, moreLabel(5 - vis)]);
     await rShots(label, size, railMode);
     await r.click(more ? '#outcome-reload-more' : '#problems-show-all');
-    same(`five-chip Show all at ${label} shows all five tool lines once each with paired Codex commands`, [await r.run(CUT_OFF), await wholeLines()], [[], [
+    same(`five-chip Show all at ${label} shows all five tool lines once each with paired Codex commands kept together and Show less on the summary line`, [
+      await r.run(CUT_OFF), await wholeLines(),
+      await r.run(`(() => { const t = document.querySelector('#result-whole .band-text')?.getBoundingClientRect(), s = document.querySelector('#result-whole #problems-show-all')?.getBoundingClientRect(); return !!t && !!s && Math.abs(s.bottom - t.bottom) <= 2 && (t.height > 20 || Math.abs(s.top - t.top) <= 2); })()`),
+      await r.run(`(() => { const p = document.querySelector('#result-whole .reload-cmd-part'); if (!p) return false; const ys = [...p.children].map(c => Math.round(c.getBoundingClientRect().top + c.getBoundingClientRect().height / 2)); return Math.max(...ys) - Math.min(...ys) <= 2; })()`),
+    ], [[], [
       [['Claude Code: claude --continue', 'claude --continue'], 'Restart; keeps the chat.'],
       [['Copilot CLI: /skills reload', '/skills reload']],
-      [['Codex: /new', '/new'], 'for a new chat, or', ['codex resume --last', 'codex resume --last'], 'to restart and keep the chat.'],
+      [['Codex: /new', '/new'], 'for a new chat,', 'or', ['codex resume --last', 'codex resume --last'], 'to restart and keep the chat.'],
       [['Pi: /reload', '/reload']],
       [['OpenCode: opencode --continue', 'opencode --continue'], 'Restart; keeps the chat.'],
-    ]]);
+    ], true, true]);
     await rShots(`${label}-whole`, size, railMode);
     await r.click('#problems-show-all');
   }
@@ -16717,7 +16722,7 @@ async function libraryFlow() {
       const vis = await visibleTools();
       same(`five-chip + problem line keeps header 48px without clipping and counts unshown rows once per tool at ${label}`, [
         await r.run(CUT_OFF), await headerHeight(), await r.exists('#header .result-row2'), await moreChip(),
-      ], [[], 48, true, `+${5 - vis} more`]);
+      ], [[], 48, true, moreLabel(5 - vis)]);
       await rShots(label, size, railMode);
     }
     await sizeTo(r, 1316, 819);
@@ -16732,7 +16737,7 @@ async function libraryFlow() {
   } finally { chmodSync(join(R.home, '.claude/skills'), 0o755); }
   await fullSize(r);
   // Off-header bands (History and Settings) fold 3+ shown reload steps behind Reload steps (N), keeping Undo before it and saying each command once.
-  const bandRows = () => r.run(`[...document.querySelectorAll('.band-done .reload-row')].map(row => [...row.children].map(el => el.tagName === 'BUTTON' ? [el.textContent?.trim(), el.dataset.copy] : el.textContent?.trim()))`);
+  const bandRows = () => r.run(`[...document.querySelectorAll('.band-done .reload-row')].map(row => [...row.querySelectorAll('button, .reload-row-text, .reload-row-note')].map(el => el.tagName === 'BUTTON' ? [el.textContent?.trim(), el.dataset.copy] : el.textContent?.trim()))`);
   const foldState = () => r.run(`(() => { const d = document.querySelector('#outcome-reloads-fold'), s = document.querySelector('#outcome-reloads-toggle'), u = document.querySelector('#outcome-undo'), x = document.querySelector('#outcome-dismiss'), first = d?.querySelector('.reload-row'); const sr = s?.getBoundingClientRect(), ur = u?.getBoundingClientRect(), xr = x?.getBoundingClientRect(), fr = first?.getBoundingClientRect(); const gap = d?.open && sr && fr ? Math.round(fr.top - sr.bottom) : null; return { exists: !!d, open: !!d?.open, label: s?.textContent?.trim() ?? null, tall: !!sr && sr.height >= 24, gapOk: gap === null || (gap >= 4 && gap <= 6), undoBefore: !!ur && !!sr && ur.bottom <= sr.top + 2, dismissBefore: !!xr && !!sr && xr.bottom <= sr.top + 2 }; })()`);
   await r.click(`#${rowPart('switch', 'mcp', 'docs')}`);
   await done(r);
@@ -16748,7 +16753,7 @@ async function libraryFlow() {
   await r.click('#outcome-reloads-toggle');
   same('opening History Reload steps (4) shows all 4 single-mention rows with 4–6px gap, keeps toggle >=24px, and copies secondary command', [await r.run(CUT_OFF), (await foldState()).open, (await foldState()).tall, (await foldState()).gapOk, await bandRows()], [[], true, true, true, [
     [['Claude Code: claude --continue', 'claude --continue'], 'Restart; keeps the chat.'],
-    [['Codex: /new', '/new'], 'for a new chat, or', ['codex resume --last', 'codex resume --last'], 'to restart and keep the chat.'],
+    [['Codex: /new', '/new'], 'for a new chat,', 'or', ['codex resume --last', 'codex resume --last'], 'to restart and keep the chat.'],
     [['Pi: /reload', '/reload']],
     [['OpenCode: opencode --continue', 'opencode --continue'], 'Restart; keeps the chat.'],
   ]]);

@@ -291,7 +291,7 @@ window.addEventListener('keydown', event => { if (event.key === 'Escape' && (clo
 // come up to date), except while an editor's text area has the focus: drawn again, it would lose its Undo, and its page draws no notices.
 window.addEventListener('focus', () => { if (!document.activeElement?.matches('textarea.ins-text')) rerender(); });
 
-// Laid out, and at each resize: fit reload chips on Row 2 (+N more for any row with no chip in sight) and show Show all on cut or hidden advice.
+// Laid out, and at each resize: fit reload chips on Row 2 (+N more step(s) for any row with no chip in sight) and show Show all on cut or hidden advice.
 const cut = (text: Element) => text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight;
 function fitReloadChips(header: HTMLElement): boolean {
   const strip = header.querySelector<HTMLElement>('.header-result:not(.result-whole) .result-reloads');
@@ -300,7 +300,7 @@ function fitReloadChips(header: HTMLElement): boolean {
   const total = Number(more?.dataset.reloadRows || 0);
   const syncMore = () => {
     const hiddenRows = unshownReloadRows(total, chips.map(chip => ({ tool: chip.dataset.reloadTool, hidden: Boolean(chip.hidden) })));
-    if (more) { more.textContent = hiddenRows ? `+${hiddenRows} more` : ''; more.hidden = !hiddenRows; }
+    if (more) { more.textContent = hiddenRows ? `+${hiddenRows} more ${hiddenRows === 1 ? 'step' : 'steps'}` : ''; more.hidden = !hiddenRows; }
     return hiddenRows > 0;
   };
   for (const chip of chips) chip.hidden = false;

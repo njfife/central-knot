@@ -126,20 +126,22 @@ test('reloadLines says each command once paired with its own note, distinguishes
   ]);
   const view = reloadLines(fourSkill, 'whole') as unknown as FakeNode;
   const rows = findAll(view, el => el.className.split(/\s+/).includes('reload-row'));
+  const partShape = (el: FakeNode): unknown => (
+    el.tag === 'button' ? ['button', textOf(el), el.attrs['data-copy']]
+      : el.className === 'reload-cmd-part' ? ['reload-cmd-part', (el.children ?? []).map(child => partShape(child as FakeNode))]
+      : [el.className, textOf(el)]
+  );
   const rowShape = (row: FakeNode) => ({
     cmdRow: row.className.split(/\s+/).includes('reload-row-cmd'),
-    parts: (row.children ?? []).map(child => {
-      const el = child as FakeNode;
-      return el.tag === 'button' ? ['button', textOf(el), el.attrs['data-copy']] : [el.className, textOf(el)];
-    }),
+    parts: (row.children ?? []).map(child => partShape(child as FakeNode)),
   });
   assert.deepEqual(rows.map(rowShape), [
     { cmdRow: true, parts: [['button', 'Copilot CLI: /skills reload', '/skills reload']] },
     { cmdRow: false, parts: [['reload-row-text', 'Codex picks it up at the next turn; if not, start a new chat.']] },
     { cmdRow: true, parts: [['button', 'Pi: /reload', '/reload']] },
-    { cmdRow: true, parts: [['button', 'Antigravity: /skills reload', '/skills reload'], ['reload-row-note', 'Antigravity reads it at the next turn anyway; this is only for the CLI’s slash menu.']] },
+    { cmdRow: true, parts: [['button', 'Antigravity: /skills reload', '/skills reload'], ['reload-row-note', 'Optional: it only refreshes the CLI’s slash menu.']] },
   ]);
-  // Secondary command + desktop app caveat (Codex MCP both + Claude MCP both): each command paired with what it is for, reading as two ways not three.
+  // Secondary command + desktop app caveat (Codex MCP both + Claude MCP both): each command paired with its purpose and grouped before "or" on wrap.
   const bothMcp = reloadAdvice([
     { tool: 'claude-cli', kind: 'mcp', key: 'docs', on: true },
     { tool: 'codex-cli', kind: 'mcp', key: 'docs', on: true },
@@ -148,8 +150,12 @@ test('reloadLines says each command once paired with its own note, distinguishes
   assert.deepEqual(mcpRows.map(rowShape), [
     { cmdRow: true, parts: [['button', 'Claude Code: claude --continue', 'claude --continue'], ['reload-row-note', 'Restart (keeps the chat), or restart Claude desktop.']] },
     { cmdRow: true, parts: [
-      ['button', 'Codex: /new', '/new'], ['reload-row-note', 'for a new chat, or'],
-      ['button', 'codex resume --last', 'codex resume --last'], ['reload-row-note', 'to restart and keep the chat; restart the ChatGPT desktop app if it is open.'],
+      ['button', 'Codex: /new', '/new'], ['reload-row-note', 'for a new chat,'],
+      ['reload-cmd-part', [
+        ['reload-row-note', 'or'],
+        ['button', 'codex resume --last', 'codex resume --last'],
+        ['reload-row-note', 'to restart and keep the chat; restart the ChatGPT desktop app if it is open.'],
+      ]],
     ] },
   ]);
 });

@@ -1086,7 +1086,7 @@ export function reloadButton(item: { chip?: string; command: string; title: stri
 export const unshownReloadRows = (total: number, chips: readonly { tool?: string; hidden: boolean }[]): number =>
   Math.max(0, total - new Set(chips.filter(chip => !chip.hidden && chip.tool).map(chip => chip.tool)).size);
 
-/** One non-wrapping line of per-tool reload chips for the folded header, with +N more opening Show all for any unshown row. */
+/** One non-wrapping line of per-tool reload chips for the folded header, with +N more step(s) opening Show all for any unshown row. */
 export function reloadChips(advice: ReloadAdvice, of: typeof state.shownWhole): HTMLElement | null {
   const chips = advice.items.flatMap(item => [
     ...(item.chip ? [{ tool: item.tool, chip: item.chip, command: item.command, title: item.title!, id: `outcome-copy-${item.tool}` }] : []),
@@ -1104,15 +1104,17 @@ export function reloadChips(advice: ReloadAdvice, of: typeof state.shownWhole): 
 
 const RELOAD_FOLD_FROM = 3;
 let reloadFoldOpen: object | undefined;
-/** One reload step's row: each distinct command once paired with its own note, or plain text when there is no command. */
+/** One reload step's row: each distinct command once paired with its own note (grouped so a wrap never parts a command from its purpose), or plain text when there is no command. */
 function reloadRow(item: ReloadItem): HTMLElement {
   if (!item.command) return h('div.reload-row', {}, h('span.reload-row-text', {}, item.text));
   const parts: Child[] = [
     reloadButton({ chip: item.chip!, command: item.command, title: item.title! }, `outcome-copy-${item.tool}`),
     ...(item.note ? [h('span.reload-row-note', {}, item.note)] : []),
     ...(item.more ?? []).flatMap((extra, at) => (extra.command
-      ? [reloadButton({ ...extra, command: extra.command }, `outcome-copy-${item.tool}-${at + 1}`),
-        ...(extra.note ? [h('span.reload-row-note', {}, extra.note)] : [])]
+      ? [h('span.reload-cmd-part', {},
+        ...(extra.lead ? [h('span.reload-row-note', {}, extra.lead)] : []),
+        reloadButton({ ...extra, command: extra.command }, `outcome-copy-${item.tool}-${at + 1}`),
+        ...(extra.note ? [h('span.reload-row-note', {}, extra.note)] : []))]
       : [])),
   ];
   return h('div.reload-row.reload-row-cmd', {}, parts);
