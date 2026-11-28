@@ -9,7 +9,18 @@ import type { HarnessId, HomeView, InstalledPlugin, PluginsView } from '../src/t
 import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
-installDom({}, { byId: id => findById(rendered, id) ?? null });
+let onNavigate: ((page: string) => void) | undefined;
+let savedProfiles: unknown[] = [];
+let saveProblem: string | undefined;
+let switchStopped: string | undefined;
+let nextHome: HomeView | null = null;
+const { announcement } = installDom({
+  onNavigate: (fn: (page: string) => void) => { onNavigate = fn; },
+  saveProfile: async (edit: unknown) => { savedProfiles.push(edit); return saveProblem ? { problem: saveProblem } : { profiles: app.home?.profiles }; },
+  switchProfile: async () => (switchStopped ? { stopped: switchStopped } : {}),
+  selectHome: async () => nextHome,
+  readUsage: async () => ({ at: '2026-11-20T00:00:00.000Z', tools: [] }),
+}, { byId: id => findById(rendered, id) ?? null });
 
 const { state: app } = await import('../src/app.ts');
 const { profilesPage } = await import('../src/profilespage.ts');
@@ -19,8 +30,8 @@ const { market, resetMarket } = await import('../src/pluginstate.ts');
 const triage = 'plugin:skill:alpha@team/triage';
 /** A home where each tool has alpha installed, with its one skill triage, as `installs` says, and the profile Work ticks triage. */
 function homeWith(installs: [HarnessId, Partial<InstalledPlugin>][]): HomeView {
-  const kind = { tools: installs.map(([tool]) => tool), items: [], library: {}, gate: { state: 'ready' } };
-  return { home: '/home', sync: { access: { allowed: true }, gate: { state: 'ready' }, caughtUp: [], managed: installs.map(([tool]) => tool) }, skills: kind, mcp: kind, agents: kind,
+  const kind = { tools: installs.map(([tool]) => tool), items: [], library: {}, gate: { state: 'ready' }, notices: [] };
+  return { home: '/home', label: 'Home', mode: 'fixture', sync: { access: { allowed: true }, gate: { state: 'ready' }, caughtUp: [], takenIn: [], managed: installs.map(([tool]) => tool) }, skills: kind, mcp: kind, agents: kind,
     pluginItems: installs.map(([tool, install]) => ({ tool, plugin: 'alpha', marketName: 'team', source: '/market', listed: true, items: [{ kind: 'skill', name: 'triage', description: '' }], ...install })),
     profiles: { profiles: [{ id: 'work', name: 'Work', items: [triage], switchesPluginItems: true }], plugins: [] } } as unknown as HomeView;
 }
@@ -105,4 +116,96 @@ test('With no profile in use, the page opens the one last switched to, titled as
   app.page = 'library';
   findById(rendered, 'status-profile-edit')?.onclick?.({});
   assert.deepEqual([app.page, profileState.open], ['profiles', 'last'], 'it lands on Profiles, with Last open');
+});
+
+const { newItem } = await import('../src/library.ts');
+function changedHome(home = '/home') {
+  const base = homeWith([]), kind = (library: Record<string, unknown>) => ({ ...base.skills, items: [], library });
+  return { ...base, home, skills: kind({ notes: { ...newItem('notes', 'notes'), on: true }, standup: { ...newItem('standup', 'standup'), on: true } }), mcp: kind({}), agents: kind({}),
+    profiles: { profiles: [{ id: 'last', name: 'Last', items: ['skill:notes'], switchesPluginItems: true }, { id: 'other', name: 'Other', items: ['skill:standup'], switchesPluginItems: true }], plugins: [], last: 'last' } } as unknown as HomeView;
+}
+
+test('Status bar menu frames three profiles with one rule after changed acts and one before Edit profiles…, and pressing a wholly held profile reads its refusal', async () => {
+  const { profileStatus } = await import('../src/profilespage.ts');
+  const three = changedHome();
+  three.profiles.profiles.splice(1, 0, { id: 'first', name: 'First', items: ['skill:standup'], switchesPluginItems: true });
+  app.home = three;
+  const toggleMenu = () => { findById(profileStatus() as unknown as FakeNode, 'status-profile')?.onclick?.({ stopPropagation() {} }); return profileStatus() as unknown as FakeNode; };
+  rendered = toggleMenu();
+  try {
+    const kids = (findNode(rendered, el => el.className.split(/\s+/).includes('pf-menu'))?.children ?? []).map(el => (el as FakeNode).attrs?.id || (el as FakeNode).className);
+    assert.deepEqual(kids, ['pf-menu-head', 'status-profile-switch-back', 'status-profile-see-changes', 'pf-menu-sep', 'status-profile-first', 'status-profile-other', 'pf-menu-sep', 'status-profile-edit']);
+  } finally { toggleMenu(); }
+  // Wholly held changed profile keeps its clickable name row, and pressing it announces the refusal.
+  const held = homeWith([['codex-cli', { off: true }]]);
+  held.profiles.last = 'work';
+  app.home = held;
+  switchStopped = 'alpha is off in Codex. Nothing was switched.';
+  rendered = toggleMenu();
+  try {
+    findById(rendered, 'status-profile-work')?.onclick?.({ detail: 1 });
+    await new Promise(done => setImmediate(done));
+    assert.equal(textOf(announcement), switchStopped);
+  } finally { switchStopped = undefined; if (findNode(profileStatus() as unknown as FakeNode, el => el.className.split(/\s+/).includes('pf-menu'))) toggleMenu(); }
+});
+
+test('See changes… saves an unblurred rename through saveRename (skipping unchanged names, surfacing failures), clears Find/delete and closes the menu', async () => {
+  const { profileState } = await import('../src/app.ts');
+  const { profileStatus } = await import('../src/profilespage.ts');
+  const runSeeChanges = async (typed: string) => {
+    savedProfiles = [];
+    app.page = 'profiles';
+    profileState.open = 'other';
+    profileState.confirmDelete = 'other';
+    profileState.renaming = 'other';
+    const input = findById(profilesPage() as unknown as FakeNode, 'profile-name') as unknown as { oninput?: (e: unknown) => void; onblur?: (e: unknown) => void };
+    input?.oninput?.({ target: { value: typed } });
+    onNavigate?.('settings');
+    input?.onblur?.({ target: { value: typed, isConnected: false } });
+    assert.deepEqual(savedProfiles, [], 'disconnected blur on Settings shortcut did not save the rename');
+    findById(profileStatus() as unknown as FakeNode, 'status-profile')?.onclick?.({ stopPropagation() {} });
+    findById(profileStatus() as unknown as FakeNode, 'status-profile-see-changes')?.onclick?.({});
+    await new Promise(done => setImmediate(done));
+  };
+  app.home = changedHome();
+  (findById(profilesPage() as unknown as FakeNode, 'profile-find') as unknown as { oninput?: (e: unknown) => void })?.oninput?.({ target: { value: 'zzz' } });
+  await runSeeChanges(' Other ');
+  assert.deepEqual(savedProfiles, [], 'an unchanged rename saves nothing');
+  await runSeeChanges('Other Renamed');
+  rendered = profilesPage() as unknown as FakeNode;
+  assert.deepEqual([savedProfiles, app.page, profileState.open, profileState.confirmDelete, profileState.renaming, profileState.draft, (findById(rendered, 'profile-find') as unknown as { value?: string })?.value, !!findById(profileStatus() as unknown as FakeNode, 'status-profile-see-changes')],
+    [[{ id: 'other', name: 'Other Renamed' }], 'profiles', 'last', undefined, undefined, undefined, '', false]);
+  // Read-only or failing save: not silently dropped, leaves the blur's failure announced.
+  app.home = { ...app.home, sync: { ...app.home.sync, access: { allowed: false, reason: 'Preview only.' } } };
+  saveProblem = 'Preview only.';
+  try {
+    await runSeeChanges('Other ReadOnly');
+    assert.deepEqual([savedProfiles, textOf(announcement)], [[{ id: 'other', name: 'Other ReadOnly' }], 'Preview only.']);
+  } finally { saveProblem = undefined; }
+});
+
+test('Leaving Profiles ends only See changes…’s pin; the page toggle’s pin survives leaving, and no pin survives another home', async () => {
+  const { loadHome, profileState, showPage } = await import('../src/app.ts');
+  const { profileStatus } = await import('../src/profilespage.ts');
+  const homeA = changedHome();
+  app.home = homeA;
+  app.page = 'library';
+  findById(profileStatus() as unknown as FakeNode, 'status-profile')?.onclick?.({ stopPropagation() {} });
+  findById(profileStatus() as unknown as FakeNode, 'status-profile-see-changes')?.onclick?.({});
+  const pinnedOff = () => profileState.changes?.off;
+  assert.deepEqual(pinnedOff(), ['skill:standup'], 'See changes… pins Changes');
+  showPage('library');
+  showPage('profiles');
+  assert.equal(pinnedOff(), undefined, 'See changes… pin ends on leaving Profiles');
+  findById(profilesPage() as unknown as FakeNode, 'profile-changes')?.onclick?.({});
+  assert.deepEqual(pinnedOff(), ['skill:standup'], 'page toggle pins Changes');
+  showPage('library');
+  showPage('profiles');
+  const ownSurvived = pinnedOff();
+  if (!profileState.changes) findById(profilesPage() as unknown as FakeNode, 'profile-changes')?.onclick?.({});
+  nextHome = { ...homeWith([['codex-cli', {}]]), home: '/other-home', profiles: { profiles: [], plugins: [] } } as unknown as HomeView;
+  await loadHome('actual');
+  nextHome = homeA;
+  await loadHome('fixture');
+  assert.deepEqual([ownSurvived, profileState.changes], [['skill:standup'], undefined], 'page toggle pin survives leaving Profiles, and no pin survives switching to another home and back');
 });

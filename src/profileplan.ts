@@ -22,7 +22,7 @@
 //   `profiles.ts runCopilotRules` writes it.
 // - `inUse` holds while a switch changes and holds nothing (never stored); while none is, the one last switched to is named
 //   `Everyday · changed` (`lastSwitched`, from History, never stored either): `profileNow` is the one rule every place that names
-//   the profile in use asks. `endedByChanges` says before a Library click which in use it would end (its changes projected over the
+//   the profile in use asks; `switchSaid`, `switchOffer` and `listedChangeCount` are the shared rules for switch eligibility and listed changes, and `statusMenuRows` orders the status bar's profile menu (a heading, Switch back and See changes… under `changed`). `endedByChanges` says before a Library click which in use it would end (its changes projected over the
 //   live and plugin items: projected), by the rule its result says after it (`endedProfiles`), and the name every place would then give;
 //   `listedPlugins` is the one rule for which plugin rows
 //   a profile lists and `listedChanges` gives each listed changing row once with its cell words (read by the header's short line,
@@ -543,6 +543,17 @@ export const namedCount = (profile: Pick<Profile, 'items' | 'switchesPluginItems
  * it would turn every item off, so it is offered once it has an item.
  */
 export const switchable = (profile: Pick<Profile, 'items' | 'switchesPluginItems'>, live: LiveItem[], plugins: PluginLive[]) => namedCount(profile, live, plugins) > 0;
+/** What a switch to `profile` will change, in words ('' when it changes nothing — in use or wholly held). */
+export const switchSaid = (profile: Profile, live: LiveItem[], plugins: PluginLive[], turns = switchPlan(profile, live), plugs = pluginPlan(profile, plugins), whole = wholeTurns(profile, plugins)) =>
+  changeWords(allTurns(turns, plugs), wholeCounts({ installs: whole }), 'will');
+/** Whether a switch to `profile` is offered (switchable and has at least one turnable change, even if other items are held) and can run (`canEdit`). Shared by Profiles' Switch and the status bar menu's Switch back. */
+export function switchOffer(profile: Profile, live: LiveItem[], plugins: PluginLive[], canEdit: boolean, said = switchSaid(profile, live, plugins)) {
+  const offered = !!said && switchable(profile, live, plugins);
+  return { offered, enabled: offered && canEdit };
+}
+/** How many listed rows switching to a profile changes (on, off, or tools). */
+export const listedChangeCount = (changes: Pick<ReturnType<typeof listedChanges>, 'on' | 'off' | 'retooled'>) =>
+  changes.on.length + changes.off.length + changes.retooled.length;
 
 /**
  * The profiles in use: each one switching to which would change nothing and hold nothing, of its library items (switchPlan, their
@@ -586,6 +597,16 @@ export function profileNow(view: Pick<ProfilesView, 'profiles' | 'last'>, live: 
 export const nameNow = (now: ProfileNow, profile: Profile) => (profile.id === now.changed?.id ? changedName(profile.name) : profile.name);
 /** What leads profileNow's name where a sentence says it (the status bar's hover, Harnesses' line): "Profile in use", or for `Everyday · changed` "Profile". */
 export const nowLead = (now: ProfileNow) => (now.changed ? 'Profile' : 'Profile in use');
+/** Status bar profile menu rows in order (profilespage.ts): each profile, with a heading, Switch back (switchOffer) and See changes… (listedChangeCount) when `now.changed` has actions. */
+export type MenuRow = { kind: 'profile' | 'changed-heading' | 'switch-back' | 'see-changes'; profile: Profile };
+export function statusMenuRows(profiles: readonly Profile[], now: ProfileNow, live: LiveItem[], plugins: PluginLive[], canEdit: boolean): MenuRow[] {
+  return profiles.flatMap((profile): MenuRow[] => {
+    if (profile.id !== now.changed?.id || !switchable(profile, live, plugins)) return [{ kind: 'profile', profile }];
+    const actions: MenuRow[] = [...(switchOffer(profile, live, plugins, canEdit).enabled ? [{ kind: 'switch-back' as const, profile }] : []),
+      ...(listedChangeCount(listedChanges(profile, live, plugins)) > 0 ? [{ kind: 'see-changes' as const, profile }] : [])];
+    return actions.length ? [{ kind: 'changed-heading', profile }, ...actions] : [{ kind: 'profile', profile }];
+  });
+}
 
 /** profileNow in `home` (its `inUse`: the profiles in use there), from its live and plugin items as the status bar works them out. */
 export function profileNowIn(home: PluginHome): ProfileNow {
