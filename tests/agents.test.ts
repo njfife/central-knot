@@ -12,8 +12,8 @@ import { spawnSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { agentText, readAgents } from '../src/agentfiles.ts';
-import { agentToolFile, agentVersion, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
+import { agentHash, agentText, readAgents } from '../src/agentfiles.ts';
+import { agentKind, agentToolFile, agentVersion, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { rowClicks, harnessIs, placeOf, libraryWords, sentences } from '../src/libraryrow.ts';
 import { clickResults } from '../src/clickplan.ts';
 import { librarySentence } from '../src/historyactions.ts';
@@ -22,6 +22,7 @@ import { readHistory } from '../src/history.ts';
 import { setSyncEverything } from '../src/everything.ts';
 import { homePass, passTells } from '../src/homepass.ts';
 import { forgetMissing } from '../src/librarypass.ts';
+import { savePluginRecord } from '../src/pluginrecord.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
 import { chooseTools } from '../src/toolchoice.ts';
@@ -507,6 +508,47 @@ inBox('A copy deleted by hand turns the agent Off everywhere, once it has stayed
   assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['off: Turn it on']);
   await actions[0].run();
   assert.equal(await readOf(box, 'copilot-cli'), '---\nname: reviewer\ndescription: Reviews code\n---\n\nYou review code.\nBe brief.\n');
+});
+
+test('A plugin-linked agent whose copy is deleted by hand settles and turns Off, and a third pass changes nothing', async () => {
+  const box = await sandbox(true);
+  try {
+    box.tools.push('opencode-cli');
+    const openCodeFile = join(box.home, '.config/opencode/agents/reviewer.md');
+    await mkdir(dirname(openCodeFile), { recursive: true });
+    await savePluginRecord(box.home, { tools: box.tools, knows: [...box.tools], plugins: [{ id: 'kit', source: '/market', marketName: 'team', plugin: 'kit', on: true, except: [] }] });
+    const agent = { name: 'reviewer', description: 'Reviews code', prompt: 'You review code.\nBe brief.\n' };
+    await applyAgents(box.context, box.tools, [], {
+      source: {
+        id: 'kit', link: 'plugin:kit@team', commitAt: '2026-11-28T00:00:00Z', whole: true, kind: 'agent',
+        mergeWith: agentKind.merge, recorded: new Set(['kit']), plugin: { on: true, outOf: [], into: ['pi-cli', 'opencode-cli'] },
+        names: new Map([['reviewer', { name: 'reviewer', hash: agentHash(agent), content: agent }]]),
+      },
+    });
+    const waiting = { ...box.context, settleMs: 2000 };
+    const piCopy = (await readOf(box, 'pi-cli'))!;
+    assert.ok(await readFile(openCodeFile, 'utf8'));
+    // Put back inside the settle window: nothing turns Off and the clock is forgotten.
+    await rm(fileOf(box, 'pi-cli'));
+    const inside = await applyAgents(waiting, box.tools, [], { now: 1000 });
+    assert.deepEqual([inside.writes, inside.settling, (await itemOf(box))!.on], [0, true, true]);
+    await write(box, 'pi-cli', piCopy);
+    const back = await applyAgents(waiting, box.tools, [], { now: 1500 });
+    assert.deepEqual([back.writes, back.settling, (await itemOf(box))!.on], [0, false, true]);
+    // Removed again past the first window's end: gets a fresh settle window, then turns Off with deleted-by-hand and stops settling.
+    await rm(fileOf(box, 'pi-cli'));
+    const first = await applyAgents(waiting, box.tools, [], { now: 4000 });
+    assert.deepEqual([first.writes, first.settling, (await itemOf(box))!.on, (await historyOf(box)).some(event => event.cause === 'deleted-by-hand')], [0, true, true, false]);
+    const second = await applyAgents(waiting, box.tools, [], { now: 6500 });
+    assert.deepEqual([second.settling, second.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner, notice.losers])], [false, [['deleted-by-hand', 'pi-cli', ['opencode-cli']]]]);
+    assert.deepEqual([(await historyOf(box)).at(-1)?.cause, placeOf(await itemOf(box)), (await itemOf(box))!.source], ['deleted-by-hand', 'off', 'kit']);
+    assert.equal(await readFile(openCodeFile, 'utf8').catch(() => undefined), undefined);
+    const historyCount = (await historyOf(box)).length;
+    const third = await applyAgents(waiting, box.tools, [], { now: 9000 });
+    assert.deepEqual([third.writes, third.settling, third.notices, (await historyOf(box)).length], [0, false, [], historyCount]);
+  } finally {
+    await box.cleanup();
+  }
 });
 
 inBox('History’s Turn it on after a copy was deleted by hand gives that tool back its own settings as they were last seen, narrowed ones included', async box => {
