@@ -7,7 +7,7 @@
 // placed by renderer.ts resultHere. First setup's walkthrough (firstsetup.ts) is a band among a table's bands, given copyQuestion
 // to hold the question of the item it is at.
 // Usage, collected when a home opens and on Update usage statistics (app.ts collectUsage): when it was collected and the button
-// at the toolbar's end, a band an Update opens (closed by its button), the Sort's usage figure on each row (recency in the unused chip; both on hover where shown) and a line per tool in
+// inside the Library's Filter disclosure (filterControl), a band an Update opens (closed by its button), the Sort's usage figure on each row (recency in the unused chip; both on hover where shown) and a line per tool in
 // an opened row, the Last used and Most used orders (which a reading that lands never redraws: holdOrder), and the "No use seen in 30 days"
 // chip with its band and one Turn N off everywhere (built from each row's own Off: rowClicks.off); what the reading says of a row, and
 // the chip's rule, are usagerow.ts's.
@@ -449,6 +449,8 @@ const newView = () => ({
   unusedCounted: false,
   /** Whether the "What the marks mean" disclosure is open. */
   legendOpen: false,
+  /** Whether the Library's Filter disclosure panel is open. */
+  filterOpen: false,
   /** The order a way in asked for (openKind `order`: the Overview's Most used), shown on the visit it is first drawn on (`visit`); Sort's kept choice stays as it was. */
   askedOrder: undefined as { order: RowOrder; visit?: number } | undefined,
 });
@@ -463,7 +465,7 @@ const views: Record<PageKind | 'library', View> = { library: newView(), skills: 
 export const showFiltered = (which: PageKind, filter: Filter, harness: Tool) => { startFresh(views[which], harness); views[which].filter = filter; };
 /** A view drawn for another place (a tool's tab, or the Library) starts with no filter, From, Find text, open row or menu from the last one. */
 function startFresh(table: View, harness: Tool | undefined) {
-  Object.assign(table, { filter: 'all', from: 'anywhere', comparing: undefined, openFile: undefined, shownFor: harness, unusedCounted: false, legendOpen: false });
+  Object.assign(table, { filter: 'all', from: 'anywhere', comparing: undefined, openFile: undefined, shownFor: harness, unusedCounted: false, legendOpen: false, filterOpen: false });
   newFind(table, '');
 }
 /**
@@ -540,21 +542,26 @@ const smallAction = (label: string, id: string, onclick: () => void, extra = '',
 const overEveryKind = (t: Table): Table => (t.tool || !state.home ? t : { ...t, kinds: heldKinds(state.home) });
 const chipNames = { attention: 'Copies differ', unused: `No use seen in ${USAGE_DAYS} days` } as const;
 /**
- * The chips: each shows only what it names and is a toggle, a second click letting go (one at a time; none shows every row). Each
- * has a short form, its mark, for a crowded toolbar: the whole group folds together (dom.ts fitBars), with each name as its tooltip.
+ * A filter toggle chip: a second click lets go (one at a time; none shows every row). On a tool's tab it carries its glyph for
+ * bar-icons; on the Library its words never fold and the glyph is omitted.
  */
+function chipOf(t: Table, id: Exclude<Filter, 'all'>, glyph: IconName, warn = false) {
+  const view = t.view, over = overEveryKind(t), label = chipNames[id];
+  const count = listedRows({ ...t, view: { ...view, filter: id } }).length;
+  const most = listedRows({ ...over, view: { ...view, filter: id, from: 'anywhere', find: '' } }).length;
+  const press = () => afterFilterPick(t, () => relist(t, { filter: view.filter === id ? 'all' : id }));
+  return h(`button.chip${view.filter === id ? '.chip-on' : ''}${warn && count ? '.chip-warn' : ''}`,
+    { type: 'button', id: `chip-${id}`, 'aria-pressed': String(view.filter === id), 'aria-label': `${label} ${count}`, 'data-tip': label, onclick: press },
+    t.tool ? icon(glyph, 13, 'chip-icon') : null, h('span.chip-label', {}, label), heldCount('span.chip-count', String(count), most));
+}
+const unusedChip = (t: Table) => {
+  const over = overEveryKind(t);
+  return (!!reading(over) && !!unusedCount(over.kinds)) || t.view.filter === 'unused' ? chipOf(t, 'unused', 'history') : null;
+};
 function filterBar(t: Table) {
-  const view = t.view, over = overEveryKind(t);
-  // How many a chip shows: of what Find and From leave, in the segment (listedRows with that chip on), as the kind switch counts.
-  const shows = (id: Filter) => listedRows({ ...t, view: { ...view, filter: id } }).length;
-  // `count`: how many it shows, amber when they need something (`warn`).
-  const chip = (id: Filter, label: string, glyph: IconName, count: number, warn = false) => h(`button.chip${view.filter === id ? '.chip-on' : ''}${warn && count ? '.chip-warn' : ''}`,
-    { type: 'button', id: `chip-${id}`, 'aria-pressed': String(view.filter === id), 'aria-label': `${label} ${count}`, 'data-tip': label, onclick: () => relist(t, { filter: view.filter === id ? 'all' : id }) },
-    icon(glyph, 13, 'chip-icon'), h('span.chip-label', {}, label), heldCount('span.chip-count', String(count), listedRows({ ...over, view: { ...view, filter: id, from: 'anywhere', find: '' } }).length));
-  // A chip is offered while something matches it, over every kind the Library holds (overEveryKind), or while it is the one on.
-  const offered = (id: Filter, matching: boolean) => matching || view.filter === id;
-  const chips = [offered('attention', copiesDifferChipShown(over)) ? chip('attention', chipNames.attention, 'diff', shows('attention'), true) : null,
-    offered('unused', !!reading(over) && !!unusedCount(over.kinds)) ? chip('unused', chipNames.unused, 'history', shows('unused')) : null].filter(Boolean);
+  const over = overEveryKind(t);
+  const diff = copiesDifferChipShown(over) || t.view.filter === 'attention' ? chipOf(t, 'attention', 'diff', true) : null;
+  const chips = [diff, t.tool ? unusedChip(t) : null].filter(Boolean);
   return chips.length ? h('div.chips', { role: 'group', 'aria-label': 'Show only' }, chips) : null;
 }
 
@@ -563,6 +570,8 @@ const fromMenu = (): FromEntry[][] => {
   const { plugins, sources: links } = state.home ? fromChoices(state.home, sources.view?.sources.map(source => source.link) ?? []) : { plugins: [], sources: [] };
   return [[{ value: 'anywhere', label: 'Anywhere' }, { value: 'yours', label: 'Your own' }], plugins, links];
 };
+/** The From entry chosen now, resolved from fromMenu (shared by fromChoice, fromActive and the empty state). */
+const chosenFrom = (t: Table, menu = fromMenu()): FromEntry => menu.flat().find(entry => entry.value === t.view.from) ?? menu[0]![0]!;
 /** Whether a choice of From is in the menu now: a plugin's while it has rows here, a source's while the home records it. */
 const fromOffered = (from: From) => fromMenu().flat().some(entry => entry.value === from);
 /**
@@ -584,20 +593,57 @@ const listFromTop = (t: Table) => { const list = document.getElementById(tableId
 /** Whether the table's From shows a row, by where it came from (origins.ts originOf). */
 const fromHolds = (t: Table, row: ItemRow | PluginRow) => fromShows(t.view.from, originOf(row));
 
-/**
- * The From menu, between the chips and Sort, on the Library and a tool's tabs: kept in the table's view, applied with the chip
- * (picked). Closed, it is as wide as its widest entry whatever is chosen, so a choice never changes the bar's fit, and has a chip's
- * on look while it narrows the list (style.css .from-select). A choice shows its list from the top, the opened row closed if it hides it (relist).
- */
+/** Commits a choice made inside the Library's Filter disclosure, closes it, and restores focus to Filter after redraw. */
+function afterFilterPick(t: Table, run: () => void) {
+  const close = !t.tool && t.view.filterOpen;
+  if (close) t.view.filterOpen = false;
+  run();
+  if (close) document.getElementById('library-filter')?.focus({ preventScroll: true });
+}
 function fromChoice(t: Table) {
-  const menu = fromMenu(), chosen = menu.flat().find(entry => entry.value === t.view.from) ?? menu[0]![0]!;
+  const menu = fromMenu(), chosen = chosenFrom(t, menu);
   const option = (entry: FromEntry) => h('option', { value: entry.value, selected: entry === chosen, title: entry.title }, entry.label);
   const [top, plugins, links] = menu, group = (label: string, entries: FromEntry[]) => (entries.length ? h('optgroup', { label }, entries.map(option)) : null);
-  const choose = (event: Event) => relist(t, { from: (event.target as HTMLSelectElement).value as From });
+  const choose = (event: Event) => afterFilterPick(t, () => relist(t, { from: (event.target as HTMLSelectElement).value as From }));
   return h('span.from', {}, h('label.from-word', { for: 'item-from' }, 'From'),
     h(`span.select.select-bar.from-select${chosen.value === 'anywhere' ? '' : '.from-on'}`, {}, h('select', { id: 'item-from', 'aria-label': 'From', title: chosen.title ?? chosen.label, onchange: choose },
       top!.map(option), group('Plugins', plugins!), group(pageNames.sources, links!)), icon('chevrons-up-down', 14)));
 }
+/**
+ * The Library's Filter disclosure: a button with aria-expanded (active look derived from From and No use seen) opening a
+ * nonmodal panel under itself with normal Tab order through From, No use seen in 30 days, and usage controls.
+ */
+function filterControl(t: Table) {
+  if (t.tool) return null;
+  const open = t.view.filterOpen, on = t.view.from !== 'anywhere' || t.view.filter === 'unused';
+  const door = h(`button.btn.outline.small.filter-btn${on ? '.filter-on' : ''}`, {
+    type: 'button', id: 'library-filter', 'aria-expanded': String(open), ...(open ? { 'aria-controls': 'library-filter-panel' } : {}),
+    onclick: () => { t.view.filterOpen = !open; rerender(); },
+  }, h('span.btn-label', {}, 'Filter'), icon('chevron-down', 12, 'filter-chevron'));
+  const panel = open ? h('div.filter-panel', { id: 'library-filter-panel', role: 'region', 'aria-label': 'Filter' },
+    fromChoice(t), unusedChip(t), h('div.filter-usage', {}, usageControls(t))) : null;
+  return h('span.filter-wrap', {}, door, panel);
+}
+/** What From narrows the Library to, with From anywhere to clear through relist (leaving No use seen as it is). */
+function fromActive(t: Table) {
+  if (t.tool || t.view.from === 'anywhere') return null;
+  const chosen = chosenFrom(t);
+  return h('span.from-active', {}, h('span.from-active-label', { title: chosen.title }, `From: ${chosen.label}`),
+    button({ variant: 'outline', size: 'micro', label: 'From anywhere', id: 'from-clear', onclick: () => relist(t, { from: 'anywhere' }) }));
+}
+const fromBand = (t: Table) => { const active = fromActive(t); return active ? h('div.band.band-quiet.from-band', { role: 'status', id: 'from-band' }, active) : null; };
+/** Places the open Filter disclosure panel under its button, clamped inside the toolbar's content box. */
+function placeFilterPanel(): void {
+  const btn = document.getElementById?.('library-filter'), panel = document.getElementById?.('library-filter-panel');
+  if (!btn || !panel) return;
+  const box = btn.getBoundingClientRect(), bar = btn.closest('.toolbar')?.getBoundingClientRect();
+  if (!box.width) return;
+  const minLeft = (bar?.left ?? 0) + 16, maxRight = (bar?.right ?? innerWidth) - 16;
+  panel.style.maxWidth = `${Math.max(240, maxRight - minLeft)}px`;
+  panel.style.top = `${Math.round(box.bottom + 6)}px`;
+  panel.style.left = `${Math.round(Math.max(minLeft, Math.min(box.left, maxRight - panel.getBoundingClientRect().width)))}px`;
+}
+afterLayout(placeFilterPanel);
 
 /**
  * A count on the toolbar (the kind switch's, a chip's) holding the room of `most`, the most it says with no Find, From or chip:
@@ -647,10 +693,13 @@ function kindSwitch(t: Table) {
   const unread = (kind: PageKind) => notAllRead(home, kind);
   // A kind not on show whose automatic change wasn't painted is marked, as the sidebar's dot says (renderer.ts).
   const news = (id: PageKind | 'all') => id !== 'all' && !t.kinds.includes(id) && unseenNotices(id).length > 0;
-  const choice = (id: PageKind | 'all', label: string, glyph: IconName, counted: number, most: number, unsure: boolean) => h(`button.kind-seg${segment() === id ? '.kind-seg-on' : ''}`, {
-    type: 'button', id: `library-kind-${id}`, 'aria-pressed': String(segment() === id), title: unsure ? `${label}: ${counted} known; some couldn’t be read` : news(id) ? `${label}: an automatic change to see` : undefined,
-    onclick: pickSegment(id) }, icon(glyph, 13, 'tone-muted'), h('span.kind-seg-label', {}, label),
-    heldCount('span.kind-seg-count', `${counted}${unsure ? '?' : ''}`, most), news(id) ? h('span.kind-seg-news') : null);
+  const choice = (id: PageKind | 'all', label: string, glyph: IconName, counted: number, most: number, unsure: boolean) => {
+    const empty = id !== 'all' && !most && !unsure;
+    return h(`button.kind-seg${segment() === id ? '.kind-seg-on' : ''}${empty ? '.kind-seg-empty' : ''}`, {
+      type: 'button', id: `library-kind-${id}`, 'aria-pressed': String(segment() === id), title: unsure ? `${label}: ${counted} known; some couldn’t be read` : news(id) ? `${label}: an automatic change to see` : undefined,
+      onclick: pickSegment(id) }, icon(glyph, 13, 'tone-muted'), h('span.kind-seg-label', {}, label),
+      empty ? null : heldCount('span.kind-seg-count', `${counted}${unsure ? '?' : ''}`, most), news(id) ? h('span.kind-seg-news') : null);
+  };
   const sum = (each: (kind: PageKind) => number) => kinds.reduce((total, kind) => total + each(kind), 0);
   return h('div.kind-switch', { role: 'group', 'aria-label': 'Kind' }, choice('all', 'All', 'layers', sum(count), sum(whole), kinds.some(unread)),
     ...kinds.map(kind => choice(kind, kindNouns[kind].title, kindGlyph[kind], count(kind), whole(kind), unread(kind))));
@@ -1388,7 +1437,7 @@ function forgetOtherHomes(t: Table, name: keyof typeof views) {
   if (now === was) return;
   tableHomes[name] = now;
   // A view's first table has no other home's to forget (a link may have opened its row before it was drawn).
-  if (was !== undefined) Object.assign(t.view, { comparing: undefined, openFile: undefined, confirmDelete: undefined, from: 'anywhere', unusedCounted: false });
+  if (was !== undefined) Object.assign(t.view, { comparing: undefined, openFile: undefined, confirmDelete: undefined, from: 'anywhere', unusedCounted: false, filterOpen: false });
 }
 
 // ---------- See change: what an edit did, before Undo ----------
@@ -1757,6 +1806,7 @@ function useLibrary(): Table {
   const view = views.library, now = { segment: segment(), visit: state.visit, home: state.home?.home };
   if (drawnLibrary && drawnLibrary.segment !== now.segment) view.confirmDelete = undefined;
   if (drawnLibrary && (drawnLibrary.segment !== now.segment || drawnLibrary.visit !== now.visit || drawnLibrary.home !== now.home)) view.legendOpen = false;
+  if (drawnLibrary && (drawnLibrary.visit !== now.visit || drawnLibrary.home !== now.home)) view.filterOpen = false;
   drawnLibrary = now;
   return tableOf('library', segmentKinds());
 }
@@ -1984,6 +2034,7 @@ let filesFrom: { tool?: HarnessId } = {};
  */
 export function openFiles(key: string, placed = false) {
   noteMove();
+  views.library.filterOpen = false;
   filesFrom = { tool: state.page === 'harnesses' ? state.harness : undefined };
   if (placed) { revealed = key; listSize = ''; }
   if (state.page !== 'library') showPage('library');
@@ -2060,18 +2111,24 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   // Nothing listed: none of the segment's kind here (Find empty), or nothing Find, From and the chip leave, whatever the segment.
   const nothing = shown.length || plugins.length || inPlugins?.length ? null : !view.find.trim() && !all.length && !plugged(t).rows.length && none ? none(t.kinds[0]!)
     : emptyState('search-x', 'Nothing matches', [view.find.trim() ? `“${view.find.trim()}”` : '', view.filter !== 'all' ? `Only: ${chipNames[view.filter]}` : '',
-      view.from !== 'anywhere' ? `From: ${fromMenu().flat().find(entry => entry.value === view.from)?.label}` : ''].filter(Boolean).join(' · '),
+      view.from !== 'anywhere' ? `From: ${chosenFrom(t).label}` : ''].filter(Boolean).join(' · '),
       view.find.trim() ? button({ variant: 'outline', size: 'small', label: 'Clear Find', id: 'find-clear', onclick: () => findTyped(t, '') }) : undefined);
   // With no hit at all, the group's line on the reading goes under those words, in view.
   const said = nothing && inPlugins && coverageLine();
   if (said) nothing!.append(h('p.catalog-coverage', {}, said[0], ' · ', said[1]));
   const legend = markLegend(t, all, plugins);
+  const findBox = h('div.find', {}, icon('search', 16, 'find-glyph'), find);
+  const bar = tool
+    ? h('div.toolbar.fit-bar', {}, findBox, filterBar(t), fromChoice(t), h('div.toolbar-end', {}, toolbarState(t), legend?.toggle ?? null))
+    : h('div.toolbar.library-toolbar.fit-bar', {}, h('div.toolbar-lead', {}, kindSwitch(t), findBox),
+      h('div.toolbar-group', {}, filterBar(t), h('div.toolbar-end', {}, toolbarState(t), filterControl(t), orderChoice(t), selectControl(t))));
+  const unused = view.filter === 'unused' ? unusedBand(t, unusedShown) : null;
   const table = [
-    h('div.toolbar.fit-bar', {}, kindSwitch(t), h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(t), fromChoice(t), orderChoice(t), h('div.toolbar-end', {}, selectControl(t), toolbarState(t), usageControls(t), legend?.toggle ?? null)),
+    bar,
     legend?.body ?? null,
     t.selectable ? selectBar(t, rowsDrawn) : null,
     usageBand(t),
-    view.filter === 'unused' ? unusedBand(t, unusedShown) : null,
+    unused ?? fromBand(t),
     bands(t),
     sectionJump(t, sections),
     // Its id keeps it where it was scrolled across a redraw (the dock's breakpoint crossed, say): tableId.
@@ -2089,15 +2146,14 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
 // ---------- Select: ticks, and a Delete of many (selection.ts) ----------
 
 /**
- * Select, at the toolbar's end on the Library's list (not a tool's tab: a Delete of many takes items from every tool), left of
- * Update usage: it starts Select's mode, and reads Done while the mode is on, which ends it. Its two words hold one width
- * (style.css .band-stack). Select folds with the bar's controls (dom.ts fitBars, at bar-icons): its tick's icon alone, Select its
- * tooltip and name; Done is a word at every width, the way out always read.
+ * Select, at the toolbar's end on the Library's list (not a tool's tab: a Delete of many takes items from every tool): it starts
+ * Select's mode, and reads Done while the mode is on, which ends it. Its two words hold one width (style.css .band-stack) at
+ * every window width, with no icon folding.
  */
 function selectControl(t: Table) {
   if (t.tool || !state.home) return null;
   const on = !!t.selectable;
-  const go = button({ variant: 'outline', size: 'micro', label: 'Select', icon: on ? undefined : 'square-check', collapse: !on, id: 'library-select',
+  const go = button({ variant: 'outline', size: 'small', label: on ? 'Done' : 'Select', id: 'library-select',
     onclick: () => { if (on) stopSelecting(); else startSelecting(); rerender(); } });
   go.querySelector('.btn-label')!.replaceChildren(h('span.band-stack', {}, h('span', {}, on ? 'Done' : 'Select'), h('span.band-unshown', {}, on ? 'Select' : 'Done')));
   return go;
@@ -2557,19 +2613,17 @@ const usageFactsOf = (row: ItemRow | PluginRow): UsageFacts | undefined => (isPl
 const firstReading = (t: Table) => !t.tool && firstReadingRuns();
 
 /**
- * At the Library's toolbar end: when usage was collected ("Collected 8:44 AM", "· no sessions yet" where no tool
+ * Inside the Library's Filter disclosure: when usage was collected ("Collected 8:44 AM", "· no sessions yet" where no tool
  * keeps any), or that it is being collected, and the one button that collects it: Collect usage statistics until a reading is
- * on show, Update usage statistics after. Its click opens the band (usageBand). Short of room (dom.ts fitBars, style.css
- * .usage-words), "Collected" and "usage statistics" go first, then the time; the button keeps its verb.
+ * on show, Update usage statistics after. Its click closes Filter, focuses it, and opens the band outside (usageBand).
  */
 function usageControls(t: Table) {
   if (t.tool) return null;
   const collecting = state.usage.state === 'reading', read = reading(t), today = read && new Date(read.at).toDateString() === new Date().toDateString();
-  const when = collecting ? ['Collecting…'] : read ? [h('span.usage-words', {}, 'Collected '), today ? clockTime(read.at) : dayWords(read.at), read.tools.every(each => !each.sessions && !incompleteHistory(each)) ? ' · no sessions yet' : ''] : [];
+  const when = collecting ? ['Collecting…'] : read ? [`Collected ${today ? clockTime(read.at) : dayWords(read.at)}`, read.tools.every(each => !each.sessions && !incompleteHistory(each)) ? ' · no sessions yet' : ''] : [];
   const verb = read ? 'Update' : 'Collect';
-  const go = button({ variant: 'outline', size: 'micro', label: `${verb} usage statistics`, id: 'collect-usage', disabled: collecting && 'Usage statistics are being collected.', onclick: () => void collectUsage({ asked: true }) });
-  // In a crowded bar it keeps "Update usage" (never a bare "Update", which reads as the app's): only " statistics" folds (style.css).
-  go.querySelector('.btn-label')!.replaceChildren(`${verb} usage`, h('span.usage-words', {}, ' statistics'));
+  const go = button({ variant: 'outline', size: 'micro', label: `${verb} usage statistics`, id: 'collect-usage',
+    disabled: collecting && 'Usage statistics are being collected.', onclick: () => afterFilterPick(t, () => { void collectUsage({ asked: true }); }) });
   return [when.length ? h('span.apply-state', { id: 'usage-when' }, when) : null, go];
 }
 
@@ -2679,9 +2733,10 @@ export function unusedCount(kinds: readonly PageKind[]): number {
 function unusedBand(t: Table, shown: ItemRow[]) {
   const read = reading(t), home = state.home, sums = kindParts(t).flatMap(({ kind, usage }) => (usage ? [{ kind, sum: usage }] : []));
   if (!read || !home || !sums.length) return null;
+  const from = fromActive(t);
   const shell = (lead: string, action: HTMLElement | null, extra?: HTMLElement, more?: HTMLElement | null) =>
     h('div.band.usage-band', { role: 'status', id: 'unused-band' },
-      icon('history', 14, 'tone-muted'), h('span.band-text', {}, h('span.usage-lead', {}, lead), extra ?? null), action, more ?? null);
+      icon('history', 14, 'tone-muted'), h('span.band-text', {}, from ? [from, h('span.from-sep', { 'aria-hidden': 'true' }, '·')] : null, h('span.usage-lead', {}, lead), extra ?? null), action, more ?? null);
   if (!shown.length) {
     const current = segment();
     if (t.tool || current === 'all' || t.view.find.trim() || t.view.from !== 'anywhere') return null;
@@ -2880,7 +2935,7 @@ export function holdOrder() {
 }
 /** Whether each row says when it was last updated: while the rows go by it (not while the Library's Find has text: they go by best match). */
 const dated = (t: Table) => chosenOrder(t) === 'updated' && !searching(t);
-/** The choice of order, after the filters on the Library. */
+/** The choice of order on the Library; while rows are held out of order, the Sort caption itself acts as Put in order at equal width. */
 function orderChoice(t: Table) {
   if (t.tool) return null;
   const choose = (event: Event) => {
@@ -2893,9 +2948,11 @@ function orderChoice(t: Table) {
   // While the Library's Find has text: Best match, greyed, its tooltip saying why.
   const best = searching(t), options = best ? [h('option', { value: 'best', selected: true }, 'Best match')]
     : [option('name', 'Name'), option('updated', 'Last updated'), option('used', 'Last used'), option('most-used', 'Most used')];
-  return [h('span.order', { title: best ? 'Best match while Find has text; the Sort you chose comes back when Find is cleared' : 'The order of the rows under each heading' }, h('label.order-word', { for: 'item-order' }, 'Sort'),
-    h('span.select.select-bar', {}, h('select', { id: 'item-order', 'aria-label': 'Sort by', title: best ? undefined : 'Sort by', disabled: best, onchange: choose }, options), best ? null : icon('chevrons-up-down', 14))),
-    roomHeld(rowsHeld(t), held => button({ variant: 'ghost', size: 'small', icon: 'list', label: 'Put in order', id: held ? 'put-in-order' : undefined, collapse: true, onclick: () => { unpin(); rerender(); } }))];
+  const caption = rowsHeld(t)
+    ? h('button.inline-link.order-word.order-put', { type: 'button', id: 'put-in-order', 'aria-label': 'Sort: Put in order', title: 'Put in order', onclick: () => { unpin(); rerender(); } }, 'Sort')
+    : h('label.order-word', { for: 'item-order' }, 'Sort');
+  return h('span.order', { title: best ? 'Best match while Find has text; the Sort you chose comes back when Find is cleared' : 'The order of the rows under each heading' }, caption,
+    h('span.select.select-bar', {}, h('select', { id: 'item-order', 'aria-label': 'Sort by', title: best ? undefined : 'Sort by', disabled: best, onchange: choose }, options), best ? null : icon('chevrons-up-down', 14)));
 }
 /**
  * The ids of a table's rows as drawn, heading by heading, given the rows pinned on it (none: each row under its own heading,
@@ -3219,24 +3276,17 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
     remove ? h('div.details-actions.details-danger', {}, remove) : null);
 }
 
-/** What waits, in the toolbar: the changes waiting for sync (libraryrow.ts waitsForSync, as the Overview's card counts them), or that sync is off. */
+/** What waits, in the toolbar: the changes waiting for sync (libraryrow.ts waitsForSync); on a tool's tab also that sync is off. */
 function toolbarState(t: Table) {
-  const waiting = rowsIn(t).filter(waitsForSync).length, said = (n: number) => [`${n}`, h('span.apply-words', {}, ` ${n === 1 ? 'change' : 'changes'} waiting`)];
-  // One slot, as wide as the widest it can say (a count of two figures; with sync off, that nothing waits), so a change a click
-  // leaves waiting changes nothing of the bar's fit.
-  const quiet = state.home && !state.home.syncOn ? h(`span.apply-state.apply-quiet${waiting ? '.band-unshown' : ''}`, {}, icon('circle-minus', 14, 'tone-muted'), 'Nothing waiting · sync off') : null;
+  const waiting = rowsIn(t).filter(waitsForSync).length;
+  const said = (n: number) => (t.tool
+    ? [`${n}`, h('span.apply-words', {}, ` ${n === 1 ? 'change' : 'changes'} waiting`)]
+    : [h('span', {}, `${n}`, h('span.apply-change', {}, ` ${n === 1 ? 'change' : 'changes'}`), ' waiting')]);
+  // One slot, as wide as the widest it can say (two figures; on a tool tab with sync off, Nothing waiting · sync off), so a change a
+  // click leaves waiting changes nothing of the bar's fit.
+  const quiet = t.tool && state.home && !state.home.syncOn ? h(`span.apply-state.apply-quiet${waiting ? '.band-unshown' : ''}`, {}, icon('circle-minus', 14, 'tone-muted'), 'Nothing waiting · sync off') : null;
   return h('span.band-stack', {}, h('span.apply-state.band-unshown', {}, icon('clock', 14), ...said(99)), quiet,
     waiting ? h('span.apply-state.apply-waiting', { title: `${waiting} ${waiting === 1 ? 'change' : 'changes'} waiting` }, icon('clock', 14, 'tone-warning'), ...said(waiting)) : null);
-}
-/**
- * What a click can make appear in the toolbar (Put in order) has its room held from the start, drawn but unseen until it is
- * `shown` (style.css .band-unshown: hidden from the eye, the mouse, the keyboard and screen readers): so a click never changes
- * how the bar fits (dom.ts fitBars), and no row moves for it.
- */
-function roomHeld(shown: boolean, draw: (shown: boolean) => HTMLElement) {
-  const drawn = draw(shown);
-  if (!shown) drawn.classList.add('band-unshown');
-  return drawn;
 }
 
 // ---------- The Library's Files view ----------
@@ -3410,17 +3460,29 @@ function openedPart(t: Table, row: ItemRow | PluginRow, placement: 'row' | 'dock
   return filePanel(t, row, t.view.openFile!, placement === 'dock', h('button.inline-link.file-to-details', { type: 'button', id: partId('file-details', id),
     title: 'Closes the file', onclick: back }, icon('chevron-left', 12), 'Back to details'));
 }
-// Escape in a find box with text clears it; on the unused band's disclosure button it closes the disclosure; else it closes an
-// open skill's, agent's or server's file (an open row's details come back in its place). Elsewhere on the Library's list in
-// Select's mode, it closes a Delete of many's question, or else ends the mode. A card open (an info card, the header's) is closed first, and this doesn't hear it (renderer.ts).
+// Escape closes an open Library Filter panel (returning focus to Filter, without leaving Select or its Delete question); else in a
+// find box with text clears it; on a disclosure button closes it; else closes an open file panel, or ends Select's question/mode.
+// A card open (an info card, the header's) is closed first, and this doesn't hear it (renderer.ts).
 document.addEventListener('keydown', event => {
   const id = (event.target as HTMLElement | null)?.id;
   if (event.key !== 'Escape') return;
   const t = useTableShown(), view = t?.view;
-  if (id === 'skills-find' && view?.listFind) { view.listFind = ''; rerender(); }
+  if (t && !t.tool && view?.filterOpen) { event.preventDefault?.(); view.filterOpen = false; rerender(); document.getElementById('library-filter')?.focus({ preventScroll: true }); }
+  else if (id === 'skills-find' && view?.listFind) { view.listFind = ''; rerender(); }
   else if (id === 'find' && t && view?.find) findTyped(t, '');
   else if (id === 'unused-counted-toggle' && view?.unusedCounted) { view.unusedCounted = false; rerender(); }
   else if (id === 'mark-legend-toggle' && view?.legendOpen) { view.legendOpen = false; rerender(); }
   else if (t && view?.openFile && !(state.page === 'library' && state.libraryView === 'files')) setFile(t, undefined, undefined, true);
   else if (state.page === 'library' && state.libraryView === 'list' && selecting()) { if (!cancelAsk()) stopSelecting(); rerender(); }
 });
+// A press outside the Library's open Filter panel closes it without redrawing, so the target keeps its own click and focus.
+let pressedInFilter = false;
+document.addEventListener('pointerdown', event => { pressedInFilter = !!(event.target as Element | null)?.closest?.('.filter-wrap'); }, true);
+document.addEventListener('click', event => {
+  if (!views.library.filterOpen || (event.detail && pressedInFilter) || (event.target as Element | null)?.closest?.('.filter-wrap')) return;
+  views.library.filterOpen = false;
+  document.getElementById('library-filter-panel')?.remove();
+  const door = document.getElementById('library-filter');
+  door?.setAttribute('aria-expanded', 'false');
+  door?.removeAttribute('aria-controls');
+}, true);

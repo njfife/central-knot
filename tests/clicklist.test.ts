@@ -3485,8 +3485,9 @@ test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosu
     ]);
     assert.deepEqual(main.sent, []);
     // Turning the unused chip off resets the disclosure so re-enabling the chip starts closed.
+    findById(libraryTable(), 'library-filter').onclick();
     findById(libraryTable(), 'chip-unused').onclick();
-    libraryTable();
+    findById(libraryTable(), 'library-filter').onclick();
     findById(libraryTable(), 'chip-unused').onclick();
     assert.equal(findById(libraryTable(), 'unused-counted'), undefined);
   });
@@ -3572,7 +3573,9 @@ test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosu
     showOther.onclick();
     assert.equal(app.libraryKind, 'agents');
     const agentsTree = libraryTable();
-    assert.equal(findById(agentsTree, 'chip-unused').attrs['aria-pressed'], 'true');
+    assert.equal(findById(agentsTree, 'library-filter').className.split(/\s+/).includes('filter-on'), true);
+    findById(agentsTree, 'library-filter').onclick();
+    assert.equal(findById(libraryTable(), 'chip-unused').attrs['aria-pressed'], 'true');
     const allPluginBand = findById(agentsTree, 'unused-band');
     assert.equal(findById(allPluginBand, 'turn-unused-off'), undefined);
     assert.ok(textOf(allPluginBand).includes('2 with no use seen in 30 days, both from a plugin: turn each off on its own row.'), textOf(allPluginBand));
@@ -3597,13 +3600,16 @@ test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosu
     assert.equal(textOf(emptyTwo), 'No unused skills left. 1 MCP server and 2 agents have no use seen in 30 days.Show all 3');
     findById(emptyTwo, 'unused-show-other').onclick();
     assert.equal(app.libraryKind, 'all');
+    findById(libraryTable(), 'library-filter').onclick();
     assert.equal(findById(libraryTable(), 'chip-unused').attrs['aria-pressed'], 'true');
   });
 
   await t.test('Find miss and From miss omit the unused band', async sub => {
     reset({ skillsOn: [], agentsOn: ['plug-1', 'plug-2'], mcpOn: ['quiet-srv'] }, undefined, 'skills', 'unused');
+    findById(libraryTable(), 'library-filter').onclick();
     findById(libraryTable(), 'item-from').onchange({ target: { value: 'yours' } });
     assert.equal(findById(libraryTable(), 'unused-band'), undefined);
+    assert.ok(findById(libraryTable(), 'from-band'), 'From band stays visible when unused band is omitted on From miss');
     reset({ skillsOn: [], agentsOn: ['plug-1', 'plug-2'], mcpOn: ['quiet-srv'] }, undefined, 'skills', 'unused');
     const prevSearch = (api as Record<string, unknown>).search;
     sub.after(() => {
