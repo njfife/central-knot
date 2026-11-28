@@ -18,7 +18,8 @@
 // plugin's row: kindOf), and only a row's own kind says which it is: its words, its tools and its clicks.
 // A row's switch or Add joins the page's list of clicks (flip, pluginRowSwitch → app.ts queueClick) and is worked out in its turn,
 // perhaps while another table is drawn: its closures hold the row and the table it was clicked on, so it is worked out there.
-// Before a click that would end the profile in use, its control says so, from the changes the click sends, built once for both (endsOf).
+// Before a click that would end the profile in use, its control says so in its result's words (`Everyday · changed`, or that it
+// stops being in use), from the changes the click sends, built once for both (endsOf).
 // The Library's Find is answered by word search in main (search.ts, asked by askFind): while it has text the list is one list,
 // best first, under one heading (foundRows), and after it the items of listed plugins installed in no managed tool, which are
 // no rows of the Library's (catalogGroup). A tool's tabs match their Find here (holdsFindText); the Files view, itself.
@@ -34,10 +35,10 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, orList, pageNames, profileBack, profileStops, readsIt, rowNames, rowNouns,
-  saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
+import { andList, byToolOrder, CHANGED, changedCard, fewNames, kindNouns, NOTHING_CHANGED, orList, pageNames, profileBack, profileStops, readsIt, rowNames, rowNouns,
+  saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind, type Ending } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type RowFigure, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
-import { copilotSharesYours, endedByChanges } from './profileplan.ts';
+import { copilotSharesYours, endedByChanges, profileNowIn } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, homeReadOwed, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, readHomeOnce, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, setHome, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
@@ -45,7 +46,7 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, fo
 import type { IconName } from './icons.ts';
 import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rankIn, rowId, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type RowUsage, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inHarnessDoes, switchDrawn, TOOL_STATE_WORDS, toolSwitch, type SwitchDrawn, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inHarnessDoes, switchDrawn, TOOL_STATE_WORDS, toolSwitch, type SwitchDrawn, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, showsPlaceTag, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
@@ -64,7 +65,7 @@ import { cellWords, handledWhere, inTool, insideTitle, itemThrough, offIn, pageR
 import { fromChoices, fromShows, originOf, type From, type FromEntry } from './origins.ts';
 import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
-import { reloadAdvice, rowReload, toItemKind, type ReloadAdvice } from './reload.ts';
+import { reloadAdvice, rowReload, toItemKind, type ReloadAdvice, type ReloadItem } from './reload.ts';
 import { pageData, readPageData, resetPageData } from './pagedata.ts';
 import { ask, askedNow, cancelAsk, cantWords, deletedWords, DIFFERS_REASON, headingState, isTicked, ofListed, questionWords, selectedWords, selecting, listDrawn, startSelecting, stopSelecting, restoreWords, tickHeading, tickRow, toggleWhy, turnedWords, turnLabel, turnTail, whyLines, whyShown, type Listed } from './selection.ts';
 
@@ -174,7 +175,7 @@ function resultLine(row: ItemRow | PluginRow, tool: Tool) {
   const main = h('p.details-tool-result', { 'data-result': resultKey(said.aim), 'data-failed': String(said.failed) }, icon(said.failed ? 'triangle-alert' : 'check', 12, said.failed ? 'tone-warning' : 'tone-success'),
     h('span.details-tool-result-text', {}, [said.words, said.next].filter(Boolean).join(' ')), said.undo ? smallAction('Undo', elId('line-undo', row, tool), said.undo, '', selectOff() ?? !!acting()) : null,
     closeButton(() => closeLineResult(said), { id: elId('line-close', row, tool), label: 'Close this result' }));
-  return said.profileLine ? h('div.details-tool-results', {}, main, profileSpan(said.profileLine)) : main;
+  return said.profileLine ? h('div.details-tool-results', {}, main, profileSpan(said.profileLine, elId('profile-changed-info', row, tool))) : main;
 }
 
 /** A plugin's row: an item of a plugin installed whole, not the person's own (pluginrows.ts PluginRow). */
@@ -274,20 +275,40 @@ function pluginSection(t: Table, list: PluginRow[]) {
     list.flatMap(row => pluginRowEl(t, row)));
 }
 
-/** The Library's one heading while its Find has text, over its rows (foundRows), each drawn as under its own heading; its count is listedRows'. */
+/** The Library's one heading while its Find has text, over its rows (foundRows); rows keep their routine place tags because Results does not name Found or Off. Its count is listedRows'. */
 function foundSection(t: Table, rows: (ItemRow | PluginRow)[]) {
   if (!rows.length) return null;
   return h('div', { role: 'rowgroup' },
     h('div.ov-section', { role: 'row', 'data-section': 'results' }, h('div.ov-section-label', { role: 'cell' }, headingTick(t, 'results', 'Results', rows), h('strong', {}, 'Results'), h('span.ov-section-count', {}, String(listedRows(t).length)))),
-    rows.flatMap(each => (isPluginRow(each) ? pluginRowEl(t, each) : row(t, each))));
+    rows.flatMap(each => (isPluginRow(each) ? pluginRowEl(t, each) : row(t, each, 'results'))));
 }
 
-/** Installed plugins whose copy couldn't be read in the tools this table is about: what they bring is missing, and why. */
+/** One unread plugin's reason in the warning card, naming the plugin once and avoiding pronoun ambiguity. */
+function unreadReason(install: InstalledPlugin, withTool: boolean): string {
+  const tool = names[install.tool];
+  const problem = install.problem!;
+  if (problem.startsWith(`${tool} lists it,`)) {
+    return problem
+      .replace(`${tool} lists it,`, `${tool} lists ${install.plugin},`)
+      .replace('where it records them', `where ${tool} records them`)
+      .replace('in its plugin cache', `in ${tool}’s plugin cache`);
+  }
+  return withTool ? `${install.plugin} (${tool}): ${problem}` : `${install.plugin}: ${problem}`;
+}
+
+/** Installed plugins whose copy couldn't be read in the tools this table is about: what they bring is missing, with the reason behind its mark. */
 function unreadBand(t: Table) {
   const list = plugged(t).unread.filter(install => !t.tool || install.tool === t.tool);
   if (!list.length) return null;
-  return h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
-    h('span.band-text', {}, list.slice(0, 3).map(install => `What ${install.plugin} brings in ${names[install.tool]} isn’t listed: ${install.problem}`).join(' · ') + (list.length > 3 ? ` · and ${list.length - 3} more` : '')));
+  const plugins = [...new Set(list.map(install => install.plugin))];
+  const tools = [...new Set(list.map(install => install.tool))];
+  const shown = plugins.length === 1
+    ? `What the plugin ${plugins[0]} brings in ${tools.length === 1 ? names[tools[0]!] : `${tools.length} tools`} isn’t listed`
+    : plugins.length === 2 ? `What 2 plugins bring isn’t listed: ${plugins[0]} and ${plugins[1]}`
+    : `What ${plugins.length} plugins bring isn’t listed: ${plugins[0]} and ${plugins.length - 1} more`;
+  const why = list.map(install => unreadReason(install, list.length > 1)).join('\n');
+  return h('div.band', { role: 'status', 'data-info-block': true }, icon('triangle-alert', 14, 'tone-warning'),
+    h('span.band-text', {}, shown), infoMark('unread-plugins-info', 'Unlisted plugin items', why));
 }
 /** How long ago a time was ("2 min ago", "3 h ago", "yesterday", "5 days ago"), or '' when it isn't known. */
 const sinceThen = (at: number) => {
@@ -974,10 +995,11 @@ function openRow(t: Table, row: ItemRow | PluginRow) {
   if (view.comparing && underRow(t, id)) revealUnderRow(id);
 }
 
-/** A library item's tag after its name, when it isn't plainly on everywhere (libraryrow.ts placeTag). */
-function libraryTag(t: Table, skill: ItemRow) {
-  const tag = libraryPages[skill.kind].say.placeTag(skill, itemOf(skill), toolsFor(t, skill.kind), leftOutTools());
-  return tag ? h('span.row-tag', { title: tag.title }, tag.text) : null;
+/** A library item's tag after its name, when it isn't plainly on everywhere and its heading doesn't already say it (libraryrow.ts showsPlaceTag, placeTag). */
+function libraryTag(t: Table, skill: ItemRow, heading: Role) {
+  const item = itemOf(skill), tools = toolsFor(t, skill.kind);
+  const tag = showsPlaceTag(heading, skill, item, tools) ? libraryPages[skill.kind].say.placeTag(skill, item, tools, leftOutTools(), heading === 'off') : undefined;
+  return tag ? h(`span.row-tag${tag.warn ? '.row-tag-warn' : ''}`, { title: tag.title }, tag.text) : null;
 }
 /** The tag after an item's name while a version waits at the source it is linked to, or once its source removed it (libraryrow.ts fromSourceWords). */
 function sourceTag(skill: ItemRow) {
@@ -1006,13 +1028,13 @@ function rowPlugins(skill: ItemRow) {
  * the name wraps out of sight, and only then does the name shorten (style.css .ov-name-fit). Its full text is always in the tooltip. Nothing in it is a control: the row's switch and chevron
  * are its only ones, so Copies differ is said here, not clicked.
  */
-function nameCell(t: Table, skill: ItemRow, attention: boolean) {
+function nameCell(t: Table, skill: ItemRow, attention: boolean, heading: Role) {
   const name = skill.name ?? skill.key, open = t.view.comparing === idOf(skill) && !fileInDetails(t.view, idOf(skill));
   return h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: skill.description ? `${name}: ${skill.description}` : name },
     h('span.ov-name-main', {}, kindMark(t, skill.kind),
       h('span.ov-name-text', {}, name), fileButton(t, skill), kindWord(t, skill.kind, name),
-      attention ? h('span.row-tag.row-tag-differs', { id: elId('decide', skill) }, 'Copies differ') : null),
-    libraryTag(t, skill),
+      attention ? h('span.row-tag.row-tag-differs', { id: elId('decide', skill) }, 'copies differ') : null),
+    libraryTag(t, skill, heading),
     sourceTag(skill),
     // While the row is open, its details show the description whole, except for differing copies (which show the chooser alone)
     // and while its file is in their place.
@@ -1082,24 +1104,61 @@ export function reloadButton(item: { chip?: string; command: string; title: stri
   return control;
 }
 
-/** One non-wrapping line of per-tool reload chips for the folded header, with +N more opening Show all on overflow. */
+/** Count of Show all rows with no chip in sight (one per tool, whether a tool has zero chips or multiple commands). */
+export const unshownReloadRows = (total: number, chips: readonly { tool?: string; hidden: boolean }[]): number =>
+  Math.max(0, total - new Set(chips.filter(chip => !chip.hidden && chip.tool).map(chip => chip.tool)).size);
+
+/** One non-wrapping line of per-tool reload chips for the folded header, with +N more step(s) opening Show all for any unshown row. */
 export function reloadChips(advice: ReloadAdvice, of: typeof state.shownWhole): HTMLElement | null {
   const chips = advice.items.flatMap(item => [
-    ...(item.chip ? [{ chip: item.chip, command: item.command, title: item.title!, id: `outcome-copy-${item.tool}` }] : []),
-    ...(item.more ?? []).map((extra, at) => ({ ...extra, id: `outcome-copy-${item.tool}-${at + 1}` })),
+    ...(item.chip ? [{ tool: item.tool, chip: item.chip, command: item.command, title: item.title!, id: `outcome-copy-${item.tool}` }] : []),
+    ...(item.more ?? []).map((extra, at) => ({ ...extra, tool: item.tool, id: `outcome-copy-${item.tool}-${at + 1}` })),
   ]);
-  const view = (chip: { chip: string; command?: string; title: string; id: string }) =>
-    (chip.command ? reloadButton({ chip: chip.chip, command: chip.command, title: chip.title }, chip.id) : h('span.reload-chip', { title: chip.title }, chip.chip));
+  const view = (chip: { tool: string; chip: string; command?: string; title: string; id: string }) => {
+    const node = chip.command ? reloadButton({ chip: chip.chip, command: chip.command, title: chip.title }, chip.id) : h('span.reload-chip', { title: chip.title }, chip.chip);
+    node.setAttribute('data-reload-tool', chip.tool);
+    return node;
+  };
   return chips.length ? h('div.result-reloads', {},
     h('span.result-copies', {}, chips.map(view)),
-    h('button.inline-link.reload-more', { type: 'button', id: 'outcome-reload-more', hidden: true, onclick: (event: Event) => { event.stopPropagation(); state.shownWhole = of; rerender(); } }, '')) : null;
+    h('button.inline-link.reload-more', { type: 'button', id: 'outcome-reload-more', hidden: true, 'data-reload-rows': String(advice.items.length), onclick: (event: Event) => { event.stopPropagation(); state.shownWhole = of; rerender(); } }, '')) : null;
 }
 
-/** Per-tool reload lines for Show all and off-header bands: the table's sentence, then its Copy buttons if it has any. */
-export const reloadLines = (advice: ReloadAdvice): HTMLElement | null => (advice.items.length
-  ? h('div.reload-list.result-copies', {}, advice.items.map(item => h('div.reload-row', {}, h('span.reload-row-text', {}, item.text),
-    item.command ? reloadButton({ chip: item.chip!, command: item.command, title: item.title! }, `outcome-copy-${item.tool}`) : null,
-    ...(item.more ?? []).flatMap((extra, at) => (extra.command ? [reloadButton({ ...extra, command: extra.command }, `outcome-copy-${item.tool}-${at + 1}`)] : []))))) : null);
+const RELOAD_FOLD_FROM = 3;
+let reloadFoldOpen: object | undefined;
+/** One reload step's row: each distinct command once paired with its own note (grouped so a wrap never parts a command from its purpose), or plain text when there is no command. */
+function reloadRow(item: ReloadItem): HTMLElement {
+  if (!item.command) return h('div.reload-row', {}, h('span.reload-row-text', {}, item.text));
+  const parts: Child[] = [
+    reloadButton({ chip: item.chip!, command: item.command, title: item.title! }, `outcome-copy-${item.tool}`),
+    ...(item.note ? [h('span.reload-row-note', {}, item.note)] : []),
+    ...(item.more ?? []).flatMap((extra, at) => (extra.command
+      ? [h('span.reload-cmd-part', {},
+        ...(extra.lead ? [h('span.reload-row-note', {}, extra.lead)] : []),
+        reloadButton({ ...extra, command: extra.command }, `outcome-copy-${item.tool}-${at + 1}`),
+        ...(extra.note ? [h('span.reload-row-note', {}, extra.note)] : []))]
+      : [])),
+  ];
+  return h('div.reload-row.reload-row-cmd', {}, parts);
+}
+
+/**
+ * Per-tool reload steps for page bands and the header's whole result: each command said once on its Copy button, caveats and
+ * no-command steps in plain text. Every page band folds 3+ shown steps behind "Reload steps (N)" (keyed by its outcome/run);
+ * the header's Show all card passes `'whole'` as the one named exception that never folds.
+ */
+export function reloadLines(advice: ReloadAdvice, owner: object | 'whole'): HTMLElement | null {
+  if (!advice.items.length) return null;
+  const list = h('div.reload-list.result-copies', {}, advice.items.map(reloadRow));
+  if (owner === 'whole' || advice.items.length < RELOAD_FOLD_FROM) return list;
+  const disclosure = fold({
+    id: 'outcome-reloads-fold', toggleId: 'outcome-reloads-toggle',
+    label: `Reload steps (${advice.items.length})`, open: reloadFoldOpen === owner,
+    onToggle: open => { reloadFoldOpen = open ? owner : undefined; }, bodyClass: 'reload-fold-body',
+  }, list);
+  disclosure.className = 'fold reload-fold';
+  return disclosure;
+}
 
 /**
  * The last action's result as a band, when it offers something to do; a result that only tells is in the status bar. While a
@@ -1148,7 +1207,7 @@ export function outcomeBand(cardResult?: Outcome, omitProfile = false): HTMLElem
       !outcome.act && !outcome.undo && outcome.history ? smallAction(outcome.refused ? 'History' : 'Undo in History', 'outcome-history', () => showPage('history')) : null,
       outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),
     cardResult ? null : closeButton(closeResult, { id: 'outcome-dismiss' }),
-    outcome === state.outcome && !resultInHeader() && outcome.reloads ? reloadLines(reloadAdvice(outcome.reloads, toolWays())) : null);
+    outcome === state.outcome && !resultInHeader() && outcome.reloads ? reloadLines(reloadAdvice(outcome.reloads, toolWays()), outcome) : null);
 }
 
 /**
@@ -1244,15 +1303,24 @@ export function listResult(): HTMLElement[] {
   const chips = !whole && advice ? reloadChips(advice, of) : null;
   const profile = profileSpan(done && !whole ? state.outcome?.profileLine : undefined);
   const problem = lines.length ? h(`div.band${chips || profile ? '.result-row2' : ''}`, { role: 'status' }, profile, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, of, hasAdvice), chips, done ? null : closeButton(close, { id: 'problems-dismiss' })) : null;
-  const row2 = whole && advice ? reloadLines(advice) : problem ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
-  return [done, row2, problem].filter((band): band is HTMLElement => !!band);
+  const row2 = whole && advice ? reloadLines(advice, 'whole') : problem ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
+  return [done, problem, row2].filter((band): band is HTMLElement => !!band);
 }
 
-/** The profile-left-use sentence for a result's second line: long names give way while the rest stays whole (style.css .band-profile). */
-export function profileSpan(line: string | undefined): HTMLElement | null {
+/**
+ * The words of an act that ended the profile in use (app.ts profileEndedLine), for a result's second line: long names give way while
+ * the rest stays whole (style.css .band-profile), ` · changed` (words.ts CHANGED) with a (?) saying what that means, its switch
+ * promised only while the home on screen can switch to it (profileplan.ts profileNowIn `canSwitchBack`), or " stopped being the
+ * profile in use." `id`: the (?)'s, one per place a result is drawn.
+ */
+export function profileSpan(line: string | undefined, id = 'profile-changed-info'): HTMLElement | null {
   if (!line) return null;
-  const at = line.lastIndexOf(' stopped being the ');
-  return h('span.band-profile', { title: line }, h('span.band-profile-name', {}, line.slice(0, at)), h('span.band-profile-rest', {}, line.slice(at)));
+  const changed = line.endsWith(CHANGED), at = changed ? line.length - CHANGED.length : line.lastIndexOf(' stopped being the '), name = line.slice(0, at);
+  const now = changed && state.home ? profileNowIn(state.home) : undefined;
+  const card = changed ? infoMark(id, 'the profile', changedCard(name, now?.changed?.name === name && !!now.canSwitchBack)) : null;
+  // The span's own title names the line where its name is cut; the (?) says the rest.
+  card?.setAttribute('title', '');
+  return h('span.band-profile', { title: line }, h('span.band-profile-name', {}, name), h('span.band-profile-rest', {}, line.slice(at)), card);
 }
 
 /**
@@ -2451,12 +2519,12 @@ function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
 }
 
 /** One row: its switch (in Select's mode, its tick), its name, a mark per tool, and the chevron that opens its details. */
-function row(t: Table, skill: ItemRow) {
+function row(t: Table, skill: ItemRow, heading: Role) {
   const id = idOf(skill), open = t.view.comparing === id, fileOpen = t.view.openFile?.id === id, when = dated(t);
   return [
     h(`div.ov-row.ov-switch-row${takeFlash(id) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}${fileOpen ? '.ov-file-anchored' : ''}${when ? '.ov-dated' : ''}${t.used ? '.ov-usage' : ''}${tickedLook(t, skill)}`, { role: 'row', 'data-key': id, 'aria-expanded': String(open), onclick: rowClick(t, skill) },
       h('div.ov-managed', { role: 'cell' }, t.selectable ? tickOf(t, skill) : itemSwitch(t, skill)),
-      nameCell(t, skill, differs(skill)),
+      nameCell(t, skill, differs(skill), heading),
       when ? whenCell(skill) : null,
       t.used ? usedCell(t, skill) : null,
       h('div.ov-marks', { role: 'cell' }, rowMarks(t, skill)),
@@ -2689,28 +2757,33 @@ export const theseOff = (rows: ItemRow[]) => clicksByKind(rows, changeBy(rowClic
 const switchClicks = (skill: ItemRow) => [{ kind: skill.kind, changes: [changeBy(libraryPlace(itemOf(skill)) === 'on' ? rowClicks.off : rowClicks.on)(skill)] }];
 /**
  * The names of the profiles in use `clicks` would end, from the very changes they send (profileplan.ts endedByChanges; none projected
- * for no change), and `may` while other clicks still wait or run, whose writes the view doesn't hold yet; undefined for none.
+ * for no change), `may` while other clicks still wait or run, whose writes the view doesn't hold yet, and the profile then named
+ * `<Profile> · changed` where one would be (words.ts Ending); undefined for none.
  */
-function endsOf(clicks: Pick<Click, 'kind' | 'changes'>[]) {
+function endsOf(clicks: Pick<Click, 'kind' | 'changes'>[]): Ending | undefined {
   const changes = clicks.flatMap(click => click.changes.map(change => ({ kind: partOfPage[click.kind], change })));
-  const ended = state.home && changes.length ? endedByChanges(state.home, changes) : [];
-  return ended.length ? { names: ended.map(profile => profile.name), may: !!acting() } : undefined;
+  const { ended, changed } = state.home && changes.length ? endedByChanges(state.home, changes) : { ended: [] };
+  if (!ended.length) return undefined;
+  return { names: ended.map(profile => profile.name), may: !!acting(), ...(changed ? { changed: changed.name } : {}) };
 }
 /** What `clicks` would end, as a control's hover (after `label`) and its description, worked out as the pointer or the focus comes to it, not as the page draws. */
 export const endsOnHover = (label: string, clicks: () => Pick<Click, 'kind' | 'changes'>[]) => {
   const say = ({ currentTarget: node }: Event) => {
-    const ending = endsOf(clicks()), more = ending ? `${profileStops(ending.names, ending.may)}.` : '';
+    // Its words start with the profile's name (as typed), or, where it would then be `<Profile> · changed`, with "the profile".
+    const ending = endsOf(clicks()), stops = ending && profileStops(ending), more = stops ? `${ending.changed ? sentence(stops) : stops}.` : '';
     (node as HTMLElement).setAttribute('title', more ? `${label} ${more}` : label);
     (node as HTMLElement).setAttribute('aria-description', more);
   };
   return { onmouseenter: say, onfocus: say };
 };
-/** After a control, what its click would end (endsOf): "Would leave Everyday" ("Either would …" after two), its sentence and what brings it back on hover; `line`, a row's head; `band`, the result band's full wording. */
+/** After a control, what its click would end (endsOf): "Would leave Everyday", or "Would show Everyday · changed" ("Either would …" after two), its sentence and what brings it back on hover; `line`, a row's head; `band`, the result band's full wording. */
 function endsMark(ending: ReturnType<typeof endsOf>, act: string, id: string, shown: 'mark' | 'either' | 'line' | 'band' = 'mark') {
   if (!ending) return null;
-  const said = `${act}, ${shown === 'line' ? 'only this item changes: ' : ''}${profileStops(ending.names, ending.may)}.`, back = profileBack(ending.names);
-  const short = profileStops(ending.names, ending.may, true);
-  const bandText = `${andList(ending.names)} ${ending.may ? 'may' : 'would'} stop being the ${ending.names.length === 1 ? 'profile' : 'profiles'} in use`;
+  const said = `${act}, ${shown === 'line' ? 'only this item changes: ' : ''}${profileStops(ending)}.`, back = profileBack(ending);
+  const short = profileStops(ending, true);
+  // The band's wording; where the profile is then named `· changed`, the words said after the click (profileStops).
+  const bandText = ending.changed ? sentence(profileStops(ending))
+    : `${andList([...ending.names])} ${ending.may ? 'may' : 'would'} stop being the ${ending.names.length === 1 ? 'profile' : 'profiles'} in use`;
   const text = shown === 'band' ? bandText : shown === 'line' ? said : shown === 'either' ? `Either ${short}` : sentence(short);
   return h('span.profile-stop', { id, title: shown === 'line' ? back : `${said} ${back}` }, icon('sliders-horizontal', 12), h('span', {}, text));
 }
@@ -2843,7 +2916,11 @@ function whenCell(skill: ItemRow) {
 }
 
 const PLUGIN_HEADING_CARD = 'Installed with their plugin, not copied. Open a row for the controls each tool has.';
-const OFF_HEADING_CARD = 'Kept in Central Knot, switched off. Where a tool still has it, its row says so.';
+function offCard(): string {
+  const out = leftOutTools();
+  const left = out.length ? `; ${andList(out.map(tool => names[tool]))}, left out, ${out.length === 1 ? 'keeps whatever it has' : 'keep whatever they have'}` : '';
+  return `Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so${left}.`;
+}
 
 /**
  * Rows under one heading: On, Found, Off, or (on a harness's page) the ones only other tools have. `rows`: the rows drawn under
@@ -2858,7 +2935,7 @@ function section(t: Table, role: Role, rows: ItemRow[], truly: ItemRow[]) {
   const matching = truly.filter(row => picked(t, row));
   const own = rows.every(skill => matching.includes(skill));
   const about = own ? matching : rows;
-  const card = role === 'found' ? foundCard() : role === 'off' ? OFF_HEADING_CARD : '';
+  const card = role === 'found' ? foundCard() : role === 'off' ? offCard() : '';
   const mark = card ? infoMark(`section-${role}-info`, label, card) : null;
   const note = role === 'found' ? foundNote(about) : role === 'off' ? offNote(t, about) : '';
   return h('div', { role: 'rowgroup' },
@@ -2871,7 +2948,7 @@ function section(t: Table, role: Role, rows: ItemRow[], truly: ItemRow[]) {
         h('span.ov-section-count', {}, String(matching.length)),
         mark,
         note ? sectionNote(own, note) : null)),
-    rows.flatMap(skill => row(t, skill)));
+    rows.flatMap(skill => row(t, skill, role)));
 }
 
 let jumpFlashTimer: ReturnType<typeof setTimeout> | undefined;
@@ -2896,12 +2973,13 @@ function sectionJump(t: Table, sections: (HTMLElement | null | false | undefined
     }, head.querySelector('.ov-section-title')?.textContent ?? '')));
 }
 
-/** The card behind the Found heading's mark: what Add does, or what Synchronize everything skips. */
+/** The card behind the Found heading's mark: what Add does, and (while Synchronize everything is on) what the rule skips. */
 function foundCard(): string {
+  const base = 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools.';
   if (state.home?.sync.syncEverything) {
-    return 'Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
+    return `${base} Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.`;
   }
-  return 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.';
+  return base;
 }
 
 /** The Found heading's live line while Synchronize everything is on: how many rows wait for a choice of copy, or empty. */
@@ -2913,7 +2991,7 @@ function foundNote(list: ItemRow[]): string {
 
 /**
  * The Off heading's live line, in order: tools that still have some on through a plugin; removals waiting until sync runs;
- * copies Central Knot didn't place; or other-reader/switched-off copies (whole sentence for one row, short summary for several).
+ * copies Central Knot didn't place; or a single Off row's other-reader/switched-off sentence (with several rows, each row's tag says so).
  */
 function offNote(t: Table, list: ItemRow[]): string {
   const through = columns(t).filter(tool => list.some(skill => skill.pluginOn?.includes(tool)));
@@ -2924,9 +3002,9 @@ function offNote(t: Table, list: ItemRow[]): string {
   const ownTools = list.flatMap(skill => ownCopies(skill, itemOf(skill), toolsFor(t, skill.kind)));
   const where = [...new Set(ownTools)];
   if (ownTools.length) return `${plural(ownTools.length, 'own copy', 'own copies')} in ${andList(where.map(tool => names[tool]))}`;
-  // A tool that has a copy another way still has it, whether it reads it or its own switch has it off.
+  // A single Off row names the tools still reading it or holding it switched off; with several rows, each row's own tag says so.
   const ways = list.flatMap(row => [...otherReadLines(row, toolsFor(t, row.kind)), ...switchedOffWords(row, toolsFor(t, row.kind))]);
-  if (ways.length) return list.length === 1 ? ways.join(' ') : 'some tools still have copies elsewhere';
+  if (ways.length && list.length === 1) return ways.join(' ');
   return '';
 }
 

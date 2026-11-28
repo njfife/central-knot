@@ -329,7 +329,7 @@ export interface LastRun { done: PluginDone[]; undo: boolean; home: string; /** 
   stop?: ResultLine;
   /** The plugins a run that stopped never reached (pluginstate.ts applyPluginOps). */
   unreached?: { source: string; plugin: string }[];
-  /** Appended profileLeftUse sentence when the run ended every profile in use (pluginstate.ts, pluginspage.ts). */
+  /** Appended app.ts profileEndedLine words (`Everyday · changed`, or profileLeftUse's sentence) when the run ended every profile in use (pluginstate.ts, pluginspage.ts). */
   profileLine?: string;
   /** Parts turned off with the plugin on Instructions (pluginswitch.ts installedImpact), for the band sentence. */
   also?: string;

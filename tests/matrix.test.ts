@@ -1,12 +1,14 @@
-// Library Used cell words by Sort (matrix.ts usedCellWords), row-hiding rules (matrix.ts tableOf), tool-tab single mark, Mark key disclosure, section jump and docked description priority.
+// Library Used cell words by Sort (matrix.ts usedCellWords), reload step rendering (reloadLines, reloadChips), row-hiding rules (matrix.ts tableOf), tool-tab single mark, Mark key disclosure, section jump and docked description priority.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { dayWords, DAY_MS } from '../src/model.ts';
 import { newItem, type LibraryItem } from '../src/library.ts';
 import type { RowOrder } from '../src/itemrow.ts';
+import { reloadAdvice } from '../src/reload.ts';
+import type { Outcome } from '../src/app.ts';
 import { pluginLink } from '../src/sourcelink.ts';
 import type { HarnessId, HomeView, ItemNotice, LibraryFacts, ToolCopy } from '../src/types.ts';
-import { findById, installDom, textOf, type FakeNode } from './domstub.ts';
+import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let nextRefresh: (() => Promise<HomeView | null>) | undefined;
 let nextSearch: ((text: string) => Promise<{ ready: boolean; home: string; rows: { id: string }[] }>) | undefined;
@@ -18,7 +20,9 @@ const { dispatch } = installDom({
 await import('../src/settingspage.ts');
 const { oweHomeRead, readHomeOnce, setRenderer, state, unpin } = await import('../src/app.ts');
 const { runAfterLayout } = await import('../src/dom.ts');
-const { headerNotices, itemsTable, libraryTable, listResult, noticeKindsShown, openKind, rowByKey, skillsBrowser, usedCellWords } = await import('../src/matrix.ts');
+const { headerNotices, itemsTable, libraryTable, listResult, noticeKindsShown, openKind, reloadChips, reloadLines, rowByKey, skillsBrowser, unshownReloadRows, usedCellWords } = await import('../src/matrix.ts');
+const { pluginsResult, runBand } = await import('../src/pluginspage.ts');
+const { market } = await import('../src/pluginstate.ts');
 const app = state;
 
 const findAll = (node: unknown, match: (el: FakeNode) => boolean, out: FakeNode[] = []): FakeNode[] => {
@@ -108,6 +112,154 @@ test('usedCellWords shows the Sort’s figure (recency in the unused filter), ke
     assert.deepEqual(usedCellWords({ noneSeen: true }, order), { text: 'no use seen', hover: 'No use seen in 30 days.' });
     assert.deepEqual(usedCellWords({ noneSeen: true, since: sinceAt }, order), { text: 'no use seen', hover: `No use seen · records from ${since}.` });
     assert.deepEqual(usedCellWords(undefined, order), { text: 'use unknown', hover: 'No tool that has it on can tell whether it was used.' });
+  }
+});
+
+test('reloadLines says each command once paired with its own note, distinguishes command rows from plain-text steps, and keeps secondary commands and desktop caveats', () => {
+  // Five-tool skill write: Claude Code needs no reload, leaving four tools' steps.
+  const fourSkill = reloadAdvice([
+    { tool: 'claude-cli', kind: 'skill', key: 'draft-rfc', on: true },
+    { tool: 'copilot-cli', kind: 'skill', key: 'draft-rfc', on: true },
+    { tool: 'codex-cli', kind: 'skill', key: 'draft-rfc', on: true },
+    { tool: 'pi-cli', kind: 'skill', key: 'draft-rfc', on: true },
+    { tool: 'antigravity-cli', kind: 'skill', key: 'draft-rfc', on: true },
+  ]);
+  const view = reloadLines(fourSkill, 'whole') as unknown as FakeNode;
+  const rows = findAll(view, el => el.className.split(/\s+/).includes('reload-row'));
+  const partShape = (el: FakeNode): unknown => (
+    el.tag === 'button' ? ['button', textOf(el), el.attrs['data-copy']]
+      : el.className === 'reload-cmd-part' ? ['reload-cmd-part', (el.children ?? []).map(child => partShape(child as FakeNode))]
+      : [el.className, textOf(el)]
+  );
+  const rowShape = (row: FakeNode) => ({
+    cmdRow: row.className.split(/\s+/).includes('reload-row-cmd'),
+    parts: (row.children ?? []).map(child => partShape(child as FakeNode)),
+  });
+  assert.deepEqual(rows.map(rowShape), [
+    { cmdRow: true, parts: [['button', 'Copilot CLI: /skills reload', '/skills reload']] },
+    { cmdRow: false, parts: [['reload-row-text', 'Codex picks it up at the next turn; if not, start a new chat.']] },
+    { cmdRow: true, parts: [['button', 'Pi: /reload', '/reload']] },
+    { cmdRow: true, parts: [['button', 'Antigravity: /skills reload', '/skills reload'], ['reload-row-note', 'Optional: it only refreshes the CLI’s slash menu.']] },
+  ]);
+  // Secondary command + desktop app caveat (Codex MCP both + Claude MCP both): each command paired with its purpose and grouped before "or" on wrap.
+  const bothMcp = reloadAdvice([
+    { tool: 'claude-cli', kind: 'mcp', key: 'docs', on: true },
+    { tool: 'codex-cli', kind: 'mcp', key: 'docs', on: true },
+  ], { 'claude-cli': 'both', 'codex-cli': 'both' });
+  const mcpRows = findAll(reloadLines(bothMcp, 'whole') as unknown as FakeNode, el => el.className.split(/\s+/).includes('reload-row'));
+  assert.deepEqual(mcpRows.map(rowShape), [
+    { cmdRow: true, parts: [['button', 'Claude Code: claude --continue', 'claude --continue'], ['reload-row-note', 'Restart (keeps the chat), or restart Claude desktop.']] },
+    { cmdRow: true, parts: [
+      ['button', 'Codex: /new', '/new'], ['reload-row-note', 'for a new chat,'],
+      ['reload-cmd-part', [
+        ['reload-row-note', 'or'],
+        ['button', 'codex resume --last', 'codex resume --last'],
+        ['reload-row-note', 'to restart and keep the chat; restart the ChatGPT desktop app if it is open.'],
+      ]],
+    ] },
+  ]);
+});
+
+test('reloadLines folds from exactly 3 shown steps on every page band (including Instructions runBand), keeps header whole unfolded, and counts unshown tool rows once per tool', () => {
+  const outcomeA: Outcome = { page: 'history', text: 'Done A.' };
+  const outcomeB: Outcome = { page: 'history', text: 'Done B.' };
+  // 2 shown steps from 3 raw writes -> inline, no disclosure.
+  const twoShown = reloadAdvice([
+    { tool: 'claude-cli', kind: 'skill', key: 'notes', on: true },
+    { tool: 'copilot-cli', kind: 'skill', key: 'notes', on: true },
+    { tool: 'pi-cli', kind: 'skill', key: 'notes', on: true },
+  ]);
+  const inline = reloadLines(twoShown, outcomeA) as unknown as FakeNode;
+  assert.equal(inline.tag, 'div');
+  assert.equal(findById(inline, 'outcome-reloads-fold'), undefined);
+  // Exactly 3 shown steps -> folds behind Reload steps (3).
+  const threeShown = reloadAdvice([
+    { tool: 'claude-cli', kind: 'skill', key: 'notes', on: true },
+    { tool: 'copilot-cli', kind: 'skill', key: 'notes', on: true },
+    { tool: 'codex-cli', kind: 'skill', key: 'notes', on: true },
+    { tool: 'pi-cli', kind: 'skill', key: 'notes', on: true },
+  ]);
+  const foldedThree = reloadLines(threeShown, outcomeA) as unknown as FakeNode;
+  assert.equal(foldedThree.tag, 'details');
+  assert.equal(foldedThree.attrs.id, 'outcome-reloads-fold');
+  assert.equal(textOf(findById(foldedThree, 'outcome-reloads-toggle')), 'Reload steps (3)');
+  // 4 shown steps -> folds behind Reload steps (4); open state persists per owner and resets for a new owner.
+  const fourShown = reloadAdvice([
+    { tool: 'claude-cli', kind: 'skill', key: 'draft-rfc', on: true },
+    { tool: 'copilot-cli', kind: 'skill', key: 'draft-rfc', on: true },
+    { tool: 'codex-cli', kind: 'skill', key: 'draft-rfc', on: true },
+    { tool: 'pi-cli', kind: 'skill', key: 'draft-rfc', on: true },
+    { tool: 'antigravity-cli', kind: 'skill', key: 'draft-rfc', on: true },
+  ]);
+  const folded = reloadLines(fourShown, outcomeA) as unknown as FakeNode;
+  assert.equal(folded.tag, 'details');
+  assert.equal('open' in folded.attrs, false);
+  assert.equal(textOf(findById(folded, 'outcome-reloads-toggle')), 'Reload steps (4)');
+  (folded as unknown as { open: boolean; ontoggle: (event: { currentTarget: unknown }) => void }).open = true;
+  (folded as unknown as { ontoggle: (event: { currentTarget: unknown }) => void }).ontoggle({ currentTarget: folded });
+  assert.equal('open' in (reloadLines(fourShown, outcomeA) as unknown as FakeNode).attrs, true);
+  assert.equal('open' in (reloadLines(fourShown, outcomeB) as unknown as FakeNode).attrs, false);
+  // Header whole result ('whole') never folds; 0 steps returns null.
+  assert.equal((reloadLines(fourShown, 'whole') as unknown as FakeNode).tag, 'div');
+  assert.equal(reloadLines(reloadAdvice([{ tool: 'claude-cli', kind: 'skill', key: 'notes', on: true }]), outcomeA), null);
+  // reloadChips stamps data-reload-rows and per-chip data-reload-tool so +N more counts rows without a chip in sight (one per tool).
+  const mcpFour = reloadAdvice([
+    { tool: 'claude-cli', kind: 'mcp', key: 'docs', on: true },
+    { tool: 'codex-cli', kind: 'mcp', key: 'docs', on: true },
+    { tool: 'pi-cli', kind: 'mcp', key: 'docs', on: true },
+    { tool: 'opencode-cli', kind: 'mcp', key: 'docs', on: true },
+  ]);
+  const chipsWithCodex = reloadChips(fourShown, outcomeA) as unknown as FakeNode;
+  assert.equal(findById(chipsWithCodex, 'outcome-reload-more')?.attrs['data-reload-rows'], '4');
+  assert.deepEqual(
+    findAll(chipsWithCodex, el => 'data-reload-tool' in el.attrs).map(el => el.attrs['data-reload-tool']),
+    ['copilot-cli', 'pi-cli', 'antigravity-cli'],
+  );
+  const chipsTwoCmd = reloadChips(mcpFour, outcomeA) as unknown as FakeNode;
+  assert.equal(findById(chipsTwoCmd, 'outcome-reload-more')?.attrs['data-reload-rows'], '4');
+  assert.deepEqual(
+    findAll(chipsTwoCmd, el => 'data-reload-tool' in el.attrs).map(el => el.attrs['data-reload-tool']),
+    ['claude-cli', 'codex-cli', 'codex-cli', 'pi-cli', 'opencode-cli'],
+  );
+  // One unit: unshownReloadRows counts rows Show all opens without a visible chip (chipless row counts even when all chips fit; two hidden commands for one tool count once).
+  assert.equal(unshownReloadRows(4, [{ tool: 'copilot-cli', hidden: false }, { tool: 'pi-cli', hidden: false }, { tool: 'antigravity-cli', hidden: false }]), 1);
+  assert.equal(unshownReloadRows(5, [
+    { tool: 'claude-cli', hidden: false }, { tool: 'copilot-cli', hidden: false },
+    { tool: 'codex-cli', hidden: true }, { tool: 'codex-cli', hidden: true },
+    { tool: 'pi-cli', hidden: true }, { tool: 'opencode-cli', hidden: true },
+  ]), 3);
+  assert.equal(unshownReloadRows(5, [
+    { tool: 'claude-cli', hidden: false }, { tool: 'copilot-cli', hidden: false },
+    { tool: 'codex-cli', hidden: false }, { tool: 'codex-cli', hidden: true },
+    { tool: 'pi-cli', hidden: true }, { tool: 'opencode-cli', hidden: true },
+  ]), 2);
+  assert.equal(unshownReloadRows(2, [{ tool: 'copilot-cli', hidden: false }, { tool: 'pi-cli', hidden: false }]), 0);
+  // Instructions runBand follows the same band fold rule (3+ steps fold behind Reload steps (N)), and Plugins header whole places problems before reload rows.
+  const prevPage = state.page, prevHome = state.home, prevShown = state.shownWhole, prevOutcome = state.outcome;
+  const okStep = (tool: HarnessId) => ({ source: 'm', marketName: 'team', plugin: 'kit', tool, action: 'install-items' as const, report: { tool, outcome: 'installed' as const, changed: true, message: 'ok', runs: [], reloads: [{ tool, kind: 'mcp' as const, key: 'docs', on: true }] } });
+  const failStep = { source: 'm', marketName: 'team', plugin: 'bad', tool: 'claude-cli' as const, action: 'install' as const, report: { tool: 'claude-cli' as const, outcome: 'failed' as const, changed: false, message: 'failed', runs: [] } };
+  try {
+    state.home = makeHome('/tmp/ck-reload-unit', []);
+    state.outcome = undefined;
+    state.page = 'instructions';
+    const insRun = { done: [okStep('claude-cli'), okStep('codex-cli'), okStep('pi-cli')], undo: false, home: '/tmp/ck-reload-unit', place: 'instructions' as const };
+    market.lastRun = insRun;
+    const insBand = runBand() as unknown as FakeNode;
+    assert.equal(findById(insBand, 'outcome-reloads-fold')?.tag, 'details');
+    assert.equal(textOf(findById(insBand, 'outcome-reloads-toggle')), 'Reload steps (3)');
+    state.page = 'plugins';
+    const plugRun = { done: [failStep, okStep('claude-cli'), okStep('codex-cli'), okStep('pi-cli')], undo: false, home: '/tmp/ck-reload-unit', place: 'plugins' as const };
+    market.lastRun = plugRun;
+    state.shownWhole = market.lastRun;
+    const parts = pluginsResult() as unknown as FakeNode[];
+    const problemAt = parts.findIndex(part => !!findNode(part, el => el.className.split(/\s+/).includes('problem-line')));
+    const reloadAt = parts.findIndex(part => part.className.split(/\s+/).includes('reload-list'));
+    assert.ok(problemAt >= 0 && reloadAt > problemAt, `Plugins header whole puts problems (${problemAt}) before reload rows (${reloadAt})`);
+    assert.equal(parts.some(part => !!findById(part, 'outcome-reloads-fold')), false, 'Plugins header whole never folds reload rows');
+  } finally {
+    state.page = 'instructions'; market.lastRun = undefined;
+    state.page = 'plugins'; market.lastRun = undefined;
+    state.page = prevPage; state.home = prevHome; state.shownWhole = prevShown; state.outcome = prevOutcome;
   }
 });
 

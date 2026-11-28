@@ -679,7 +679,7 @@ export interface HistoryEvent {
   /** 'took-over' from before the library: what was replaced, removed and placed (read only to tell such an entry apart). */
   tookOver?: TookOver;
   /**
-   * 'profile': a profile switch (`toName`: the profile, by its name then), or the profiles migration's one entry (`migrated`,
+   * 'profile': a profile switch (`toName`: the profile, by its name then; `toId`, by its id), or the profiles migration's one entry (`migrated`,
    * `toName` the profile last switched to before it, written when it turns something Off): the library items it turned On and
    * Off, and a switch's plugins' items' copies it turned (`plugins`: written as planned before the switch, then as each tool
    * confirmed). Its Undo turns back each item and copy still as it left it (profileplan.ts undoPlan, pluginUndo), the copies told
@@ -690,7 +690,10 @@ export interface HistoryEvent {
    * keep-outs it changed, turned On or On before and after (a profile that holds them: profileplan.ts effectiveOut), each put
    * back by its Undo while as it left them. An entry from before profiles were sets of items has neither `on` nor `off`: it is past.
    */
-  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; except?: ExceptSwitched[]; plugins?: PluginSwitched[]; wholeSteps?: PluginOp[]; copilotCleared?: { id: string; name: string; server: string }[]; migrated?: true; undoOf?: string };
+  profile?: { toName?: string;
+    /** The profile by its id (profileplan.ts lastSwitched finds the one last switched to by it): on a switch's entry, from this build; an older entry, and an Undo's own, have only `toName`. */
+    toId?: string;
+    on?: SwitchedItem[]; off?: SwitchedItem[]; except?: ExceptSwitched[]; plugins?: PluginSwitched[]; wholeSteps?: PluginOp[]; copilotCleared?: { id: string; name: string; server: string }[]; migrated?: true; undoOf?: string };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
   /** What the pass changed in a tool's own settings with the copies, in words (librarypass.ts Kind.follow): Pi's skills list. */
@@ -1588,6 +1591,13 @@ export interface ProfilesView {
   plugins?: { id: string; plugin: string; marketName: string; on: boolean }[];
   /** Why profiles can't be read or saved here, if they can't. */
   problem?: string;
+  /**
+   * The profile last switched to, by id, worked out from History each time main.ts reads profiles (profileplan.ts lastSwitched,
+   * through profiles.ts profilesWithLast; never stored), so every view of them main.ts gives has looked for it: while no profile
+   * is in use, it is named `<Profile> · changed` (profileplan.ts profileNow). Unset where none was switched to within History's
+   * days, or it is gone.
+   */
+  last?: string;
 }
 
 /**

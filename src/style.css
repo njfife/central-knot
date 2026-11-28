@@ -260,36 +260,51 @@ ul { list-style: none; }
 .result-reloads > .result-copies { display: contents; }
 .result-reloads .btn.micro, .reload-list .btn.micro { height: 20px; padding: 0 7px; font-size: 11.5px; line-height: 16px; }
 .reload-chip { flex: none; display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: color-mix(in oklab, var(--ink) 7%, transparent); color: var(--ink-soft); font-size: 11.5px; line-height: 16px; white-space: nowrap; }
-.inline-link.reload-more { flex: none; font-size: 11.5px; line-height: 16px; white-space: nowrap; }
+.inline-link.reload-more { flex: none; color: var(--accent-ink); font-size: 11.5px; line-height: 16px; white-space: nowrap; }
 .btn.is-copied { border-color: var(--success); color: var(--success); }
 .header-result:not(.result-whole):has(.result-reloads, .band-profile) { gap: 1px; }
 .header-result:not(.result-whole):has(.result-reloads, .band-profile) :is(.band-done > .band-text, .toolbar-result-text) { -webkit-line-clamp: 1; }
 .header-result:not(.result-whole):has(.result-reloads, .band-profile) :is(.band-done, .toolbar-result) .btn { height: 22px; }
 .header-result:not(.result-whole) .result-row2 { height: 20px; }
 .header-result:not(.result-whole) .result-row2 > .band-lines { flex: 0 1 auto; max-width: 50%; min-width: 0; }
-.header-result:not(.result-whole) .result-row2 > .result-reloads { flex: 1 1 0; min-width: 64px; padding-left: 8px; border-left: 1px solid var(--line); }
+.header-result:not(.result-whole) .result-row2 > .result-reloads { flex: 1 1 0; min-width: 92px; padding-left: 8px; border-left: 1px solid var(--line); }
 /* Profile-left-use sentence on folded Row 2 (matrix.ts listResult): long names give way, never the words. */
 .result-profile-row { display: flex; align-items: center; gap: 8px; height: 20px; min-width: 0; }
 .band-profile { flex: 0 1 auto; min-width: 0; max-width: 100%; display: inline-flex; align-items: baseline; padding-left: 20px; font-size: 12px; line-height: 16px; color: var(--ink); }
 .band-profile-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .band-profile-rest { flex: none; white-space: pre; }
+/* After `Everyday · changed`, its (?): what the next switch does (matrix.ts profileSpan), on the line's own height. */
+.band-profile > .info-wrap { flex: none; align-self: center; margin-left: 2px; }
+.band-profile .info-mark { width: 18px; height: 16px; }
 .header-result:not(.result-whole) .result-row2:has(.band-profile) > .band-lines { flex: 4 1 0; min-width: 48px; }
-.header-result:not(.result-whole) .result-row2:has(.band-profile) > .result-reloads { flex: 1 0 58px; min-width: 0; }
-.reload-list { display: flex; flex-direction: column; gap: 4px; padding: 2px 0 4px 20px; font-size: 12px; line-height: 18px; }
-.reload-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--ink-soft); }
-.band-done:has(> .reload-list) { flex-wrap: wrap; row-gap: 4px; }
-/* Single-action result bands with reload lines (every page off the header, excluding .band-two): grid keeps icon, wrapped text,
-   Undo and × on row 1 so long text never drops below its icon or orphans × above .reload-list at 860px. */
-.band-done:not(.band-two):has(> .reload-list) { display: grid; grid-template-columns: auto minmax(0, max-content) auto minmax(auto, 1fr); align-items: center; }
-.band-done:not(.band-two):has(> .reload-list) > .band-dismiss { grid-column: 4; }
-.band-done > .reload-list { order: 2; flex-basis: 100%; grid-column: 1 / -1; }
+.header-result:not(.result-whole) .result-row2:has(.band-profile) > .result-reloads { flex: 1 0 92px; min-width: 0; }
+.reload-list { display: flex; flex-direction: column; gap: 8px; padding: 2px 0 4px 20px; font-size: 12px; line-height: 18px; }
+.reload-fold { padding: 0 0 0 20px; }
+/* Shares .fold > summary's inline-flex/padding/font-size (below); keeps the target at least 24px tall. */
+.reload-fold > summary { min-height: 24px; line-height: 16px; }
+.reload-fold .reload-list { padding: 1px 0 2px 0; }
+/* Plain-text steps stay in full ink (they are steps to do); notes beside a Copy button stay in soft grey and indent under their button when wrapped. */
+.reload-row { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; color: var(--ink); }
+.reload-row-cmd { padding-left: 14px; }
+.reload-row-cmd > :first-child { margin-left: -14px; }
+.reload-cmd-part { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; }
+.reload-row-note { color: var(--ink-soft); line-height: 16px; }
+.band-done:has(> :is(.reload-list, .reload-fold)) { flex-wrap: wrap; row-gap: 4px; }
+/* Single-action result bands with reload lines or disclosure (every page off the header, excluding .band-two): grid keeps icon,
+   wrapped text, Undo and × on row 1 so long text never drops below its icon or orphans × above reloads at 860px. */
+.band-done:not(.band-two):has(> :is(.reload-list, .reload-fold)) { display: grid; grid-template-columns: auto minmax(0, max-content) auto minmax(auto, 1fr); align-items: center; }
+.band-done:not(.band-two):has(> :is(.reload-list, .reload-fold)) > .band-dismiss { grid-column: 4; }
+.band-done > :is(.reload-list, .reload-fold) { order: 2; flex-basis: 100%; grid-column: 1 / -1; }
 .result-whole { --card: color-mix(in oklab, var(--surface) 88%, white); align-self: flex-start; max-height: calc(100vh - 120px); overflow-y: auto; margin: 0 -12px;
-  padding: 0 12px 12px; background: var(--card); border: 1px solid var(--control-line); border-top: 0; border-radius: 0 0 8px 8px;
+  padding: 0 12px 6px; background: var(--card); border: 1px solid var(--control-line); border-top: 0; border-radius: 0 0 8px 8px;
   box-shadow: 0 14px 28px -10px rgb(0 0 0 / 0.5); }
 .result-whole::-webkit-scrollbar { width: 8px; }
 .result-whole::-webkit-scrollbar-thumb { background: var(--control-line); border-radius: 4px; }
 .result-whole > :is(.band, .toolbar-result) { align-items: flex-start; }
-.result-whole > :first-child { position: sticky; top: 0; z-index: 1; padding-top: 5px; background: var(--card); }
+.result-whole > :is(.band-done, .toolbar-result) > svg { margin-top: 1px; }
+.result-whole > :is(.band-done, .toolbar-result) .btn:not(.micro) { height: 22px; }
+.result-whole > :is(.band-done, .toolbar-result) > :is(.band-actions, .btn:not(.micro), .band-dismiss) { margin-block: -3px; }
+.result-whole > :first-child { position: sticky; top: 0; z-index: 1; padding: 8px 0 3px; background: var(--card); }
 .result-whole :is(.band-done > .band-text, .toolbar-result-text) { display: block; overflow: visible; overflow-wrap: anywhere; }
 #header #problems-show-all { flex: none; white-space: nowrap; }
 .result-whole #problems-show-all { align-self: flex-end; }
@@ -433,11 +448,12 @@ ul { list-style: none; }
 .band-dismiss { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: none; border: 0; border-radius: 6px; background: transparent; color: var(--ink-faint); cursor: pointer; }
 .band-dismiss:hover { background: var(--hover); color: var(--ink); }
 /* Small circled-? button and its top-layer detail card (dom.ts infoMark): UA popover inset/margin reset so cardPlace places it. */
-.info-wrap { display: inline-flex; align-items: center; }
+.info-wrap { display: inline-flex; align-items: center; flex: none; }
 .info-mark { appearance: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-soft); cursor: pointer; }
 .info-mark:hover, .info-mark:focus-visible { color: var(--ink); background: var(--press); }
 .info-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .info-card { position: fixed; inset: auto; margin: 0; width: max-content; max-width: min(320px, calc(100vw - 16px)); padding: 8px 10px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); box-shadow: var(--overlay); color: var(--ink); font: 400 12px/17px var(--sans); white-space: normal; overflow: visible; overflow-wrap: break-word; }
+#unread-plugins-info-card { white-space: pre-line; }
 .info-line { display: block; }
 .info-line + .info-line { margin-top: 5px; }
 @media (prefers-color-scheme: dark) { .info-card { background: color-mix(in oklab, var(--surface) 84%, white); border-color: var(--cell-line); box-shadow: 0 10px 24px rgb(0 0 0 / 70%); } }
@@ -643,7 +659,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .no-about .ov-name-about { display: none; }
 /* Where Find found a row only in its file's text, that text takes the description's place, led by a faint mark (matrix.ts aboutLine). */
 .excerpt-mark { color: var(--ink-faint); }
-.row-tag ~ .ov-name-about::before { content: "·"; margin-right: 8px; }
+:is(.row-tag, .ov-name-main:has(.row-tag)) ~ .ov-name-about::before { content: "·"; margin-right: 8px; }
 /*
  * A row's name cell gives way in order. The description shortens (and, table-wide, steps aside; see above); the
  * tag after the name wraps onto a line below its 40px, out of sight, whole. The name and its state pills (.ov-name-main) are
@@ -652,10 +668,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-name-fit { flex-wrap: wrap; align-content: flex-start; height: 40px; padding-left: 36px; position: relative; }
 .ov-name-fit .row-open { position: absolute; left: 10px; margin: 0; top: 11px; }
 .ov-name-main { flex: 0 1 auto; min-width: 0; height: 40px; display: flex; align-items: center; gap: 8px; }
-/* While descriptions show, a name longer than half its name cell (and 280px, so a 30-letter name stays whole beside a dock)
-   is cut there, so one very long name doesn't take every description away (matrix.ts settleDescriptions, which takes the cut
-   off again once every description is left out). */
+/* While descriptions show, a name longer than half its name cell (and 280px with a tag, or 380px without one so a row that
+   dropped its routine tag uses that room) is cut there, so one very long name doesn't take every description away
+   (matrix.ts settleDescriptions, which takes the cut off again once every description is left out). */
 .ov-name-fit.name-cut > .ov-name-main { max-width: max(50%, 280px); }
+.ov-name-fit.name-cut:not(:has(.row-tag)) > .ov-name-main { max-width: max(50%, 380px); }
 .ov-name-fit > .row-tag, .ov-name-fit > .ov-name-about { line-height: 40px; }
 /* An opened row lets its name cell wrap so a plugin origin tag is never clipped out of view at 860. */
 .ov-row.open:not(.ov-file-anchored) { height: auto; min-height: 40px; }
@@ -667,7 +684,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* Open file mark right after a skill's name (filepanel.ts fileButton). */
 .row-file-btn { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; margin-left: -4px; padding: 0; border: 1px solid var(--cell-line); border-radius: 5px; background: var(--surface); box-shadow: var(--lift); color: var(--ink-soft); cursor: pointer; }
 .row-file-btn[aria-pressed="true"] { background: color-mix(in oklab, var(--accent) 14%, var(--surface)); border-color: color-mix(in oklab, var(--accent) 42%, transparent); color: var(--accent-ink); }
-.row-tag { flex: none; font-size: 11.5px; color: var(--ink-soft); white-space: nowrap; }
+.row-tag { flex: none; font-size: 11.5px; color: var(--ink); white-space: nowrap; }
 .ov-managed { display: flex; justify-content: center; }
 .ov-cell { position: relative; display: flex; justify-content: center; align-items: center; gap: 6px; }
 
@@ -1879,7 +1896,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 
 .details-part .inline-link { white-space: nowrap; }
 .details .details-limits.details-part { margin-left: 0; }
-.row-tag.row-part { display: inline-flex; align-items: center; gap: 4px; }
+.row-tag.row-part { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-soft); }
 .plugin-panel-hint { margin: -4px 0 10px; font-size: 12px; color: var(--ink-soft); }
 .plugin-section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 28px; }
 .plugin-outcome-what code { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
@@ -2100,6 +2117,9 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .toolbar-title { font-size: 12px; line-height: 16px; font-weight: 600; }
 .profile-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .profile-row-name { min-width: 0; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.profile-row-head { display: flex; min-width: 0; }
+.profile-row-head .profile-row-name { flex: 0 1 auto; }
+.profile-row-head .profile-changed-word { flex: none; line-height: 16px; white-space: pre; }
 .profile-row-text .list-fraction { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .profile-row { height: auto; min-height: 37px; padding-block: 8px; }
 .profile-in-use { flex: none; height: 20px; display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 14px; font-weight: 500; white-space: nowrap; background: var(--picked); color: var(--accent-ink); }
@@ -2109,6 +2129,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .profile-subtitle { display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: wrap; }
 .profile-subtitle > .info-wrap { flex: none; }
 .profile-header .pane-title h2, .profile-header .pane-title p { overflow-wrap: anywhere; }
+.profile-changed-word { font-weight: 400; color: var(--ink-soft); }
 /* What a switch will do is said whole: it wraps rather than being cut */
 .profile-header .pane-title p { white-space: normal; }
 .profile-header { flex-wrap: wrap; row-gap: 8px; }
@@ -2192,7 +2213,10 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* It gives way first in a crowded bar: a long name ends in an ellipsis (its tooltip and the menu have it whole). The sync switch
    beside it keeps its width, since its words can't shorten and would run under the version. */
 /* "No profile" stays whole at the narrowest window; only a longer name shortens. */
-.status-profile-wrap { position: relative; display: flex; flex: 0 3 auto; min-width: 112px; max-width: 200px; }
+.status-profile-wrap { position: relative; display: flex; flex: 0 3 auto; min-width: 112px; max-width: 260px; }
+/* `Everyday · changed`: only the name gives way, ` · changed` stays whole beside it (profilespage.ts profileStatus). */
+.status-profile .status-changed { flex: none; margin-left: -6px; white-space: pre; }
+.status-profile-wrap:has(.status-changed) { min-width: 150px; }
 #status-facts .status-item:has(> .fact-short) { flex: none; }
 #status-facts:has(> .status-profile-wrap) > .sync-switch { flex: none; }
 .status-profile { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 6px; min-width: 0; height: 22px; padding: 0 6px; margin: 0 -6px; border-radius: 6px; color: var(--ink); font-weight: 500; }
@@ -2223,6 +2247,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .other-app-says { color: var(--ink-soft); max-width: 90ch; }
 .harness-scroll > * { flex: none; }
 .harness-scroll > .tools-note { margin: 0; max-width: 80ch; }
+.tools-note-profile { white-space: nowrap; }
 .harness-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; }
 .harness-card { container-type: inline-size; display: flex; flex-direction: column; color: var(--ink); }
 .harness-card-main { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 12px 14px; }
@@ -2597,7 +2622,7 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 }
 .tool-mark.mark-off::after { content: ""; position: absolute; left: 3px; right: 3px; top: calc(50% - 0.75px); height: 1.5px; border-radius: 1px; background: var(--ink-soft); transform: rotate(-40deg); }
 .tool-mark.mark-differs, .tool-mark.mark-waits { color: var(--warning); }
-.row-tag.row-tag-differs { color: var(--warning); }
+.row-tag.row-tag-differs, .row-tag.row-tag-warn { color: var(--warning); }
 .row-tag.row-tag-source { display: inline-flex; align-items: center; gap: 4px; color: var(--warning); }
 /* An item a plugin brought (library.ts A PLUGIN): where it comes from, no warning. */
 .row-tag.row-tag-source.row-tag-plugin { color: var(--ink-soft); }
