@@ -1935,7 +1935,7 @@ export const libraryTable = (none?: (kind: PageKind) => HTMLElement) => drawTabl
 /** A tool's tab of one kind under Harnesses: its own mark on each row (opened details keep every tool, this tool first), and the rows it doesn't have under their own heading. */
 export const itemsTable = (which: PageKind, harness: Tool) => drawTable(useTab(which, harness));
 
-// Local copy of the Plugin marketplaces table's Every tool head card; unify into one labelled mark once that PR lands.
+// The same card as the plugins table's head (pluginspage.ts); one labelled mark for both once that table's change lands.
 const EVERY_TOOL_CARD = 'Each switch turns an item on or off in every tool that can take it. Open a row to change one tool alone.';
 /** Column head on a tool's tab: states that each row's switch acts in every tool, opposite this tool's single mark column. */
 const switchColumnHead = (tool: Tool) => h('div.ov-tab-head', { role: 'row', 'data-info-block': true },
