@@ -9290,6 +9290,7 @@ async function syncEverythingFlow() {
   for (let tries = 0; tries < 100 && (readNow(join(uCodex, 'edited/SKILL.md')) !== text('edited', 'Original.') || (await b.all('.setting-added .setting-message')).length < 2); tries++) await wait(100);
   writeFileSync(join(uClaude, 'edited/SKILL.md'), text('edited', 'Edited by hand.'));
   for (let tries = 0; tries < 80 && readNow(join(uCodex, 'edited/SKILL.md')) !== text('edited', 'Edited by hand.'); tries++) await wait(100);
+  for (let tries = 0; tries < 80 && !(await b.all('.setting-added .setting-message', 'e.textContent')).includes('Added skill edited from Claude Code. edited since'); tries++) await wait(100);
   await b.settle();
   same('a taken-in skill edited in its tool gets no Undo of its own on its line but says why, and the untouched one stays covered by the band',
     await b.all('.setting-added .setting-message', 'e.textContent'),
