@@ -274,7 +274,7 @@ function pluginSection(t: Table, list: PluginRow[]) {
     list.flatMap(row => pluginRowEl(t, row)));
 }
 
-/** The Library's one heading while its Find has text, over its rows (foundRows), each drawn as under its own heading; its count is listedRows'. */
+/** The Library's one heading while its Find has text, over its rows (foundRows); rows keep their routine place tags because Results does not name Found or Off. Its count is listedRows'. */
 function foundSection(t: Table, rows: (ItemRow | PluginRow)[]) {
   if (!rows.length) return null;
   return h('div', { role: 'rowgroup' },
@@ -286,7 +286,11 @@ function foundSection(t: Table, rows: (ItemRow | PluginRow)[]) {
 function unreadBand(t: Table) {
   const list = plugged(t).unread.filter(install => !t.tool || install.tool === t.tool);
   if (!list.length) return null;
-  const shown = list.slice(0, 3).map(install => `What ${install.plugin} brings in ${names[install.tool]} isn’t listed`).join(' · ') + (list.length > 3 ? ` · and ${list.length - 3} more` : '');
+  const plugins = [...new Set(list.map(install => install.plugin))];
+  const shown = list.length === 1 ? `What the plugin ${list[0]!.plugin} brings in ${names[list[0]!.tool]} isn’t listed`
+    : plugins.length === 1 ? `What the plugin ${plugins[0]} brings in ${list.length} tools isn’t listed`
+    : plugins.length === 2 ? `What 2 plugins bring isn’t listed: ${plugins[0]} and ${plugins[1]}`
+    : `What ${plugins.length} plugins bring isn’t listed: ${plugins[0]} and ${plugins.length - 1} more`;
   const why = list.length === 1 ? list[0]!.problem! : list.map(install => `${install.plugin} (${names[install.tool]}): ${install.problem}`).join('\n');
   return h('div.band', { role: 'status', 'data-info-block': true }, icon('triangle-alert', 14, 'tone-warning'),
     h('span.band-text', {}, shown), infoMark('unread-plugins-info', 'Unlisted plugin items', why));
@@ -977,8 +981,9 @@ function openRow(t: Table, row: ItemRow | PluginRow) {
 /** A library item's tag after its name, when it isn't plainly on everywhere and its heading doesn't already say it (libraryrow.ts showsPlaceTag, placeTag). */
 function libraryTag(t: Table, skill: ItemRow, heading: Role) {
   const item = itemOf(skill), tools = toolsFor(t, skill.kind);
-  const tag = showsPlaceTag(heading, skill, item, tools) ? libraryPages[skill.kind].say.placeTag(skill, item, tools, leftOutTools()) : undefined;
-  return tag ? h('span.row-tag', { title: tag.title }, tag.text) : null;
+  const tag = showsPlaceTag(heading, skill, item, tools) ? libraryPages[skill.kind].say.placeTag(skill, item, tools, leftOutTools(), heading === 'off') : undefined;
+  const warn = libraryPlace(item) === 'found' && !canAdd(skill);
+  return tag ? h(`span.row-tag${warn ? '.row-tag-warn' : ''}`, { title: tag.title }, tag.text) : null;
 }
 /** The tag after an item's name while a version waits at the source it is linked to, or once its source removed it (libraryrow.ts fromSourceWords). */
 function sourceTag(skill: ItemRow) {
@@ -2836,12 +2841,13 @@ function section(t: Table, role: Role, rows: ItemRow[], truly: ItemRow[]) {
     rows.flatMap(skill => row(t, skill, role)));
 }
 
-/** The card behind the Found heading's mark: what Add does, or what Synchronize everything skips. */
+/** The card behind the Found heading's mark: what Add does, and (while Synchronize everything is on) what the rule skips. */
 function foundCard(): string {
+  const base = 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools.';
   if (state.home?.sync.syncEverything) {
-    return 'In a tool, not yet in Central Knot. Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
+    return `${base} Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.`;
   }
-  return 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools.';
+  return base;
 }
 
 /** The Found heading's live line while Synchronize everything is on: how many rows wait for a choice of copy, or empty. */
@@ -2853,7 +2859,7 @@ function foundNote(list: ItemRow[]): string {
 
 /**
  * The Off heading's live line, in order: tools that still have some on through a plugin; removals waiting until sync runs;
- * copies Central Knot didn't place; or other-reader/switched-off copies (whole sentence for one row, short summary for several).
+ * copies Central Knot didn't place; or a single Off row's other-reader/switched-off sentence (with several rows, each row's tag says so).
  */
 function offNote(t: Table, list: ItemRow[]): string {
   const through = columns(t).filter(tool => list.some(skill => skill.pluginOn?.includes(tool)));
@@ -2864,9 +2870,9 @@ function offNote(t: Table, list: ItemRow[]): string {
   const ownTools = list.flatMap(skill => ownCopies(skill, itemOf(skill), toolsFor(t, skill.kind)));
   const where = [...new Set(ownTools)];
   if (ownTools.length) return `${plural(ownTools.length, 'own copy', 'own copies')} in ${andList(where.map(tool => names[tool]))}`;
-  // A tool that has a copy another way still has it, whether it reads it or its own switch has it off.
+  // A single Off row names the tools still reading it or holding it switched off; with several rows, each row's own tag says so.
   const ways = list.flatMap(row => [...otherReadLines(row, toolsFor(t, row.kind)), ...switchedOffWords(row, toolsFor(t, row.kind))]);
-  if (ways.length) return list.length === 1 ? ways.join(' ') : 'some tools still have copies elsewhere';
+  if (ways.length && list.length === 1) return ways.join(' ');
   return '';
 }
 

@@ -1058,39 +1058,67 @@ async function harnessFlow() {
     await openKind(h, 'skills');
 
     const FOUND_OFF_CARD = 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools.';
-    const FOUND_ON_CARD = 'In a tool, not yet in Central Knot. Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
+    const FOUND_ON_CARD = 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools. Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
     const PLUGIN_CARD = 'Installed with their plugin, not copied. Open a row for the controls each tool has.';
     const OFF_CARD = 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so.';
     const rowTags = (kind, key) => h.all(`.ov-row[data-key="${rowPart('', kind, key)}"] .row-tag`);
 
-    // Routine tags hidden under Found and Off; non-routine tags kept; Find restores routine tags under Results; unread warning is one line at 860 with its reason behind its mark.
-    same('Found and Off drop routine tags while keeping can’t be taken in, Copies differ, and switched off in a tool',
+    // Routine tags hidden under Found and Off; non-routine tags kept (shortened under Off, warning tone on can't be taken in, dot before description); Find restores full tags under Results; Off heading omits generic elsewhere note.
+    same('Found and Off drop routine tags while keeping can’t be taken in, Copies differ, and shortened switched off in a tool; Off heading has no generic elsewhere note',
       [await rowTags('skills', 'found-only'), await rowTags('skills', 'bad-found'), await rowTags('skills', 'clash'),
-        await rowTags('skills', 'off-a'), await rowTags('skills', 'off-switched')],
-      [[], ['can’t be taken in'], ['Copies differ'], [], ['in Central Knot · switched off in Codex']]);
+        await rowTags('skills', 'off-a'), await rowTags('skills', 'off-switched'), await headingSays(h, 'off')],
+      [[], ['can’t be taken in'], ['Copies differ'], [], ['switched off in Codex'], 'Off3']);
+    const tagVisuals = await h.run(`(() => {
+      const dot = key => { const el = document.querySelector('.ov-row[data-key="' + key + '"] .ov-name-about'); return el ? getComputedStyle(el, '::before').content : null; };
+      const bad = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'bad-found')}"] .row-tag');
+      const differs = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'clash')}"] .row-tag-differs');
+      return {
+        clashDot: dot('${rowPart('', 'skills', 'clash')}'),
+        offDot: dot('${rowPart('', 'skills', 'off-switched')}'),
+        plainDot: dot('${rowPart('', 'skills', 'found-only')}'),
+        badWarn: !!bad?.classList.contains('row-tag-warn') && !!differs && getComputedStyle(bad).color === getComputedStyle(differs).color,
+      };
+    })()`);
+    same('kept tags (Copies differ too) separate from descriptions with ·, plain rows have no ·, and can’t be taken in shares Copies differ’s warning tone',
+      tagVisuals, { clashDot: '"·"', offDot: '"·"', plainDot: 'none', badWarn: true });
     const waitForEl = async sel => { for (let tries = 0; tries < 40 && !(await h.exists(sel)); tries++) await wait(100); };
     const findText = async typed => { await h.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`); await h.settle(); };
-    for (const [query, key, wantTag] of [['found-only', 'found-only', 'not in Central Knot'], ['off-a', 'off-a', 'in Central Knot only']]) {
+    for (const [query, key, wantTag] of [['found-only', 'found-only', 'not in Central Knot'], ['off-a', 'off-a', 'in Central Knot only'], ['off-switched', 'off-switched', 'in Central Knot · switched off in Codex']]) {
       await findText(query);
       await waitForEl('.ov-section[data-section="results"]');
-      same(`with Find typed (${query}), plain row carries its tag under Results`, await rowTags('skills', key), [wantTag]);
+      same(`with Find typed (${query}), row carries its full tag under Results`, await rowTags('skills', key), [wantTag]);
     }
     await findText('');
     await waitForEl('.ov-section[data-section="found"]');
     await sizeTo(h, ...SMALLEST);
     if (await h.run(`document.body.classList.contains('rail')`)) await h.click('#sidebar-toggle');
     await h.settle();
-    const unreadCheck = await h.run(`(() => {
+    const readUnread = () => h.run(`(() => {
       const mark = document.getElementById('unread-plugins-info');
       const band = mark?.closest('.band'), text = band?.querySelector('.band-text');
       const tb = text?.getBoundingClientRect(), mb = mark?.getBoundingClientRect();
       const lh = text ? parseFloat(getComputedStyle(text).lineHeight) : 0;
-      return { text: text?.textContent ?? null, oneLine: !!tb && tb.height <= lh + 2, markSized: !!mb && mb.width >= 18 && mb.height >= 18 };
+      const wsUnread = getComputedStyle(document.getElementById('unread-plugins-info-card')).whiteSpace;
+      const wsFound = getComputedStyle(document.getElementById('section-found-info-card')).whiteSpace;
+      return { text: text?.textContent ?? null, oneLine: !!tb && tb.height <= lh + 2, markSized: !!mb && mb.width >= 18 && mb.height >= 18, wsUnread, wsFound };
     })()`);
-    same('at 860 with sidebar open, unread plugin warning is one line with a sized (?) mark whose card holds the reason',
-      [unreadCheck, await keyboardCard('unread-plugins-info')],
-      [{ text: 'What issue-tracker brings in Claude Code isn’t listed', oneLine: true, markSized: true },
+    same('at 860 with sidebar open, 1 unread plugin warning says it is a plugin, fits on one line, scopes pre-line to its card, and holds the reason behind (?)',
+      [await readUnread(), await keyboardCard('unread-plugins-info')],
+      [{ text: 'What the plugin issue-tracker brings in Claude Code isn’t listed', oneLine: true, markSized: true, wsUnread: 'pre-line', wsFound: 'normal' },
         { focused: 'unread-plugins-info', opened: true, cardText: 'Claude Code lists it, but its files are not where it records them.', closed: true, keptFocus: 'unread-plugins-info' }]);
+    const savedPluginsJson = readFileSync(join(hHome, '.claude/plugins/installed_plugins.json'), 'utf8');
+    for (const [add, wantText] of [
+      [['release-helper'], 'What 2 plugins bring isn’t listed: issue-tracker and release-helper'],
+      [['document-tools'], 'What 3 plugins bring isn’t listed: issue-tracker and 2 more'],
+      [['lint-helper', 'docs-sync'], 'What 5 plugins bring isn’t listed: issue-tracker and 4 more'],
+    ]) {
+      for (const name of add) writeClaudeInstall(hHome, 'hn-market', name, '1.0.0', {});
+      await h.click('#header-refresh');
+      same(`at 860 with sidebar open, unread plugin warning (${wantText}) stays one line`,
+        await readUnread(), { text: wantText, oneLine: true, markSized: true, wsUnread: 'pre-line', wsFound: 'normal' });
+    }
+    writeFileSync(join(hHome, '.claude/plugins/installed_plugins.json'), savedPluginsJson);
+    await h.click('#header-refresh');
     await fullSize(h);
     await h.click('#nav-harnesses');
     await h.click('button#harness-claude-cli.harness-card-head');
@@ -7712,7 +7740,7 @@ async function sharedCopiesFlow() {
   await opened();
   const elsewhere = `Pi ${reads} Copilot CLI ${reads}`;
   check('the Off heading names the copies still read', (await headingSays(a, 'off')).includes(elsewhere), await headingSays(a, 'off'));
-  same('the Off row names the tools that still have it', await a.text(`${row} .row-tag`), 'in Central Knot, Pi and Copilot CLI');
+  same('the Off row names the tools that still have it', await a.text(`${row} .row-tag`), 'in Pi and Copilot CLI');
   check('the Off status says where the tools read it', (await a.text('.details-status') ?? '').includes(elsewhere), await a.text('.details-status'));
   if (shots) { await sizeTo(a, 1280, 800); await a.shot('pi-skills-off'); await fullSize(a); }
   await openKind(a, 'skills');
@@ -7925,9 +7953,9 @@ async function syncEverythingFlow() {
   same('the Overview’s foot is one sentence, where every change is kept: Automatic sync is the status bar’s to say', (await a.text('#overview-kept'))?.trim(), 'Every change Central Knot makes in your tools is kept in History, with Undo where it can be undone.');
   await openKind(a, 'skills');
   same('on the Library’s skills notes and fresh are On and review stays found', await sectionsNow(a, 'skills'), [['on', ['fresh', 'notes']], ['found', ['review']]]);
-  same('the Found heading’s card says what Synchronize everything skips, and its live line counts what waits for a choice',
+  same('the Found heading’s card says what Add does and what Synchronize everything skips, and its live line counts what waits for a choice',
     [await a.text('#section-found-info-card'), (await foundNote())?.replace(/^·\s*/, '')],
-    ['In a tool, not yet in Central Knot. Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.', '1 waits for your choice of copy']);
+    ['In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools. Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.', '1 waits for your choice of copy']);
   const notice = '.sync-notice[data-kind="taken-in"] .notice-text';
   await openNotices(a);
   same('one notice per pass says how many it took in, where they were found, and their names, in the notices’ card', await a.all(`#notices-card ${notice}`, 'e.textContent.replace(/ · .*$/, "")'),
@@ -12630,7 +12658,7 @@ async function usageFlow() {
   await fullSize(a);
   same('Turn these off: one click removes Central Knot’s copies, leaves spare’s shared copy, says Codex still reads spare another way and Everyday stopped being in use, with one Undo; the chip, now at 0, is gone',
     [await headerResultWords(a), (await a.text('#status-profile'))?.trim(), Object.entries(filesOf(['standup', 'spare'])).filter(([, body]) => body), (await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'spare')}"] .row-tag`))?.trim(), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
-    ['Turned off 2 skills with no use seen in the last 30 days: spare and standup. Codex still reads spare another way. Central Knot keeps them, and turning one on puts it back as it was. Everyday stopped being the profile in use.', 'No profile', [[join(shared, 'spare'), before[join(shared, 'spare')]]], 'in Central Knot and Codex', false]);
+    ['Turned off 2 skills with no use seen in the last 30 days: spare and standup. Codex still reads spare another way. Central Knot keeps them, and turning one on puts it back as it was. Everyday stopped being the profile in use.', 'No profile', [[join(shared, 'spare'), before[join(shared, 'spare')]]], 'in Codex', false]);
   await a.click('#outcome-undo');
   for (let tries = 0; tries < 50 && JSON.stringify(filesOf(['standup', 'spare'])) !== JSON.stringify(before); tries++) await wait(100);
   same('its one Undo puts both back On, every file byte for byte, and the chip offers them again',

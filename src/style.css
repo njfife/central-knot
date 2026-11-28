@@ -437,7 +437,8 @@ ul { list-style: none; }
 .info-mark { appearance: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-soft); cursor: pointer; }
 .info-mark:hover, .info-mark:focus-visible { color: var(--ink); background: var(--press); }
 .info-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.info-card { position: fixed; inset: auto; margin: 0; width: max-content; max-width: min(320px, calc(100vw - 16px)); padding: 8px 10px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); box-shadow: var(--overlay); color: var(--ink); font: 400 12px/17px var(--sans); white-space: pre-line; overflow: visible; overflow-wrap: break-word; }
+.info-card { position: fixed; inset: auto; margin: 0; width: max-content; max-width: min(320px, calc(100vw - 16px)); padding: 8px 10px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); box-shadow: var(--overlay); color: var(--ink); font: 400 12px/17px var(--sans); white-space: normal; overflow: visible; overflow-wrap: break-word; }
+#unread-plugins-info-card { white-space: pre-line; }
 @media (prefers-color-scheme: dark) { .info-card { background: color-mix(in oklab, var(--surface) 84%, white); border-color: var(--cell-line); box-shadow: 0 10px 24px rgb(0 0 0 / 70%); } }
 /* Collapsible fold (dom.ts fold): one look on every page. */
 .fold > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; margin-left: -6px; border-radius: 6px; font-size: 12.5px; color: var(--accent-ink); cursor: pointer; }
@@ -634,7 +635,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .no-about .ov-name-about { display: none; }
 /* Where Find found a row only in its file's text, that text takes the description's place, led by a faint mark (matrix.ts aboutLine). */
 .excerpt-mark { color: var(--ink-faint); }
-.row-tag ~ .ov-name-about::before { content: "·"; margin-right: 8px; }
+:is(.row-tag, .ov-name-main:has(.row-tag)) ~ .ov-name-about::before { content: "·"; margin-right: 8px; }
 /*
  * A row's name cell gives way in order. The description shortens (and, table-wide, steps aside; see above); the
  * tag after the name wraps onto a line below its 40px, out of sight, whole. The name and its state pills (.ov-name-main) are
@@ -2530,7 +2531,7 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 }
 .tool-mark.mark-off::after { content: ""; position: absolute; left: 3px; right: 3px; top: calc(50% - 0.75px); height: 1.5px; border-radius: 1px; background: var(--ink-soft); transform: rotate(-40deg); }
 .tool-mark.mark-differs, .tool-mark.mark-waits { color: var(--warning); }
-.row-tag.row-tag-differs { color: var(--warning); }
+.row-tag.row-tag-differs, .row-tag.row-tag-warn { color: var(--warning); }
 .row-tag.row-tag-source { display: inline-flex; align-items: center; gap: 4px; color: var(--warning); }
 /* An item a plugin brought (library.ts A PLUGIN): where it comes from, no warning. */
 .row-tag.row-tag-source.row-tag-plugin { color: var(--ink-soft); }
