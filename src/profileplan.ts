@@ -568,10 +568,7 @@ export function lastSwitched(events: readonly HistoryEvent[], profiles: readonly
   return (entry.toId ? profiles.find(profile => profile.id === entry.toId) : profiles.find(profile => profile.name === entry.toName))?.id;
 }
 
-/**
- * The profiles now, as profileNow gives them: those in use, else the one last switched to (`changed`, with whether it can be
- * switched to now: `canSwitchBack`, the menus' and the page's rule, switchable), and the name every place says.
- */
+/** The profiles now: those in use, else the one last switched to (`changed`; can it be switched to now: `canSwitchBack`, switchable), and the name every place says. */
 export interface ProfileNow { inUse: Profile[]; changed?: Profile; canSwitchBack?: boolean; name: string }
 /**
  * The profiles now, the one rule every place that names the profile in use asks (the status bar and its menu, the menu bar's
