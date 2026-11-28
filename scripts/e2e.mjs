@@ -12624,7 +12624,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   /** The page as drawn: the tools' columns, and each row's name, plugin and cells' words (a mark and a Copy's label aside). */
   const page = async () => {
     const tools = await a.all('.signin-head', 'e.dataset.tool');
-    const rows = await a.run(`[...document.querySelectorAll('.signin-table tbody tr')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', ...[...row.querySelectorAll('td')].map(cell => [...(cell.querySelector('.signin-words')?.childNodes ?? [])].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''))])`);
+    const rows = await a.run(`[...document.querySelectorAll('.signin-table tbody tr[data-row]')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', ...[...row.querySelectorAll('td')].map(cell => [...(cell.querySelector('.signin-words')?.childNodes ?? [])].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''))])`);
     return { tools, rows };
   };
   /** A row by its name, and a plugin's by its name and the plugin's: "issues (tracker)". */
@@ -12634,7 +12634,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   /** Each row's words in one tool's column, by the row's name (and plugin). */
   const column = async tool => { const { tools, rows } = await page(); return Object.fromEntries(rows.map(row => [rowName(row), row[2 + tools.indexOf(tool)]])); };
   /** A row's id on the page, by its name (and plugin): what its cells' and Copy's ids end with. */
-  const rowIdOf = async name => (await a.run(`[...document.querySelectorAll('.signin-table tbody tr')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', row.dataset.row])`)).find(row => rowName(row) === name)?.[2];
+  const rowIdOf = async name => (await a.run(`[...document.querySelectorAll('.signin-table tbody tr[data-row]')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', row.dataset.row])`)).find(row => rowName(row) === name)?.[2];
   const cellId = async (tool, name) => `signin-cell-${tool}-${await rowIdOf(name)}`;
   /** A column's head as it reads (a no-break space read as a space, the ends trimmed). */
   const head = async tool => (await a.run(`document.querySelector('.signin-head[data-tool="${tool}"]')?.innerText ?? null`))?.replace(/\u00a0/g, ' ').trim() ?? null;
@@ -12730,6 +12730,47 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
     [['copilot-cli'], 'Sign-in shows only inside a session of that tool. • means the tool has the server; blank means it doesn’t.']);
   same('Local’s card says where the server runs and nothing more', await card('signin-local-mark', 'local-card'), 'Runs on this computer.');
   await fits('not-checked');
+  // At 860 with six tools: each of your own servers has the file mark after its name without pushing single-word names onto a
+  // second line, plugin servers have none, pressing a mark opens its entry in a full-width row under it (nothing cut off), a
+  // second mark moves it, an open (?) card takes Escape first and the next Escape closes the panel and refocuses its mark.
+  await sizeTo(a, ...SMALLEST); await shape(false);
+  const fileShot = async (name, theme) => { if (!shots) return; await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] }); await wait(300); await a.shot(`mcp-signin-file-${name}-${theme}`); await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); };
+  const marks860 = await a.run(`[...document.querySelectorAll('.signin-table tbody tr[data-row]')].map(r => {
+    const s = r.querySelector('.signin-server'), m = r.querySelector('.row-file-btn'), range = document.createRange();
+    range.selectNodeContents(s);
+    return { name: s.textContent, plugin: !!r.querySelector('.signin-plugin'), mark: !!m, lines: new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size };
+  })`);
+  same('at 860 own servers get the file mark with single-word names on one line, and plugin servers get none',
+    [marks860.filter(r => !r.plugin).every(r => r.mark && (r.name.includes('-') || r.lines === 1)), marks860.filter(r => r.plugin).every(r => !r.mark)], [true, true]);
+  if (shots) { await a.run(`document.querySelector('tr[data-row="${await rowIdOf('issues')}"]').scrollIntoView({ block: 'center' })`); await fileShot('plugin-beside-860', 'light'); }
+  const openEntry = async (name, expect) => {
+    const id = await rowIdOf(name);
+    await a.click(`tr[data-row="${id}"] .row-file-btn`);
+    await until(async () => (await a.text('#file-panel-mcpsignin pre.content'))?.includes(expect), `${name}’s entry`);
+    return a.run(`(() => { const row = document.querySelector('tr[data-row="${id}"]'), next = row?.nextElementSibling, td = next?.querySelector('td');
+      return { anchored: !!row?.classList.contains('file-anchored'), colspan: td?.getAttribute('colspan'), boxes: document.querySelectorAll('.file-open-box').length, text: next?.querySelector('pre.content')?.textContent ?? '' }; })()`);
+  };
+  const oauthEntry = await openEntry('oauth', 'http://127.0.0.1:47202/mcp');
+  same('at 860 pressing a server’s mark opens its entry in a full-width row under it, nothing cut off',
+    [oauthEntry.anchored, oauthEntry.colspan, oauthEntry.boxes, oauthEntry.text.includes('http://127.0.0.1:47202/mcp'), ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)],
+    [true, '7', 1, true]);
+  await fileShot('open-860', 'light');
+  await sizeTo(a, 1316, 819); await shape(false);
+  await fileShot('open-1316', 'dark');
+  await sizeTo(a, ...SMALLEST); await shape(false);
+  const issuesEntry = await openEntry('issues', 'http://127.0.0.1:47205/mcp');
+  same('at 860 pressing a second server’s mark moves the panel under it with that server’s entry',
+    [issuesEntry.anchored, issuesEntry.colspan, issuesEntry.boxes, issuesEntry.text.includes('http://127.0.0.1:47205/mcp')], [true, '7', 1, true]);
+  await a.click('#signin-session-mark');
+  const cardOpened = await a.run(`!!document.getElementById('signin-session-mark-card')?.matches(':popover-open')`);
+  await a.press('Escape');
+  const cardFirst = [cardOpened, await a.run(`!!document.getElementById('signin-session-mark-card')?.matches(':popover-open')`), await a.exists('#file-panel-mcpsignin')];
+  await a.press('Escape');
+  same('Escape closes an open (?) card first, then closes the entry panel and returns focus to its mark',
+    [cardFirst, await a.exists('#file-panel-mcpsignin'), await a.run(`document.activeElement === document.querySelector('tr[data-row="${await rowIdOf('issues')}"] .row-file-btn')`)],
+    [[true, false, true], false, true]);
+  await fullSize(a);
+  await a.run(`document.querySelector('#mcpsignin-scroll').scrollTop = 0`);
   // A server that arrives on disk while he is on the page (Pi's file, read again by itself) takes a place after the rows already
   // there, though by its name it would come first; on Refresh it goes where its name puts it.
   write('.pi/agent/mcp.json', piFile({ 'aaa-new': { url: P(47213) } }));
