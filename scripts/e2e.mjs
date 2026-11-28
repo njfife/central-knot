@@ -8935,6 +8935,42 @@ async function syncEverythingFlow() {
   for (let tries = 0; tries < 300 && !/fresh/.test(await unseenOnLibrary()); tries++) await wait(100);
   same('a notice no page has shown stays until shown: the sidebar’s Library names both passes’ notices, of every kind', await unseenOnLibrary(), '3 automatic changes: notes, fresh, files');
   await a.shot('everything-on');
+  // Added lines on Settings: each held item's name gets a file mark; at 860 one press opens its text under that line, a second mark moves it, Escape closes it, nothing cut off.
+  const setTheme = (page, value) => page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  const openAdded = async (page, id, expect) => {
+    await page.click(`#${id}`);
+    const read = () => page.run(`(() => { const p = document.getElementById('file-panel-settings'), l = p?.previousElementSibling;
+      return { anchored: !!l?.classList.contains('file-anchored'), line: l?.textContent ?? '', text: p?.querySelector('pre.content')?.textContent ?? '' }; })()`);
+    for (let tries = 0; tries < 40 && !(await read()).text.includes(expect); tries++) await wait(100);
+    await page.settle();
+    return read();
+  };
+  await sizeTo(a, ...SMALLEST);
+  await setTheme(a, 'light');
+  await a.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+  await a.settle();
+  await a.shot('settings-added-marks-860-light');
+  const markIds = await a.all('.setting-added .row-file-btn', 'e.id');
+  same('at 860, each added item on Settings has a file mark after its name', markIds.map(id => id.replace(/^file-(skills|mcp)-([^-]+)-.*$/, '$1:$2')), ['skills:notes', 'skills:fresh', 'mcp:files']);
+  const firstOpen = await openAdded(a, markIds[0], 'Take notes.');
+  same('at 860, pressing notes’s mark opens its text under that line with nothing cut off', [firstOpen.anchored, firstOpen.line, firstOpen.text.includes('Take notes.'), await a.run(CUT_OFF)], [true, 'Added skill notes from Claude Code.', true, []]);
+  await a.shot('settings-added-open-860-light');
+  const secondOpen = await openAdded(a, markIds[2], 'files-mcp');
+  same('at 860, pressing files’s mark moves the panel under its line with nothing cut off', [secondOpen.anchored, secondOpen.line, secondOpen.text.includes('files-mcp'), await a.run(CUT_OFF)], [true, 'Added MCP server files from Codex.', true, []]);
+  await a.press('Escape');
+  await a.settle();
+  same('Escape closes the file panel on Settings and returns focus to its mark', [await a.exists('#file-panel-settings'), await a.run(`document.activeElement?.id`)], [false, markIds[2]]);
+  await sizeTo(a, 1316, 819);
+  await setTheme(a, 'dark');
+  await a.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+  await a.settle();
+  await a.shot('settings-added-marks-1316-dark');
+  await openAdded(a, markIds[2], 'files-mcp');
+  await a.shot('settings-added-mcp-open-1316-dark');
+  await a.press('Escape');
+  await a.settle();
+  await setTheme(a, '');
+  await fullSize(a);
   await a.click('#outcome-dismiss');
   same('closing the band brings back History on the take-in lines', await a.all('.setting-added .setting-message', 'e.textContent'),
     ['Added skill notes from Claude Code. History can undo it.History', 'Added skill fresh from Claude Code. History can undo it.History', 'Added MCP server files from Codex. History can undo it.History']);
@@ -9091,6 +9127,54 @@ async function syncEverythingFlow() {
       [await b.exists('[data-outcome]'), await b.run(`document.querySelector('#announcement')?.classList.contains('visually-hidden')`), await b.run(`document.querySelector('#announcement')?.dataset.text`)],
       [false, false, 'Copied s1 to Claude Code. Took in s1. Copied s2 to Claude Code. Took in s2. Sync once took in 2 more items.']);
   }
+  // Two-item picture (without repeating the unit test's switch checks), then a twelve-item line at 860 checking wrapping and History.
+  settleOld([skill(uClaude, 'lint', text('lint', 'Lint gently.')), join(uClaude, 'lint/SKILL.md'),
+    skill(uCodex, 'tidy', text('tidy', 'Tidy up.')), join(uCodex, 'tidy/SKILL.md')]);
+  await b.click('#sync-switch');
+  for (let tries = 0; tries < 80 && !(await b.all('.setting-added .setting-message', 'e.textContent')).some(line => line.startsWith('Added 2 skills from Claude Code and Codex: lint and tidy.')); tries++) await wait(100);
+  await sizeTo(b, ...SMALLEST);
+  await setTheme(b, 'light');
+  await b.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+  await b.settle();
+  await b.shot('settings-added-two-items-860-light');
+  const twelve = ['audit-logs', 'bench-run', 'code-review', 'deploy', 'doc-syncs', 'migrate-db', 'plan-work', 'release-cut', 'schema-diff', 'test-smoke', 'trace-req', 'watch-ci'];
+  await b.click('#sync-switch');
+  for (let tries = 0; tries < 40 && await b.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
+  settleOld(twelve.flatMap(name => [skill(uClaude, name, text(name, `Skill ${name}.`)), join(uClaude, `${name}/SKILL.md`)]));
+  await b.click('#sync-switch');
+  for (let tries = 0; tries < 80 && !(await b.all('.setting-added .setting-message', 'e.textContent')).some(line => line.startsWith('Added 12 skills from Claude Code:')); tries++) await wait(100);
+  await b.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+  await b.settle();
+  await b.shot('settings-added-twelve-items-860-light');
+  const wrapped = await b.run(`(() => {
+    const lines = [...document.querySelectorAll('.setting-added .setting-message')];
+    const twelveLine = lines.find(el => el.textContent.startsWith('Added 12 skills from Claude Code:'));
+    let markStarts = 0, punctStarts = 0, historyAlone = 0;
+    for (const line of lines) {
+      const body = line.querySelector('.setting-message-body'), bodyLeft = body.getBoundingClientRect().left;
+      for (const btn of line.querySelectorAll('.row-file-btn')) if (btn.getBoundingClientRect().left <= bodyLeft + 2) markStarts++;
+      const walk = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        if (n.parentElement.closest('button') || !n.nodeValue) continue;
+        for (let i = 0; i < n.nodeValue.length; i++) {
+          if (!/[,.;:]/.test(n.nodeValue[i])) continue;
+          const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 1);
+          if (r.getBoundingClientRect().left <= bodyLeft + 2) punctStarts++;
+        }
+      }
+      const history = line.querySelector('.text-action');
+      if (history && history.getBoundingClientRect().left <= bodyLeft + 2) historyAlone++;
+    }
+    const marks = [...twelveLine.querySelectorAll('.row-file-btn')];
+    return { marks: marks.length, markStarts, punctStarts, historyAlone, thirdMark: marks[2]?.id };
+  })()`);
+  same('at 860, added lines (including a twelve-item line) start no wrapped line with a mark or punctuation and never drop History alone',
+    [wrapped.marks, wrapped.markStarts, wrapped.punctStarts, wrapped.historyAlone, await b.run(CUT_OFF)], [12, 0, 0, 0, []]);
+  await openAdded(b, wrapped.thirdMark, 'Skill code-review.');
+  await b.shot('settings-added-several-open-860-light');
+  await b.press('Escape');
+  await setTheme(b, '');
+  await fullSize(b);
   same('no page errors, Settings inline Undo', b.pageErrors, []);
   await b.quit();
 }
