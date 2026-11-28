@@ -13,11 +13,10 @@
  * Breakpoints adapt the layout instead of clipping it. Decided by the script, from measured widths:
  *   - window narrower than 968px: the sidebar folds to its icon rail (renderer.ts, so the toggle can override it);
  *   - content from 1200px: an open row's details dock beside its table (renderer.ts);
- *   - the Files view's pane from 1040px: the file and the skill's details in two columns (matrix.ts, data-columns);
- *   - a plugin's "Your tools": a column per tool once they and Choose all fit (pluginpage.ts, data-layout).
+ *   - the Files view's pane from 1040px: the file and the skill's details in two columns (matrix.ts, data-columns).
  * In this stylesheet, by window, content (#main, beside the sidebar) or component width:
  *   - window 680px tall or less: sidebar rows tighten so every page, home and the update control fit without scrolling;
- *   - content narrower than 880px: two-pane pages stack, the list above its detail, and the marketplaces become a strip;
+ *   - content narrower than 880px: two-pane pages stack, the list above its detail, and the marketplaces become a strip (hidden while a plugin's page is open);
  *     narrow History rows put what happened on its own line;
  *   - content from 1000px: History stripes its rows;
  *   - a table narrower than 900px with four tools, or 780px: its switch and tool columns tighten (--narrow);
@@ -1650,17 +1649,26 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .plugin-panel { margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
 .plugin-panel-head { display: flex; align-items: center; gap: 12px; height: 28px; margin-bottom: 10px; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
-.plugin-tool-rows { --tool-min: 170px; --tool-gap: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 40px; }
-/* With room for them (pluginpage.ts settlePluginTools, which reads --tool-min and --tool-gap): a column per tool, sharing the box's width as the sections below share the page's. */
-.plugin-tool-rows[data-layout="columns"] { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(var(--tool-min), 1fr)); justify-items: start; align-items: start; column-gap: var(--tool-gap); }
+/* Tracks at least --tool-min wide, growing to share the panel width when few tools are present (no empty tracks) while 4+ tools line up in rows. */
+.plugin-tool-rows { --tool-min: 170px; --tool-gap: 24px; --tool-track: max(var(--tool-min), calc((100% - (var(--tool-count, 6) - 1) * var(--tool-gap) - 1px) / var(--tool-count, 6))); display: grid; grid-template-columns: repeat(auto-fill, minmax(min(var(--tool-track), 100%), 1fr)); justify-items: start; align-items: start; gap: 10px var(--tool-gap); }
 /* The plugin's parts and In each tool sit beside the README from about 1100px of page; below that, one above the other. */
 .plugin-columns { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 48px; }
 /* The plugin's parts get the larger share: their rows carry a description and a switch per tool, the README only prose. */
 @container plugin (width >= 1100px) { .plugin-columns:has(> .plugin-readme) { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } }
-.plugin-tool { display: flex; align-items: flex-start; gap: 10px; min-width: var(--tool-min); max-width: 100%; }
+.plugin-tool { display: flex; align-items: flex-start; gap: 10px; min-width: 0; max-width: 100%; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .plugin-tool-state { display: flex; flex-direction: column; font-size: 11.5px; color: var(--ink-soft); }
+.plugin-tool-state-row { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; }
+.plugin-tool-state-row > .plugin-tool-state { text-wrap: auto; }
+.plugin-tool-state-row > .info-wrap { flex: none; }
+/* Status word and limit link on one line where they fit, separated by a dot that clips off when the link wraps (as .harness-count-part does). */
+.plugin-tool-parts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; overflow-x: clip; max-width: 100%; }
+.plugin-tool-part { min-width: 0; max-width: 100%; }
+.plugin-tool-part:first-child { white-space: nowrap; }
+.plugin-tool-part:not(:first-child)::before { content: "·"; display: inline-block; width: 12px; margin-left: -12px; text-align: center; color: var(--ink-soft); }
+.plugin-limit-link { font: inherit; color: var(--accent-ink); text-align: left; }
+.plugin-limit-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 3px; }
 /* A name of his or a clash under a tool's box (pluginpage.ts yourLines, clashLines): its sentence, then its control under it, at its start. */
 .plugin-tool-yours, .plugin-tool-clash { align-items: flex-start; gap: 4px; max-width: 100%; }
 .plugin-tool-yours .btn, .plugin-tool-clash .btn { max-width: 100%; height: auto; min-height: 28px; padding: 3px 8px; white-space: normal; overflow-wrap: anywhere; text-align: left; }
@@ -1672,8 +1680,13 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .plugin-fold > summary:hover { background: var(--hover); }
 .plugin-fold > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .plugin-fold[open] > summary > .plugin-fold-chevron { transform: rotate(90deg); }
+.plugin-fold-note { font-size: 12.5px; font-weight: 400; color: var(--ink-soft); }
 .plugin-outcome-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .plugin-outcome-row { display: grid; grid-template-columns: minmax(200px, auto) minmax(0, 1fr); gap: 4px 16px; align-items: baseline; padding: 8px 12px; }
+@keyframes outcome-flash { from { background: color-mix(in oklab, var(--accent) 18%, var(--surface)); box-shadow: inset 3px 0 0 var(--accent); } to { background: var(--surface); box-shadow: inset 3px 0 0 transparent; } }
+.plugin-outcome-row.section-flash { background: color-mix(in oklab, var(--accent) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--accent); animation: outcome-flash 2.5s ease-out forwards; }
+.plugin-outcome-row:focus { outline: none; }
+.plugin-outcome-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
 .plugin-outcome-row + .plugin-outcome-row { border-top: 1px solid var(--line); }
 .plugin-outcome-list.plugin-outcome-plain { border: 0; background: transparent; }
 .plugin-outcome-plain .plugin-outcome-row { padding: 3px 0; border-top: 0; }
@@ -1743,7 +1756,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .skill-switch-lock { position: absolute; right: 13px; color: var(--ink-soft); }
 .plugin-group-note code, .plugin-part-note code { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
 .plugin-part-note { font-size: 12px; color: var(--ink-soft); }
-/* A skill, command, agent or instruction file: the whole row opens its file, shown as the Library's Files view shows a skill's SKILL.md */
+/* A skill, command, agent, instruction file or MCP server: the whole row opens its file or entry, shown as the Library's Files view shows a skill's SKILL.md */
 .plugin-parts li.open { margin-bottom: 6px; }
 .plugin-file-toggle { all: unset; grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; padding: 3px 0; border-radius: 6px; cursor: pointer; }
 .plugin-file-toggle:hover { background: var(--hover); }
@@ -1779,6 +1792,8 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* Narrow content: the marketplaces become a strip above the page they open. */
 @container content (width < 880px) {
   .market-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .market-layout.market-plugin-open { grid-template-rows: minmax(0, 1fr); }
+  .market-layout.market-plugin-open > .market-list { display: none; }
   .market-list { flex-direction: row; align-items: center; gap: 8px; padding: 8px 16px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); }
   .market-list-title { display: none; }
   .market-list ul { flex-direction: row; }
@@ -2328,7 +2343,12 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
    rows on a plugin's page; its words, then its two buttons side by side. */
 .harness-plugin:has(> .uninstall-ask) { flex-wrap: wrap; }
 :is(.harness-plugin, .plugin-tool-rows) > .uninstall-ask { flex-basis: 100%; grid-column: 1 / -1; justify-self: stretch; }
+.plugin-uninstall { display: inline-flex; align-items: center; height: 24px; padding: 0 6px; font-size: 12px; line-height: 16px; text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--ink-soft) 45%, transparent); text-underline-offset: 3px; }
+.plugin-uninstall:hover:not(:disabled), .plugin-uninstall:focus-visible { text-decoration-color: currentColor; }
+.plugin-uninstall:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.plugin-uninstall:disabled { opacity: 0.5; text-decoration: none; }
 .plugin-tool-text > .btn { align-self: flex-start; }
+.plugin-tool-text > .plugin-uninstall { align-self: flex-start; padding: 0; border-radius: 3px; }
 .uninstall-ask { flex-direction: column; align-items: flex-start; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
 .uninstall-ask-actions { display: flex; gap: 6px; }
 .uninstall-ask .btn { height: 24px; padding: 0 10px; }
