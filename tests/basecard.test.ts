@@ -3,22 +3,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { HarnessId, InstructionFile } from '../src/types.ts';
-import { findById, findNode, installDom, makeElement, textOf, type FakeNode } from './domstub.ts';
+import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
 installDom({}, { userAgent: 'Macintosh', byId: id => findById(rendered, id) ?? null });
-const rawCreate = (globalThis.document as unknown as { createElement: (tag: string) => FakeNode }).createElement;
-(globalThis.document as unknown as { createElement: (tag: string) => FakeNode }).createElement = (tag: string) => {
-  const node = rawCreate(tag);
-  if (tag !== 'template') return node;
-  return Object.defineProperty(node, 'innerHTML', {
-    set(html: string) {
-      const svg = makeElement('svg');
-      svg.className = /class="([^"]*)"/.exec(html)?.[1] ?? '';
-      node.content.firstElementChild = svg;
-    },
-  });
-};
 
 const { state: app } = await import('../src/app.ts');
 const { baseCard } = await import('../src/basecard.ts');
@@ -139,9 +127,9 @@ test('Instructions leads with tool cards, keeps Base instructions reachable at t
   const baseIdx = children.findIndex(el => el.attrs?.id === 'base-card');
   assert.ok(aboutIdx >= 0 && toolsIdx > aboutIdx && baseIdx > toolsIdx, `expected about (${aboutIdx}) < tools (${toolsIdx}) < base (${baseIdx})`);
   assert.ok(findById(children[aboutIdx], 'ins-about'), 'How these files are read stays in the top line');
-  const goBase = findById(children[aboutIdx], 'ins-go-base');
+  const goBase = findById(children[aboutIdx], 'ins-go-base')!;
   assert.ok(goBase, 'Base instructions jump control stays reachable at top');
-  assert.equal(textOf(goBase), 'Base instructions');
+  assert.equal(textOf(goBase), 'Base instructions ↓');
   // Inside a tool card, order stays: own text (.ins-body) -> added files (.ins-parts) -> hooks (.session-strip) -> versions (.ins-versions).
   const claudeCard = findAll(rendered, el => el.attrs?.['aria-label'] === 'Claude Code instructions')[0]!;
   const inside = claudeCard.children as FakeNode[];
@@ -151,18 +139,75 @@ test('Instructions leads with tool cards, keeps Base instructions reachable at t
   const versionsIdx = inside.findIndex(el => el.className.includes('ins-versions'));
   assert.ok(bodyIdx >= 0 && partsIdx > bodyIdx && stripIdx > partsIdx && versionsIdx > stripIdx, 'order inside tool card preserved');
 
-  // Dirty base editor stays mounted in place in #base-card.
+  // Dirty base editor stays mounted in place in #base-card: jump focuses #base-text and a redraw keeps the unsaved draft there.
   app.baseEdit = { text: '- Shared edited draft.\n', hash: 'base-h', tools: ['claude-cli', 'codex-cli'], stage: 'edit' };
   rendered = instructionsPage() as unknown as FakeNode;
-  const dirtyScroll = findById(rendered, 'instructions-scroll')!;
-  const dirtyChildren = dirtyScroll.children as FakeNode[];
+  const dirtyGo = findById(rendered, 'ins-go-base')!;
+  dirtyGo.focus();
+  dirtyGo.click();
+  const dirtyArea = findById(rendered, 'base-text') as FakeNode & { value?: string };
+  assert.equal((document.activeElement as unknown as FakeNode)?.attrs?.id, 'base-text', 'jump focuses dirty base editor');
+  assert.equal(dirtyArea.value, '- Shared edited draft.\n');
+  rendered = instructionsPage() as unknown as FakeNode;
+  const dirtyChildren = findById(rendered, 'instructions-scroll')!.children as FakeNode[];
   const dirtyBaseIdx = dirtyChildren.findIndex(el => el.attrs?.id === 'base-card');
   assert.ok(dirtyBaseIdx > dirtyChildren.findIndex(el => el.className.includes('ins-tool-cards')), 'dirty base card stays in place after tools');
-  assert.ok(findById(dirtyChildren[dirtyBaseIdx], 'base-text'), 'dirty base textarea stays mounted');
+  assert.equal((findById(dirtyChildren[dirtyBaseIdx], 'base-text') as FakeNode & { value?: string }).value, '- Shared edited draft.\n');
   app.baseEdit = undefined;
 });
 
-test('Base matching fold puts its chevron after the label without tone-faint, and edited-copy combines explanation into one paragraph with both choices', () => {
+test('Base jump link carries actionable status with arrow and lands focus in locked, draft-panel, discard-confirm, and stale-save states', () => {
+  const editedFiles = [
+    makeFile('claude-cli', 'same'),
+    makeFile('codex-cli', 'edited', { sameFile: ['pi-cli'], base: { chosen: true, state: 'edited', own: 'Own.\n', copy: '- Edited.\n', leftPlain: false } }),
+    makeFile('pi-cli', 'edited', { sameFile: ['codex-cli'], path: FILE_NAMES['codex-cli'], base: { chosen: true, state: 'edited', own: 'Own.\n', copy: '- Edited.\n', leftPlain: false } }),
+    makeFile('copilot-cli', 'older'),
+  ];
+  setupBase(editedFiles);
+  rendered = instructionsPage() as unknown as FakeNode;
+  assert.equal(textOf(findById(rendered, 'ins-go-base')), 'Base instructions · 1 edited copy · 1 file to update ↓');
+
+  const jumpFrom = () => {
+    rendered = instructionsPage() as unknown as FakeNode;
+    const link = findById(rendered, 'ins-go-base')!;
+    link.focus();
+    link.click();
+    return (document.activeElement as unknown as FakeNode | null)?.attrs?.id ?? null;
+  };
+
+  // 1a. Home locked, empty base (all buttons disabled): falls back to #base-card itself (tabindex="-1").
+  setupBase([makeFile('claude-cli', 'missing', { exists: false })]);
+  app.home = { home: '/home', mode: 'actual', sync: { access: { allowed: false, reason: 'Preview only' }, gate: { state: 'ready' } } } as never;
+  app.base!.text = '';
+  assert.equal(jumpFrom(), 'base-card');
+  assert.equal(findById(rendered, 'base-card')!.attrs.tabindex, '-1');
+
+  // 1b. Home locked, existing base (#base-edit disabled): lands on first enabled control (#base-matching-toggle).
+  setupBase([makeFile('claude-cli', 'same')]);
+  app.home = { home: '/home', mode: 'actual', sync: { access: { allowed: false, reason: 'Preview only' }, gate: { state: 'ready' } } } as never;
+  assert.equal(jumpFrom(), 'base-matching-toggle');
+
+  // 2. Draft panel open (head actions hidden, empty base): lands on first enabled control in the draft panel.
+  setupBase([makeFile('claude-cli', 'missing', { exists: false })]);
+  app.base!.text = '';
+  app.base!.drafters = ['claude-cli'];
+  app.draftPick = { tool: 'claude-cli', model: '', prompt: 'Sort these instructions.' };
+  assert.equal(jumpFrom(), 'base-draft-model');
+
+  // 3. Review discard question (#base-save replaced by discard confirmation): lands on first enabled control.
+  setupBase([makeFile('claude-cli', 'same')]);
+  app.baseEdit = { text: '- Changed.\n', hash: 'base-h', tools: ['claude-cli'], stage: 'review', confirmDiscard: true };
+  assert.equal(jumpFrom(), 'base-review-discard-yes');
+
+  // 4. Stale draft review (#base-save disabled): lands on enabled #base-back.
+  setupBase([makeFile('claude-cli', 'same')]);
+  app.baseEdit = { text: '- Draft.\n', hash: 'base-h', readBase: 'older-hash', tools: ['claude-cli'], stage: 'review', source: { kind: 'draft', tool: 'claude-cli' } };
+  assert.equal(jumpFrom(), 'base-back');
+  assert.equal('disabled' in findById(rendered, 'base-save')!.attrs, true);
+  app.baseEdit = undefined;
+});
+
+test('Base matching fold puts its chevron after the label without tone-faint, and edited-copy states one sentence with review details on button hover', () => {
   const files = [
     makeFile('claude-cli', 'same'),
     makeFile('codex-cli', 'edited', { base: { chosen: true, state: 'edited', own: 'Own.\n', copy: '- Edited.\n', leftPlain: false } }),
@@ -179,15 +224,15 @@ test('Base matching fold puts its chevron after the label without tone-faint, an
   const choices = findAll(rendered, el => el.className.split(/\s+/).includes('base-choice'));
   assert.equal(choices.length, 2);
   const codexExplains = findAll(choices[0], el => el.className.split(/\s+/).includes('base-explain'));
-  assert.equal(codexExplains.length, 1, 'edited-copy explanation should be combined into one paragraph');
-  assert.match(textOf(codexExplains[0]), /Changed outside Central Knot, so AGENTS\.md was left as it is; either choice shows the change first, keeps the replaced text under Earlier versions, and can be undone\./);
+  assert.equal(codexExplains.length, 1, 'edited-copy explanation should be one concise paragraph');
+  assert.equal(textOf(codexExplains[0]), 'Changed outside Central Knot, so AGENTS.md was left as it is.');
   assert.ok(findById(choices[0], 'base-diff-codex-cli'));
-  assert.ok(findById(choices[0], 'base-usecopy-codex-cli'));
-  assert.ok(findById(choices[0], 'base-restore-codex-cli'));
+  assert.match(findById(choices[0], 'base-usecopy-codex-cli')!.attrs.title, /Shows the change first, keeps the replaced text under Earlier versions, and can be undone\./);
+  assert.match(findById(choices[0], 'base-restore-codex-cli')!.attrs.title, /Shows the change first, keeps the replaced text under Earlier versions, and can be undone\./);
 
   const piExplains = findAll(choices[1], el => el.className.split(/\s+/).includes('base-explain'));
   assert.equal(piExplains.length, 1);
-  assert.match(textOf(piExplains[0]), /putting the base back shows the change first/);
+  assert.equal(textOf(piExplains[0]), 'Changed outside Central Knot, so AGENTS.md was left as it is.');
   assert.equal(findById(choices[1], 'base-usecopy-pi-cli'), undefined);
-  assert.ok(findById(choices[1], 'base-restore-pi-cli'));
+  assert.match(findById(choices[1], 'base-restore-pi-cli')!.attrs.title, /Shows the change first, keeps the replaced text under Earlier versions, and can be undone\./);
 });

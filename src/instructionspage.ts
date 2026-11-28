@@ -9,7 +9,7 @@
 // There is no turn-off switch: instruction files are edited, never disabled or emptied by Central Knot (the one deletion is
 // an Undo of a base save removing a file that save created, while unchanged).
 import { acting, announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
-import { baseCard, baseStrip } from './basecard.ts';
+import { baseCard, baseStrip, baseWaiting } from './basecard.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
 import { fileName, lineCount, toolNames } from './words.ts';
 import { button, h, icon, infoMark, lockAttrs, pathText, rereadBand } from './dom.ts';
@@ -322,10 +322,14 @@ export function instructionsPage() {
   const items = state.home?.pluginItems ?? [];
   const anyRunnable = files.some(file => stripHasRunnable(sessionStrip(file.tool, items, file)));
   const hookInfo: HookStripPage = { marked: false, anyRunnable };
-  const goBase = state.base ? button({ variant: 'link', size: 'micro', label: 'Base instructions', id: 'ins-go-base', onclick: () => {
+  const waiting = baseWaiting(files);
+  const goBase = state.base ? button({ variant: 'link', size: 'micro', label: waiting ? `Base instructions · ${waiting} ↓` : 'Base instructions ↓', id: 'ins-go-base', onclick: () => {
     const card = document.getElementById('base-card');
     card?.scrollIntoView({ block: 'start' });
-    (card?.querySelector<HTMLElement>('#base-text, #base-save, #base-edit, #base-write') ?? card)?.focus({ preventScroll: true });
+    const target = card?.querySelector<HTMLElement>('#base-text:not(:disabled), #base-save:not(:disabled), #base-edit:not(:disabled), #base-write:not(:disabled)')
+      ?? card?.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, [tabindex="0"]')
+      ?? card;
+    target?.focus({ preventScroll: true });
   } }) : null;
   return h('div.page', {}, instructionBands(),
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },

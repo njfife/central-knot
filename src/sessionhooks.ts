@@ -101,7 +101,7 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
 }
 
 /** Standing line above the first row of every strip that has a runnable hook. */
-export const HOOK_RUN_WARN = 'Runs this command. It may change your files.';
+export const HOOK_RUN_WARN = 'Run it runs a hook’s command to show what it adds; it may change your files.';
 
 /** Information-mark card text on the first hooks strip of a page (30 words at most). */
 export function hookStripHelp(tool: HarnessId, runnable: boolean): string {
@@ -131,14 +131,14 @@ export interface HookRunView {
   errDirect?: string;
 }
 
-/** Maps one HookRunResult to its exact sentence, quiet trailing run tool/version/place/time (only when known), notes, and stdout/stderr display slots. */
-export function hookRunWords(tool: HarnessId, result: HookRunResult, shownCwd: string, time = clockTime(result.at), runAs?: { tool?: HarnessId; version?: string }): HookRunView {
+/** Maps one HookRunResult to its exact sentence, quiet trailing run tool/plugin-version/place/time (only when known), notes, and stdout/stderr display slots. */
+export function hookRunWords(tool: HarnessId, result: HookRunResult, shownCwd: string, time = clockTime(result.at), runAs?: HarnessId): HookRunView {
   if (result.outcome === 'refused') return { sentence: result.problem ? `Not run: ${lowerLead(result.problem)}` : 'Couldn’t run it.', notes: [] };
   const place = shownCwd || '~';
   const promptPart = result.emptyPrompt ? ' with an empty prompt' : '';
   const started = result.outcome !== 'missing' && result.detail !== 'spawn-error';
-  const version = runAs?.version?.trim();
-  const who = runAs?.tool ? `as ${toolNames[runAs.tool]}${version ? ` ${version}` : ''}, ` : '';
+  const version = result.pluginVersion?.trim();
+  const who = runAs ? `as ${toolNames[runAs]}${version ? `, plugin ${version}` : ''}, ` : '';
   const meta = `${who}${started ? `run in ${place}${promptPart}, ${time}` : `tried at ${time}`}`;
   const baseNotes = started && result.missingOptions ? ['Ran without some of the plugin’s options.'] : [];
   const err = result.stderr || undefined;

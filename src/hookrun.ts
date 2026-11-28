@@ -318,11 +318,12 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
   const started = Date.now();
   const baseEnv = ctx.env ?? process.env;
   const platform = ctx.platform ?? process.platform;
+  let pluginVersion: string | undefined;
   const halt = (cwd = '', isPrompt = false, limitSec?: number, source?: string) => {
     if (signal.aborted) {
       return makeResult({
         outcome: 'stopped', durationMs: Date.now() - started, cwd, emptyPrompt: isPrompt,
-        ...(limitSec !== undefined ? { limitSec } : {}), ...(source ? { source } : {}),
+        ...(limitSec !== undefined ? { limitSec } : {}), ...(source ? { source } : {}), ...(pluginVersion ? { pluginVersion } : {}),
       });
     }
     if (ctx.stillOpen && !ctx.stillOpen()) return hookRunRefused(HOOK_SOURCE_UNREADABLE, isPrompt);
@@ -340,6 +341,7 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
   if ('problem' in found) return hookRunRefused(found.problem);
   if (ref.from === 'installed' && found.pluginOff) return hookRunRefused(`${ref.plugin} is turned off in ${toolNames[ref.tool]}.`);
   if (found.hooksDisabled) return hookRunRefused(`Hooks are turned off in ${toolNames[ref.tool]}’s settings (${found.hooksDisabled}).`);
+  pluginVersion = found.pluginVersion;
   const toolRoot = toolConfigRoot(ctx, ref.tool);
   const { hook } = found;
   if (hook.type && hook.type !== 'command') return hookRunRefused(`Not a command hook (type “${hook.type}”).`);
@@ -404,6 +406,7 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
     return makeResult({
       ...classified, allPrinted: stdout, stderr, durationMs: Date.now() - runStart, cwd, emptyPrompt: isPrompt, limitSec,
       ...(source ? { source } : {}),
+      ...(pluginVersion ? { pluginVersion } : {}),
       ...(missingOptions ? { missingOptions: true } : {}),
       ...(typeof ran.code === 'number' && !ran.reason && !ran.signal ? { exitCode: ran.code } : {}),
     });

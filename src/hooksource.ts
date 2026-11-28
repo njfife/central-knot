@@ -144,10 +144,10 @@ function tomlHookEntry(raw: string, event: string, at: number): string | undefin
 }
 
 /** Result of re-finding one hook on disk through its owner's readers (shared by readHookSource and hookrun.ts runHook). */
-export type FoundHook = { hook: DeclaredHook; pluginRoot?: string; hooksDisabled?: string; pluginOff?: boolean } | { file?: string; problem: string };
+export type FoundHook = { hook: DeclaredHook; pluginRoot?: string; pluginVersion?: string; hooksDisabled?: string; pluginOff?: boolean } | { file?: string; problem: string };
 
 /** Re-reads the owner's hooks through the same readers the page uses (no network) and returns the folder bounding its declaring files. */
-async function findOwner(ctx: HookSourceContext, ref: HookSourceRef): Promise<{ hooks: DeclaredHook[]; unread: string[]; pluginRoot?: string; within: string; hooksDisabled?: string; pluginOff?: boolean } | undefined> {
+async function findOwner(ctx: HookSourceContext, ref: HookSourceRef): Promise<{ hooks: DeclaredHook[]; unread: string[]; pluginRoot?: string; pluginVersion?: string; within: string; hooksDisabled?: string; pluginOff?: boolean } | undefined> {
   if (ref.from === 'own') {
     const root = toolConfigRoot(ctx, ref.tool);
     const { ownHooks = [], ownHooksUnread = [], ownHooksDisabled } = await sessionSettings(ref.tool, root);
@@ -164,6 +164,7 @@ async function findOwner(ctx: HookSourceContext, ref: HookSourceRef): Promise<{ 
     ]);
     return {
       hooks, unread: hooksUnread, pluginRoot: install.state.path, within: install.state.path,
+      ...(install.state.version ? { pluginVersion: install.state.version } : {}),
       ...(ownHooksDisabled ? { hooksDisabled: ownHooksDisabled } : {}),
       ...(install.off ? { pluginOff: true } : {}),
     };
@@ -189,6 +190,7 @@ export async function findHook(ctx: HookSourceContext, ref: HookSourceRef): Prom
   return {
     hook,
     ...(owner.pluginRoot ? { pluginRoot: owner.pluginRoot } : {}),
+    ...(owner.pluginVersion ? { pluginVersion: owner.pluginVersion } : {}),
     ...(owner.hooksDisabled ? { hooksDisabled: owner.hooksDisabled } : {}),
     ...(owner.pluginOff ? { pluginOff: true } : {}),
   };

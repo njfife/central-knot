@@ -17,7 +17,6 @@ interface RunEntry {
   seq: number;
   runBtnId: string;
   running: boolean;
-  version?: string;
   result?: HookRunResult;
   openAll: boolean;
   openErr: boolean;
@@ -138,7 +137,7 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
     !source ? h('p.hook-source-note', {}, 'Reading…')
       : source.problem ? sourceBlock(`${base}-err`, source.file, undefined, source.problem)
       : [
-        source.script ? sourceBlock(`${base}-script`, source.script.path, source.script.text, source.script.problem, undefined, !source.file ? copy : undefined) : null,
+        source.script ? sourceBlock(`${base}-script`, source.script.path, source.script.text, source.script.problem, undefined, source.entry !== undefined && source.file ? undefined : entrySuffix) : null,
         source.entry !== undefined && source.file ? sourceBlock(`${base}-entry`, source.file, source.entry, undefined, 'Declared in', entrySuffix) : null,
       ]);
   const control = (open: boolean): HTMLElement => rowLink(open ? 'Hide source' : 'View source', btnId, toggle,
@@ -155,7 +154,7 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
   const runPanel = (entry: RunEntry): HTMLElement => {
     const result = entry.result!;
     const knownTool = 'tool' in ref ? ref.tool : undefined;
-    const view = hookRunWords(knownTool ?? 'claude-cli', result, result.cwd ? shownPath(result.cwd) : '~', undefined, knownTool ? { tool: knownTool, version: entry.version } : undefined);
+    const view = hookRunWords(knownTool ?? 'claude-cli', result, result.cwd ? shownPath(result.cwd) : '~', undefined, knownTool);
     const flip = (which: 'openAll' | 'openErr', focusId: string) => () => {
       const live = runs.get(key);
       if (!live?.result) return;
@@ -198,10 +197,7 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
     const activeHome = state.home?.home;
     if (!activeHome || runs.get(key)?.running) return;
     const call = ++seq;
-    const version = ref.from === 'installed'
-      ? state.home?.pluginItems?.find(item => item.tool === ref.tool && item.plugin === ref.plugin && item.marketName === ref.marketName)?.version
-      : undefined;
-    runs.set(key, { seq: call, runBtnId, running: true, version, openAll: false, openErr: false });
+    runs.set(key, { seq: call, runBtnId, running: true, openAll: false, openErr: false });
     document.getElementById(runPanelId)?.remove();
     const busy = runButton(true);
     document.getElementById(runBtnId)?.replaceWith(busy);
@@ -226,7 +222,7 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
           return;
         }
         const visible = rowOnScreen(actionsEl);
-        const done: RunEntry = { seq: call, runBtnId, running: false, version, result, openAll: false, openErr: false };
+        const done: RunEntry = { seq: call, runBtnId, running: false, result, openAll: false, openErr: false };
         runs.set(key, done);
         const activeId = document.activeElement?.id;
         const keepFocus = activeId === runBtnId || activeId === stopBtnId;

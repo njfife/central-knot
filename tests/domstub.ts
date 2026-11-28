@@ -15,13 +15,31 @@ export interface FakeNode {
   addEventListener: () => void;
   replaceChildren: (...kids: unknown[]) => void;
   append: (...kids: unknown[]) => void;
-  focus: () => void;
+  focus: (opts?: { preventScroll?: boolean }) => void;
   scrollTo: () => void;
+  scrollIntoView: (opts?: unknown) => void;
   click: () => void;
   querySelector: (selector: string) => FakeNode | null;
 }
 
+const isDisabled = (el: FakeNode) => 'disabled' in el.attrs;
+const canFocus = (el: FakeNode) => !isDisabled(el) && (['button', 'input', 'textarea', 'select', 'summary', 'a'].includes(el.tag) || 'tabindex' in el.attrs);
+
+const matchesSimple = (el: FakeNode, raw: string): boolean => {
+  const notDisabled = raw.includes(':not(:disabled)');
+  const sel = raw.replace(':not(:disabled)', '');
+  if (notDisabled && isDisabled(el)) return false;
+  if (sel === '[tabindex="0"]') return el.attrs.tabindex === '0';
+  if (sel.startsWith('#')) return el.attrs.id === sel.slice(1);
+  if (sel.startsWith('.')) return el.className.split(/\s+/).includes(sel.slice(1));
+  return el.tag === sel;
+};
+
 const queryIn = (root: FakeNode, selector: string): FakeNode | null => {
+  const parts = selector.split(',').map(part => part.trim()).filter(Boolean);
+  if (parts.length > 1 || parts[0]?.includes(':not(') || parts[0]?.startsWith('[') || /^[a-z]+$/i.test(parts[0] ?? '')) {
+    return findNode(root, el => el !== root && parts.some(part => matchesSimple(el, part))) ?? null;
+  }
   let scope: FakeNode | undefined = root;
   for (const part of selector.trim().split(/\s+/)) {
     if (!scope) return null;
@@ -60,9 +78,13 @@ export const makeElement = (tag = 'div'): FakeNode => {
       this.children.push(...kids);
     },
     focus() {
+      if (!canFocus(this)) return;
       this.focused++;
+      const doc = (globalThis as { document?: { activeElement?: FakeNode | null } }).document;
+      if (doc) doc.activeElement = this;
     },
     scrollTo() {},
+    scrollIntoView() {},
     click() {
       if ('disabled' in this.attrs) return;
       this.onclick?.({ stopPropagation() {} });
@@ -71,6 +93,15 @@ export const makeElement = (tag = 'div'): FakeNode => {
       return queryIn(node, selector);
     },
   };
+  if (tag === 'template') {
+    Object.defineProperty(node, 'innerHTML', {
+      set(html: string) {
+        const svg = makeElement('svg');
+        svg.className = /class="([^"]*)"/.exec(html)?.[1] ?? '';
+        node.content.firstElementChild = svg;
+      },
+    });
+  }
   return node;
 };
 

@@ -992,7 +992,7 @@ export interface HookRunResult {
   outcome: HookRunOutcome; detail?: HookNotAddedDetail; added?: string; allPrinted: string; stderr: string;
   exitCode?: number; signal?: NodeJS.Signals; source?: string; durationMs: number; at: string; cwd: string; emptyPrompt: boolean;
   overLimit?: { limit: number; unit: 'chars' | 'tokens' }; limitSec?: number; program?: string; problem?: string;
-  missingOptions?: true;
+  missingOptions?: true; pluginVersion?: string;
 }
 /** What a plugin holds, read from its files (catalogdetail.ts); the row counts come from the same read. */
 export interface PluginContents {

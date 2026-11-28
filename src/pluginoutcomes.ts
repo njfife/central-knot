@@ -49,29 +49,25 @@ export function pickStartSource(tool: HarnessId, matcher?: string): string | und
  * ignored there, and Copilot CLI's start-of-session hooks take none (https://code.claude.com/docs/en/hooks, https://learn.chatgpt.com/docs/hooks).
  */
 export function whenItRuns(tool: HarnessId, hook: DeclaredHook): string {
-  const words = TEXT_EVENTS[tool]?.[hook.event] ?? '';
+  const words = isTextEvent(tool, hook.event) ? TEXT_EVENTS[tool]![hook.event]! : '';
   if (words !== START || tool === 'copilot-cli' || !hook.matcher || hook.matcher === '*') return words;
   const each = hook.matcher.split('|').map(source => STARTS[source]);
   return each.every(Boolean) ? each.join(' or ') : `${START} (matcher “${hook.matcher}”)`;
 }
 
-/** Other hook events across Claude Code, Codex and Copilot CLI, each in plain words that keep its platform's meaning. */
+/** Other hook events across Claude Code, Codex and Copilot CLI, keyed with lowercase initial so PascalCase/camelCase share one entry. */
 const OTHER_EVENTS: Record<string, string> = {
-  SessionEnd: 'when a session ends',
   sessionEnd: 'when a session ends',
-  PreToolUse: 'before a tool runs',
   preToolUse: 'before a tool runs',
-  PostToolUse: 'after a tool runs',
   postToolUse: 'after a tool runs',
-  PostToolUseFailure: 'when a tool fails',
-  PermissionRequest: 'when permission is asked',
-  Notification: 'on a notification',
-  Stop: 'when the agent stops',
+  postToolUseFailure: 'when a tool fails',
+  permissionRequest: 'when permission is asked',
+  notification: 'on a notification',
+  stop: 'when the agent stops',
   agentStop: 'when the agent stops',
-  SubagentStart: 'when a subagent starts',
-  SubagentStop: 'when a subagent stops',
+  subagentStart: 'when a subagent starts',
   subagentStop: 'when a subagent stops',
-  PreCompact: 'before compaction',
+  preCompact: 'before compaction',
   errorOccurred: 'when an error occurs',
 };
 
@@ -79,9 +75,11 @@ const OTHER_EVENTS: Record<string, string> = {
 export function hookEventLabel(hook: DeclaredHook, tool?: HarnessId): string {
   const fromTool = tool ? whenItRuns(tool, hook) : '';
   if (fromTool) return fromTool;
-  if (hook.event === 'SessionStart' || hook.event === 'sessionStart') return whenItRuns(tool ?? 'claude-cli', { ...hook, event: 'SessionStart' });
+  if (hook.event === 'sessionStart') return START;
+  if (hook.event === 'SessionStart') return whenItRuns('claude-cli', hook);
   if (hook.event === 'UserPromptSubmit' || hook.event === 'userPromptSubmitted') return PROMPT;
-  return OTHER_EVENTS[hook.event] ?? hook.event;
+  const key = hook.event.replace(/^[A-Z]/, ch => ch.toLowerCase());
+  return Object.hasOwn(OTHER_EVENTS, key) ? OTHER_EVENTS[key]! : hook.event;
 }
 
 /**
