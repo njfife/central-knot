@@ -1364,9 +1364,10 @@ export interface SignInPlace { open: string; unopened: string; unchanged: string
 export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
 /**
  * Central Knot's own settings, shown on its Settings page. `pluginUpdates`: plugins are updated automatically (pluginupdates.ts).
- * `pluginText`: what marketplace plugins hold is read (plugintext.ts).
+ * `pluginText`: what marketplace plugins hold is read (plugintext.ts). `tray`: whether this run has a menu bar or system tray
+ * icon, so closing the window keeps Central Knot running (main.ts makeTray).
  */
-export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays; pluginUpdates: boolean; pluginText: boolean; /** A custom build's own lines about itself (bundle.ts aboutBuild); none for the standard app. */ build?: string[] }
+export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays; pluginUpdates: boolean; pluginText: boolean; tray?: boolean; /** A custom build's own lines about itself (bundle.ts aboutBuild); none for the standard app. */ build?: string[] }
 /**
  * How much of what the listed marketplaces' plugins hold is read (plugintext.ts): `read` of the `of` plugins that can be read have
  * text read at the pin now listed (one whose pin moved and whose new read hasn't landed is not counted); `elsewhere` of them are
