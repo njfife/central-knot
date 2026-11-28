@@ -1286,6 +1286,8 @@ async function harnessFlow() {
       await take('tp1-skills-1316-dark', [1316, 819], true, 'dark');
       await sizeTo(t, 860, 560);
       await sidebarAs(false);
+      await t.click('#jump-off');
+      await take('tp1-jump-860-light', [860, 560], false, 'light');
       await t.click('#mark-legend-toggle');
       await t.run(`document.getElementById('mark-legend')?.scrollIntoView({ block: 'end' })`);
       await take('tp1-legend-open-860-light', [860, 560], false, 'light');
@@ -1294,8 +1296,10 @@ async function harnessFlow() {
       const longDocked = 'quarterly-platform-engineering-changelog-summary-report-writer';
       skill(tClaude, longDocked, text(longDocked, 'Summarises quarterly platform engineering changes and release milestones across repositories.'));
       await t.click('#header-refresh');
-      for (let tries = 0; tries < 40 && !(await t.exists(`#${rowPart('open', 'skills', longDocked)}`)); tries++) await wait(100);
+      for (let tries = 0; tries < 40 && !(await t.exists(`#${rowPart('add', 'skills', longDocked)}`)); tries++) await wait(100);
+      await t.click(`#${rowPart('add', 'skills', longDocked)}`);
       await t.click(`#${rowPart('open', 'skills', longDocked)}`);
+      await t.run(`document.querySelector('.ov-row.open')?.scrollIntoView({ block: 'center' })`);
       await take('tp1-docked-long-wide-light', [1728, 1117], true, 'light');
       await t.run(`window.centralKnot.setAppearance('system')`);
       await wait(80);
@@ -7135,7 +7139,8 @@ async function dockedListFlow() {
   const longDocked = 'quarterly-platform-engineering-changelog-summary-doc';
   skill(claude, longDocked, text(longDocked, 'Summarises quarterly platform engineering changes and release milestones.'));
   await a.click('#header-refresh');
-  for (let tries = 0; tries < 40 && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', longDocked)}"]`)); tries++) await wait(100);
+  for (let tries = 0; tries < 40 && !(await a.exists(`#${rowPart('add', 'skills', longDocked)}`)); tries++) await wait(100);
+  await a.click(`#${rowPart('add', 'skills', longDocked)}`);
   const checkDockedLong = async (where, minBtn) => {
     await sizeTo(a, 1316, 787); await sidebarOpen(false);
     const got = await a.run(`(() => {
@@ -7148,7 +7153,8 @@ async function dockedListFlow() {
     same(`${where} docked at 1260 px prioritizes the 52-letter filename and hittable file icon over description`, got, { nameWhole: true, nameCut: false, btnHit: true });
   };
   await checkDockedLong('Claude Code’s Skills tab', 26);
-  for (const selector of ['#nav-library', '#library-kind-all', `#${rowPart('open', 'skills', 'research')}`]) await a.click(selector);
+  for (const selector of ['#nav-library', '#library-kind-all']) await a.click(selector);
+  if (!(await a.exists('.dock-main'))) await a.click(`#${rowPart('open', 'skills', 'research')}`);
   await a.run(`(() => { const sort = document.querySelector('#item-order'); sort.value = 'name'; sort.dispatchEvent(new Event('change')); })()`);
   await a.settle();
   await checkDockedLong('Library by Name', 20);

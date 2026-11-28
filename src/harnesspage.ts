@@ -8,7 +8,7 @@ import { manageLocked, manageRow } from './managecard.ts';
 import { MARK_WORDS, installsIn, pluginsInstalled, takenItems, takesItemsOnly, viewStopped, type InstalledMarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle, uninstallControl } from './pluginparts.ts';
-import { button, emptyState, h, icon, pathText, section, toggle, type Child } from './dom.ts';
+import { afterLayout, button, emptyState, h, icon, pathText, section, toggle, type Child } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
 import { andList, coworkWords, fileName, kindNouns, pageNames, sentence, toolNames as names } from './words.ts';
 import { agentsKeptIn, hasCowork, takesPlugins, type AgentTool } from './presence.ts';
@@ -267,10 +267,26 @@ function switcher(home: HomeView, tool: HarnessId) {
   const others = home.sync.managed;
   if (others.length < 2) return null;
   return h('div.harness-switch', { role: 'group', 'aria-label': 'Other harnesses' }, others.map(other => h(`button.harness-switch-item${other === tool ? '.selected' : ''}`, {
-    type: 'button', id: `harness-switch-${other}`, 'aria-pressed': String(other === tool), title: names[other], disabled: !!state.busy && other !== tool,
+    type: 'button', id: `harness-switch-${other}`, 'aria-pressed': String(other === tool), 'aria-label': names[other], title: names[other], disabled: !!state.busy && other !== tool,
     onclick: () => { if (other !== tool) goHarness(other); },
   }, brandMark(other, 14), h('span.harness-switch-name', {}, names[other]))));
 }
+
+/** Shortens the switcher to tool marks before any tab wraps, or stacks the switcher onto its own row. */
+function fitHarnessBar(): void {
+  const bar = document.querySelector<HTMLElement>('.harness-bar');
+  const tabList = bar?.querySelector<HTMLElement>('.harness-tabs');
+  const sw = bar?.querySelector<HTMLElement>('.harness-switch');
+  if (!bar || !tabList || !sw || !bar.clientWidth) return;
+  bar.classList.remove('harness-bar-marks', 'harness-bar-stacked');
+  const crowded = () => bar.scrollWidth > bar.clientWidth + 1 || tabList.scrollWidth > tabList.clientWidth + 1;
+  if (crowded()) bar.classList.add('harness-bar-marks');
+  if (!crowded()) return;
+  bar.classList.remove('harness-bar-marks');
+  bar.classList.add('harness-bar-stacked');
+  if (sw.offsetWidth + 32 > bar.clientWidth + 1) bar.classList.add('harness-bar-marks');
+}
+afterLayout(fitHarnessBar);
 
 /** A kind the tool has no place for: said in place of its table. */
 function unsupported(kind: PageKind, tool: HarnessId) {

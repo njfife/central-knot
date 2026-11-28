@@ -2207,7 +2207,7 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .harness-switch-item:disabled { opacity: 0.5; cursor: default; }
 .harness-switch-item.selected { background: var(--surface); color: var(--ink); box-shadow: var(--lift); }
 .harness-switch-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.harness-tabs { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px; padding: 0 16px; }
+.harness-tabs { flex: 1; min-width: 0; display: flex; flex-wrap: nowrap; align-self: stretch; align-items: stretch; gap: 2px; padding: 0 0 0 16px; }
 /* The tabs look like the marketplace tabs (shared rules above); each is inline-flex for its count and keeps its label on one line. */
 .harness-tab { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .harness-tab:hover:not(:disabled) { color: var(--ink); }
@@ -2237,8 +2237,20 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .harness-path { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; min-width: 0; }
 .harness-path > .tone-faint { white-space: nowrap; }
 .harness-path .middle { min-width: 0; }
-/* Narrow: the switcher keeps only the marks (names stay in their tooltips). */
-@media (max-width: 1180px) { .harness-switch-item:not(.selected) .harness-switch-name { display: none; } }
+/* Measured nav fit (harnesspage.ts fitHarnessBar): switcher marks first, then whole switcher on its own row. */
+.harness-bar-marks .harness-switch-name { display: none; }
+.harness-bar-stacked { flex-direction: column; align-items: stretch; gap: 0; padding: 0; }
+.harness-bar-stacked .harness-tabs { flex: none; flex-wrap: wrap; padding: 0 16px; border-bottom: 1px solid var(--line); }
+.harness-bar-stacked .harness-switch { align-self: flex-start; margin: 6px 16px; }
+/* Tool tab: hittable file icon, folded Mark key, and local section jump on long lists. */
+.harness-page .row-file-btn { width: 28px; height: 28px; border-radius: 6px; }
+.harness-page .legend-fold { padding: 10px 16px 14px; }
+.harness-page .legend-fold .legend { padding: 6px 0 0; }
+.harness-page .section-jump { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.harness-page .section-jump-btn { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: 6px; font-size: 12px; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
+.harness-page .section-jump-btn:hover { background: var(--hover); color: var(--ink); }
+.harness-page .section-jump-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.harness-page .section-jump-count { font-size: 11.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 /* The harness's own column header: a quiet fill across the whole column's width. */
 /* Its Instructions tab: the info box with "Every tool's file" beside its line, then the same card as on Instructions. */
 .ins-about-line { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 16px; }
