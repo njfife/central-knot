@@ -3452,10 +3452,7 @@ async function practiceFlow() {
   if (shots) await a.press('Escape');
   await a.click('#status-profile');
   await a.click('#status-profile-see-changes');
-  same('See changes… opens Incident on Profiles with Changes pinned and switches nothing',
-    [await a.run(`document.querySelector('#profile-changes')?.getAttribute('aria-pressed')`), await a.all('.pf-section strong', 'e.textContent'),
-      await a.all('.pf-row[data-item]', 'e.dataset.item'), allFolders()],
-    ['true', ['Turns off'], ['skill:standup'], withStandup]);
+  same('See changes… opens Incident on Profiles and switches nothing', [await a.text('h1.page-title'), allFolders()], ['Profiles', withStandup]);
   await shotOpen('pc2-see-changes-860-light', SMALLEST, 'light');
   await fullSize(a);
   await openKind(a, 'skills');

@@ -71,17 +71,20 @@ function openProfileById(id: string) {
 }
 const pinChanges = (profile: Profile, { on, off, retooled }: Plan['changes']) =>
   ({ home: state.home!.home, profileId: profile.id, on: on.map(each => each.id), off: off.map(each => each.id), retooled: retooled.map(each => each.id) });
+/** Saves a rename when `raw` trims to a non-empty new name; returns the save promise, or null when unchanged/blank. */
+const saveRename = (profile: Profile, raw: string | undefined) => {
+  const name = raw?.trim();
+  return name && name !== profile.name ? saveProfileDef({ id: profile.id, name }, `Renamed to ${name}.`) : null;
+};
 /** Opens `profile` on Profiles from the status bar menu with Changes pinned for this visit; finishes any rename left open without blur. */
 function seeChanges(profile: Profile, changes: Plan['changes']) {
-  const id = profileState.renaming, draft = profileState.draft?.trim();
-  const target = id ? profiles().profiles.find(each => each.id === id) : undefined;
-  const save = !!target && !!draft && draft !== target.name && canEditProfiles();
+  const target = profileState.renaming ? profiles().profiles.find(each => each.id === profileState.renaming) : undefined, draft = profileState.draft;
   menuOpen = false;
   find = '';
   openProfileById(profile.id);
   profileState.changes = { ...pinChanges(profile, changes), fromMenu: true };
   showPage('profiles');
-  if (save) void saveProfileDef({ id: target.id, name: draft }, `Renamed to ${draft}.`);
+  if (target) void saveRename(target, draft);
 }
 
 /** The managed tools here, as the Tools strip and the list count them. */
@@ -404,9 +407,8 @@ function renameField(profile: Profile) {
     done = true;
     profileState.renaming = undefined;
     profileState.draft = undefined;
-    const name = input.value.trim();
-    if (save && name && name !== profile.name) void saveProfileDef({ id: profile.id, name }, `Renamed to ${name}.`).then(then);
-    else { rerender(); then(); }
+    const saving = save ? saveRename(profile, input.value) : null;
+    if (saving) void saving.then(then); else { rerender(); then(); }
   };
   return h('input.profile-name-input', { id: 'profile-name', type: 'text', value: profileState.draft ?? profile.name, maxlength: '40', 'aria-label': 'Profile name', spellcheck: 'false',
     oninput: (event: Event) => { profileState.draft = (event.target as HTMLInputElement).value; },
@@ -561,10 +563,8 @@ function menuChoice(profile: Profile, isInUse: boolean, name: string, all: LiveI
 /** One row of the status bar's profile menu: a profile switch, a changed profile's non-interactive heading, Switch back to it, or See changes…. */
 function menuRow(row: MenuRow, named: ProfileNow, all: LiveItem[], plugged: PluginLive[]): HTMLElement {
   switch (row.kind) {
-    case 'profile':
-      return menuChoice(row.profile, named.inUse.includes(row.profile), nameNow(named, row.profile), all, plugged);
-    case 'changed-heading':
-      return h('div.pf-menu-head', { role: 'presentation' }, nameNow(named, row.profile));
+    case 'profile': return menuChoice(row.profile, named.inUse.includes(row.profile), nameNow(named, row.profile), all, plugged);
+    case 'changed-heading': return h('div.pf-menu-head', { role: 'presentation' }, nameNow(named, row.profile));
     case 'switch-back': {
       const preview = switchPreview(row.profile, all, plugged).card;
       return h('button.pf-menu-item', { type: 'button', role: 'menuitem', id: 'status-profile-switch-back',
@@ -572,11 +572,9 @@ function menuRow(row: MenuRow, named: ProfileNow, all: LiveItem[], plugged: Plug
         h('span.pf-menu-tick', {}, icon('undo-2', 14)),
         h('span.pf-menu-body', {}, h('span.pf-menu-name', {}, `Switch back to ${row.profile.name}`), h('span.pf-menu-preview', {}, preview)));
     }
-    case 'see-changes':
-      return h('button.pf-menu-item', { type: 'button', role: 'menuitem', id: 'status-profile-see-changes',
-        title: `Open ${row.profile.name} on Profiles showing what switching changes.`, onclick: () => seeChanges(row.profile, listedChanges(row.profile, all, plugged)) },
-        h('span.pf-menu-tick', {}, icon('diff', 14, 'tone-muted')),
-        h('span.pf-menu-name', {}, 'See changes…'));
+    case 'see-changes': return h('button.pf-menu-item', { type: 'button', role: 'menuitem', id: 'status-profile-see-changes',
+      title: `Open ${row.profile.name} on Profiles showing what switching changes.`, onclick: () => seeChanges(row.profile, listedChanges(row.profile, all, plugged)) },
+      h('span.pf-menu-tick', {}, icon('diff', 14, 'tone-muted')), h('span.pf-menu-name', {}, 'See changes…'));
   }
 }
 
@@ -589,14 +587,12 @@ export function profileStatus(): HTMLElement | null {
   if (!home?.profiles.profiles.length) return null;
   const all = items(), plugged = plugins(), list = home.profiles.profiles, named = now(), inUseNow = named.inUse;
   const close = () => { menuOpen = false; rerender(); document.getElementById('status-profile')?.focus(); };
-  const rows = statusMenuRows(list, named, all, plugged, canEditProfiles());
+  const rows = statusMenuRows(list, named, all, plugged, canEditProfiles()), sep = () => h('div.pf-menu-sep', { role: 'separator' });
+  // Separators frame the changed profile's heading and acts apart from other profiles, and Edit profiles… below.
   const menu = menuOpen ? h('div.pf-menu', { role: 'menu', 'aria-label': 'Switch profile', onkeydown: (event: KeyboardEvent) => menuKeys(event, close) },
-    rows.flatMap((row, at) => [
-      ...(row.kind === 'changed-heading' && at > 0 ? [h('div.pf-menu-sep', { role: 'separator' })] : []),
-      menuRow(row, named, all, plugged),
-      ...((row.kind === 'switch-back' || row.kind === 'see-changes') && rows[at + 1]?.kind === 'profile' ? [h('div.pf-menu-sep', { role: 'separator' })] : []),
-    ]),
-    h('div.pf-menu-sep', { role: 'separator' }),
+    rows.flatMap((row, at) => [...(row.kind === 'changed-heading' && at > 0 ? [sep()] : []), menuRow(row, named, all, plugged),
+      ...((row.kind === 'switch-back' || row.kind === 'see-changes') && rows[at + 1]?.kind === 'profile' ? [sep()] : [])]),
+    sep(),
     h('button.pf-menu-item', { type: 'button', role: 'menuitem', id: 'status-profile-edit', onclick: () => { menuOpen = false; profileState.open = (inUseNow[0] ?? named.changed)?.id; showPage('profiles'); } }, h('span.pf-menu-tick'), h('span.pf-menu-name', {}, 'Edit profiles…'))) : null;
   return h('span.status-profile-wrap', {},
     h('button.status-item.status-profile', { type: 'button', id: 'status-profile', 'aria-haspopup': 'menu', 'aria-expanded': String(menuOpen), disabled: !!acting(),

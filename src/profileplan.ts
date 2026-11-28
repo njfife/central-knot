@@ -544,10 +544,8 @@ export const namedCount = (profile: Pick<Profile, 'items' | 'switchesPluginItems
  */
 export const switchable = (profile: Pick<Profile, 'items' | 'switchesPluginItems'>, live: LiveItem[], plugins: PluginLive[]) => namedCount(profile, live, plugins) > 0;
 /** What a switch to `profile` will change, in words ('' when it changes nothing — in use or wholly held). */
-export function switchSaid(profile: Profile, live: LiveItem[], plugins: PluginLive[],
-  turns = switchPlan(profile, live), plugs = pluginPlan(profile, plugins), whole = wholeTurns(profile, plugins)) {
-  return changeWords(allTurns(turns, plugs), wholeCounts({ installs: whole }), 'will');
-}
+export const switchSaid = (profile: Profile, live: LiveItem[], plugins: PluginLive[], turns = switchPlan(profile, live), plugs = pluginPlan(profile, plugins), whole = wholeTurns(profile, plugins)) =>
+  changeWords(allTurns(turns, plugs), wholeCounts({ installs: whole }), 'will');
 /** Whether a switch to `profile` is offered (switchable and has at least one turnable change, even if other items are held) and can run (`canEdit`). Shared by Profiles' Switch and the status bar menu's Switch back. */
 export function switchOffer(profile: Profile, live: LiveItem[], plugins: PluginLive[], canEdit: boolean, said = switchSaid(profile, live, plugins)) {
   const offered = !!said && switchable(profile, live, plugins);
@@ -604,10 +602,8 @@ export type MenuRow = { kind: 'profile' | 'changed-heading' | 'switch-back' | 's
 export function statusMenuRows(profiles: readonly Profile[], now: ProfileNow, live: LiveItem[], plugins: PluginLive[], canEdit: boolean): MenuRow[] {
   return profiles.flatMap((profile): MenuRow[] => {
     if (profile.id !== now.changed?.id || !switchable(profile, live, plugins)) return [{ kind: 'profile', profile }];
-    const actions: MenuRow[] = [
-      ...(switchOffer(profile, live, plugins, canEdit).enabled ? [{ kind: 'switch-back' as const, profile }] : []),
-      ...(listedChangeCount(listedChanges(profile, live, plugins)) > 0 ? [{ kind: 'see-changes' as const, profile }] : []),
-    ];
+    const actions: MenuRow[] = [...(switchOffer(profile, live, plugins, canEdit).enabled ? [{ kind: 'switch-back' as const, profile }] : []),
+      ...(listedChangeCount(listedChanges(profile, live, plugins)) > 0 ? [{ kind: 'see-changes' as const, profile }] : [])];
     return actions.length ? [{ kind: 'changed-heading', profile }, ...actions] : [{ kind: 'profile', profile }];
   });
 }

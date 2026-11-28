@@ -11,10 +11,13 @@ import { findById, findNode, installDom, textOf, type FakeNode } from './domstub
 let rendered: FakeNode | undefined;
 let onNavigate: ((page: string) => void) | undefined;
 let savedProfiles: unknown[] = [];
+let saveProblem: string | undefined;
+let switchStopped: string | undefined;
 let nextHome: HomeView | null = null;
-installDom({
+const { announcement } = installDom({
   onNavigate: (fn: (page: string) => void) => { onNavigate = fn; },
-  saveProfile: async (edit: unknown) => { savedProfiles.push(edit); return { profiles: app.home?.profiles }; },
+  saveProfile: async (edit: unknown) => { savedProfiles.push(edit); return saveProblem ? { problem: saveProblem } : { profiles: app.home?.profiles }; },
+  switchProfile: async () => (switchStopped ? { stopped: switchStopped } : {}),
   selectHome: async () => nextHome,
   readUsage: async () => ({ at: '2026-11-20T00:00:00.000Z', tools: [] }),
 }, { byId: id => findById(rendered, id) ?? null });
@@ -122,45 +125,63 @@ function changedHome(home = '/home') {
     profiles: { profiles: [{ id: 'last', name: 'Last', items: ['skill:notes'], switchesPluginItems: true }, { id: 'other', name: 'Other', items: ['skill:standup'], switchesPluginItems: true }], plugins: [], last: 'last' } } as unknown as HomeView;
 }
 
-test('Status bar menu renders a changed profile as heading + Switch back to <Name> with consequence + See changes…', async () => {
+test('Status bar menu frames three profiles with one rule after changed acts and one before Edit profiles…, and pressing a wholly held profile reads its refusal', async () => {
   const { profileStatus } = await import('../src/profilespage.ts');
-  app.home = changedHome();
+  const three = changedHome();
+  three.profiles.profiles.splice(1, 0, { id: 'first', name: 'First', items: ['skill:standup'], switchesPluginItems: true });
+  app.home = three;
   const toggleMenu = () => { findById(profileStatus() as unknown as FakeNode, 'status-profile')?.onclick?.({ stopPropagation() {} }); return profileStatus() as unknown as FakeNode; };
   rendered = toggleMenu();
   try {
-    const head = findNode(rendered, el => el.className.split(/\s+/).includes('pf-menu-head'));
-    const back = findById(rendered, 'status-profile-switch-back'), see = findById(rendered, 'status-profile-see-changes');
-    assert.deepEqual([head?.tag, textOf(head), !!findById(rendered, 'status-profile-last'), textOf(findNode(back, el => el.className.includes('pf-menu-name'))),
-      textOf(findNode(back, el => el.className.includes('pf-menu-preview'))), textOf(findNode(see, el => el.className.includes('pf-menu-name'))), !!findById(rendered, 'status-profile-other')],
-      ['div', 'Last · changed', false, 'Switch back to Last', 'Switching turns 1 item off', 'See changes…', true]);
-    app.home = { ...app.home, sync: { ...app.home.sync, access: { allowed: false, reason: 'Preview only.' } } };
-    rendered = profileStatus() as unknown as FakeNode;
-    assert.deepEqual([textOf(findNode(rendered, el => el.className.split(/\s+/).includes('pf-menu-head'))), !!findById(rendered, 'status-profile-switch-back'), !!findById(rendered, 'status-profile-see-changes'), 'disabled' in (findById(profilesPage() as unknown as FakeNode, 'profile-switch')?.attrs ?? {})],
-      ['Last · changed', false, true, true]);
+    const kids = (findNode(rendered, el => el.className.split(/\s+/).includes('pf-menu'))?.children ?? []).map(el => (el as FakeNode).attrs?.id || (el as FakeNode).className);
+    assert.deepEqual(kids, ['pf-menu-head', 'status-profile-switch-back', 'status-profile-see-changes', 'pf-menu-sep', 'status-profile-first', 'status-profile-other', 'pf-menu-sep', 'status-profile-edit']);
   } finally { toggleMenu(); }
+  // Wholly held changed profile keeps its clickable name row, and pressing it announces the refusal.
+  const held = homeWith([['codex-cli', { off: true }]]);
+  held.profiles.last = 'work';
+  app.home = held;
+  switchStopped = 'alpha is off in Codex. Nothing was switched.';
+  rendered = toggleMenu();
+  try {
+    findById(rendered, 'status-profile-work')?.onclick?.({ detail: 1 });
+    await new Promise(done => setImmediate(done));
+    assert.equal(textOf(announcement), switchStopped);
+  } finally { switchStopped = undefined; if (findNode(profileStatus() as unknown as FakeNode, el => el.className.split(/\s+/).includes('pf-menu'))) toggleMenu(); }
 });
 
-test('See changes… finishes an unblurred rename against its own profile, clears Find/delete and opens Changes pinned', async () => {
+test('See changes… saves an unblurred rename through saveRename (skipping unchanged names, surfacing failures), clears Find/delete and closes the menu', async () => {
   const { profileState } = await import('../src/app.ts');
   const { profileStatus } = await import('../src/profilespage.ts');
+  const runSeeChanges = async (typed: string) => {
+    savedProfiles = [];
+    app.page = 'profiles';
+    profileState.open = 'other';
+    profileState.confirmDelete = 'other';
+    profileState.renaming = 'other';
+    const input = findById(profilesPage() as unknown as FakeNode, 'profile-name') as unknown as { oninput?: (e: unknown) => void; onblur?: (e: unknown) => void };
+    input?.oninput?.({ target: { value: typed } });
+    onNavigate?.('settings');
+    input?.onblur?.({ target: { value: typed, isConnected: false } });
+    assert.deepEqual(savedProfiles, [], 'disconnected blur on Settings shortcut did not save the rename');
+    findById(profileStatus() as unknown as FakeNode, 'status-profile')?.onclick?.({ stopPropagation() {} });
+    findById(profileStatus() as unknown as FakeNode, 'status-profile-see-changes')?.onclick?.({});
+    await new Promise(done => setImmediate(done));
+  };
   app.home = changedHome();
-  app.page = 'profiles';
-  profileState.open = 'other';
   (findById(profilesPage() as unknown as FakeNode, 'profile-find') as unknown as { oninput?: (e: unknown) => void })?.oninput?.({ target: { value: 'zzz' } });
-  savedProfiles = [];
-  profileState.confirmDelete = 'other';
-  profileState.renaming = 'other';
-  const input = findById(profilesPage() as unknown as FakeNode, 'profile-name') as unknown as { oninput?: (e: unknown) => void; onblur?: (e: unknown) => void };
-  input?.oninput?.({ target: { value: 'Other Renamed' } });
-  onNavigate?.('settings');
-  input?.onblur?.({ target: { value: 'Other Renamed', isConnected: false } });
-  assert.deepEqual(savedProfiles, [], 'disconnected blur on Settings shortcut did not save the rename');
-  findById(profileStatus() as unknown as FakeNode, 'status-profile')?.onclick?.({ stopPropagation() {} });
-  findById(profileStatus() as unknown as FakeNode, 'status-profile-see-changes')?.onclick?.({});
-  await Promise.resolve();
+  await runSeeChanges(' Other ');
+  assert.deepEqual(savedProfiles, [], 'an unchanged rename saves nothing');
+  await runSeeChanges('Other Renamed');
   rendered = profilesPage() as unknown as FakeNode;
-  assert.deepEqual([savedProfiles, app.page, profileState.open, profileState.confirmDelete, profileState.renaming, profileState.draft, (findById(rendered, 'profile-find') as unknown as { value?: string })?.value, profileState.changes?.off, !!findById(profileStatus() as unknown as FakeNode, 'status-profile-see-changes')],
-    [[{ id: 'other', name: 'Other Renamed' }], 'profiles', 'last', undefined, undefined, undefined, '', ['skill:standup'], false]);
+  assert.deepEqual([savedProfiles, app.page, profileState.open, profileState.confirmDelete, profileState.renaming, profileState.draft, (findById(rendered, 'profile-find') as unknown as { value?: string })?.value, !!findById(profileStatus() as unknown as FakeNode, 'status-profile-see-changes')],
+    [[{ id: 'other', name: 'Other Renamed' }], 'profiles', 'last', undefined, undefined, undefined, '', false]);
+  // Read-only or failing save: not silently dropped, leaves the blur's failure announced.
+  app.home = { ...app.home, sync: { ...app.home.sync, access: { allowed: false, reason: 'Preview only.' } } };
+  saveProblem = 'Preview only.';
+  try {
+    await runSeeChanges('Other ReadOnly');
+    assert.deepEqual([savedProfiles, textOf(announcement)], [[{ id: 'other', name: 'Other ReadOnly' }], 'Preview only.']);
+  } finally { saveProblem = undefined; }
 });
 
 test('Leaving Profiles ends only See changes…’s pin; the page toggle’s pin survives leaving, and no pin survives another home', async () => {
