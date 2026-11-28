@@ -1,8 +1,10 @@
 // Sources: the page where a Git link is given as a source for the library, titled on screen as words.ts pageNames says (in
 // the code it stays `sources`; sources.ts, in main, is the engine; the table it follows is library.ts's A SOURCE).
 // One field takes the link; Look reads it and shows, item by item, what Add would do and what it won't bring in and why,
-// before anything is kept; Add brings each item into Central Knot, Off, with Turn it/them on on its band (`turnItemsOn`)
-// and Turn it on on every In Central Knot, Off line (`turnOn`). Each source has a row: its link, what it brought (On or Off),
+// before anything is kept; Add and Sync bring each item into Central Knot, Off, with Turn it/them on on their band
+// (also beside Undo on a mixed Sync) and Turn it on on every In Central Knot, Off (`nothing` / `same`) and removed line,
+// all through `turnItemsOn`, which checks live state at the press and sends the Library's own click (`matrix.ts turnOnRow`),
+// forecasting an ended profile before the press (`matrix.ts endsOnHover` / `endsMark`). Each source has a row: its link, what it brought (On or Off),
 // when it was last read, why it couldn't be read if so, Sync this source (with its own `(?)` card) and Remove; an item there
 // the library holds deleted has its own Add, and one whose version waits (library.ts changedHere) its own Merge, Replace mine
 // and Keep mine; Show in the Library, on a source with rows there (origins.ts sourcesHere), opens it with From set to that
@@ -17,15 +19,14 @@
 // handOff), the look's one action is the hand-off button (words.ts toPluginsLabel), the Plugins page's own add (pluginstate.ts
 // addMarketplace), run on that page, which tells its outcome. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way
 // and in Central Knot's layout, while a source is read only, holds a few items, and its rows grow one per link.
-import { acting, announce, applyByKind, applyClick, busy, rerender, setHome, showPage, state, tellWritten, type Click, type PageKind } from './app.ts';
+import { acting, announce, applyByKind, applyClick, busy, rerender, setHome, showPage, state, tell, tellWritten, type Click, type PageKind } from './app.ts';
 import { button, closeButton, fold, h, icon, infoCardId, infoMark } from './dom.ts';
 import { itemKey, type ItemKind } from './library.ts';
-import { asItIs } from './libraryrow.ts';
 import { dayAndTime, groupBy, plural } from './model.ts';
-import { turnedWords } from './selection.ts';
+import { turnedWords, turnTail } from './selection.ts';
 import { linkLabel } from './sourcelink.ts';
-import { andList, kindNouns, orList, pageNames, rowNames, rowNouns, toolsPhrase, toPluginsLabel, turnIt } from './words.ts';
-import { openKind, outcomeBand } from './matrix.ts';
+import { andList, fewNames, kindNouns, orList, pageNames, rowNames, rowNouns, toolsPhrase, toPluginsLabel, turnIt } from './words.ts';
+import { endsOnHover, openKind, outcomeBand, turnOnRow } from './matrix.ts';
 import { sourceFrom, sourcesHere } from './origins.ts';
 import { pageOfPart } from './pluginstatus.ts';
 import { addMarketplace, market } from './pluginstate.ts';
@@ -35,6 +36,9 @@ import type { HarnessId, LibraryFacts, MergeDone, NotComing, SourcedItem, Source
 const api = () => window.centralKnot;
 /** A kind's words on this page ("skill", "Skills"), from its page's (words.ts kindNouns). */
 const nouns = (kind: ItemKind) => kindNouns[pageOfPart[kind]];
+/** Counts per kind in first-seen order ("1 skill", "1 agent", "1 MCP server"). */
+const kindCounts = (items: readonly { kind: ItemKind }[]) => [...new Set(items.map(item => item.kind))]
+  .map(kind => plural(items.filter(item => item.kind === kind).length, nouns(kind).one, nouns(kind).many));
 /** The kinds a source brings (the view's: types.ts SourcesView `kinds`), as a sentence names many of them ("skills, agents and MCP servers"). */
 const broughtNames = () => andList((sources.view?.kinds ?? []).map(kind => nouns(kind).many));
 
@@ -75,24 +79,26 @@ export async function loadSources(): Promise<void> {
  * band (what the click did, from `said`, with its one action, and where something changed: Open on the Library at that kind, or
  * after Add, Open in the Library at the source just added, `added`).
  */
-async function settle(result: SourceResult, said: Said | undefined, added?: string) {
+async function settle(result: SourceResult, said: Said | undefined, sourceId?: string, added?: string) {
   if (result.view) sources.view = result.view;
   sources.problem = result.stopped;
   sources.confirmRemove = undefined;
   setHome(await api().refresh(), { reload: false });
   if (said && !result.stopped) {
+    const fromId = sourceId ?? (added ? sources.view?.sources.find(source => source.link === added)?.id : undefined);
     const open = !said.open ? undefined : added ? { label: 'Open in the Library', id: 'source-open-library', run: () => openKind('all', { from: sourceFrom(added) }) }
       : { label: `Open ${kindNouns[said.open].title}`, id: `source-open-${said.open}`, run: () => openKind(said.open!) };
-    const made = !said.undo && said.made?.length ? said.made : undefined;
+    const made = said.made?.length ? said.made : undefined;
     const act = made ? {
-      label: made.length === 1 ? turnIt(true) : 'Turn them on',
+      label: made.length === 1 ? (said.undo?.label.startsWith('Turn ') ? `Turn ${made[0]!.name} on` : turnIt(true)) : 'Turn them on',
       id: 'source-turn-made-on',
       title: made.length === 1
         ? turnOnTitle(made[0]!.name)
-        : `Turn ${andList(made.map(item => item.name))} on in every tool each isn’t kept out of, as their switches in the Library do. Undo turns them off again.`,
-      run: () => void turnItemsOn(made),
+        : `Turn ${andList(kindCounts(made))} (${fewNames(made.map(item => item.name))}) on in every tool each isn’t kept out of, as their switches in the Library do. Undo turns them off again.`,
+      ends: { clicks: () => previewClicks(made, fromId), act: 'If on', id: 'source-turn-made-profile' },
+      run: () => void turnItemsOn(made, fromId),
     } : undefined;
-    tellWritten({ page: 'sources', text: said.text, band: true, warn: said.warns, ...(said.note ? { note: said.note } : {}), ...(act ? { act } : said.undo ? { undo: said.undo } : {}), ...(open ? { next: open } : {}) }, result.reloads);
+    tellWritten({ page: 'sources', text: said.text, band: true, warn: said.warns, ...(said.note ? { note: said.note } : {}), ...(said.undo ? { undo: said.undo } : {}), ...(act ? { act } : {}), ...(open ? { next: open } : {}) }, result.reloads);
   } else announce(result.stopped ?? '', true);
 }
 
@@ -106,7 +112,7 @@ const add = (token: string, link: string, label: string) => busy('Adding the sou
   const result = await api().addSource(token, state.home!.home);
   if (!result.stopped) { sources.preview = undefined; sources.draft = ''; }
   const said = whatItDid(result, label);
-  await settle(result, { ...said, text: `Added ${label}. ${said.text}` }, link);
+  await settle(result, { ...said, text: `Added ${label}. ${said.text}` }, undefined, link);
 });
 
 /**
@@ -121,7 +127,7 @@ async function toPlugins(address: string) {
 
 const checkNow = (source: SourceView) => busy(`Syncing ${linkLabel(source.link)}…`, async () => {
   const result = await api().checkSource(source.id, state.home!.home);
-  await settle(result, whatItDid(result, linkLabel(source.link)));
+  await settle(result, whatItDid(result, linkLabel(source.link)), source.id);
 });
 
 /** What the page says while each click on a name's line runs. */
@@ -131,30 +137,71 @@ const running: Record<SourceRowClick, (called: string) => string> = {
 /** A click on one name's line (sources.ts rowClick), in its kind. A Replace mine's band says that name has the source's version. */
 const onLine = (source: SourceView, name: SourceName, click: SourceRowClick) => busy(running[click](name.name ?? name.key), async () => {
   const result = await api().rowClick(source.id, name.kind, name.key, click, state.home!.home);
-  await settle(result, whatItDid(result, linkLabel(source.link), click === 'replace' ? { kind: name.kind, name: name.name ?? name.key } : undefined));
+  await settle(result, whatItDid(result, linkLabel(source.link), click === 'replace' ? { kind: name.kind, name: name.name ?? name.key } : undefined), source.id);
 });
 
+type TurnTarget = { kind: ItemKind; key: string; name: string };
 /** Tooltip for Turn it on on a single Off item's line or band. */
 const turnOnTitle = (name: string) => `Turn ${name} on in every tool it isn’t kept out of, as its switch in the Library does. Undo turns it off again.`;
-/** Turn on, for one Off item (removed at its source, In Central Knot Off, or newly added): the same click as its switch in the Library, On. */
-const turnOn = (item: { key: string; name: string }, page: PageKind) => {
+/** Builds Library Turn-on clicks for live Off items (still from `sourceId` when given), separating already-on and gone/reassigned items. */
+function liveTurnClicks(items: readonly TurnTarget[], sourceId?: string) {
+  const built: { item: TurnTarget; click: Click }[] = [], already: TurnTarget[] = [], skipped: { item: TurnTarget; why: string }[] = [];
+  for (const item of items) {
+    const page = pageOfPart[item.kind], record = state.home?.[page].library[item.key];
+    if (!record || record.deleted) { skipped.push({ item, why: 'no longer in Central Knot.' }); continue; }
+    if (sourceId && record.source !== sourceId) { skipped.push({ item, why: record.source ? 'now from another source.' : 'no longer from this source.' }); continue; }
+    if (record.on) { already.push(item); continue; }
+    const click = turnOnRow(page, item.key, false);
+    if (!click) { skipped.push({ item, why: 'no longer in Central Knot.' }); continue; }
+    built.push({ item, click });
+  }
+  return { built, already, skipped };
+}
+const previewClicks = (items: readonly TurnTarget[], sourceId?: string) => liveTurnClicks(items, sourceId).built.map(entry => entry.click);
+let turningOn = false;
+/** Turn on for one or more Off items from a row or band: refreshes live state first, then sends the Library's own click(s). */
+async function turnItemsOn(items: readonly TurnTarget[], sourceId?: string) {
+  if (acting() || turningOn) return;
+  turningOn = true;
+  let built: { item: TurnTarget; click: Click }[] = [], already: TurnTarget[] = [], skipped: { item: TurnTarget; why: string }[] = [];
+  try {
+    const fresh = await api().refresh();
+    if (fresh) setHome(fresh, { reload: false });
+    ({ built, already, skipped } = liveTurnClicks(items, sourceId));
+  } finally { turningOn = false; }
+  const skipReasons = skipped.map(({ item, why }) => `${item.name}: ${why}`);
+  if (!built.length) {
+    await loadSources();
+    if (!skipped.length) {
+      const called = already.map(item => item.name);
+      tell({ page: 'sources', band: true, warn: false, text: `${fewNames(called)} ${called.length === 1 ? 'is' : 'are'} already on.` });
+    } else {
+      tell({ page: 'sources', band: true, warn: true, reasons: skipReasons, text: ['Nothing was turned on.', turnTail(true, already.length, skipped.length)].filter(Boolean).join(' ') });
+    }
+    return;
+  }
+  if (built.length === 1 && !already.length && !skipped.length) return applyClick(built[0]!.click);
   const homeTools = state.home?.sync.managed ?? [];
-  return applyClick({ kind: page, items: [item.name], rows: [{ kind: page, key: item.key }], changes: [{ ...asItIs(item.key, state.home?.[page].library[item.key]), on: true, seenOn: false }],
-    said: (_notIn, wrote) => `${item.name} is on${wrote.length ? ` in ${toolsPhrase(wrote, homeTools)}` : ''}.` });
-};
-/** Turn on, for one or more Off items made by Add or Sync: applyClick for one, or one Click per kind via applyByKind for several, with one Undo. */
-function turnItemsOn(items: { kind: ItemKind; key: string; name: string }[]) {
-  if (items.length === 1) return turnOn(items[0]!, pageOfPart[items[0]!.kind]);
-  const homeTools = state.home?.sync.managed ?? [];
-  const clicks: Click[] = [...groupBy(items, item => pageOfPart[item.kind])].map(([page, list]) => ({
-    kind: page,
-    items: list.map(item => item.name),
-    rows: list.map(item => ({ kind: page, key: item.key })),
-    changes: list.map(item => ({ ...asItIs(item.key, state.home?.[page].library[item.key]), on: true, seenOn: false })),
-    said: '',
-  }));
-  return applyByKind(clicks, through => turnedWords(true, rowNames(through), rowNouns(through.map(row => row.kind))),
-    { now: 'on', failedRow: (name, failed) => `${name}: not in ${toolsPhrase(failed, homeTools)}` });
+  const clicks: Click[] = [...groupBy(built, entry => entry.click.kind)].map(([page, list]) => {
+    const ops = list.flatMap(entry => entry.click.plugins?.ops ?? []);
+    const pluginSaid = list.map(entry => entry.click.plugins?.said).filter(Boolean).join(' ') || undefined;
+    const also = list.flatMap(entry => entry.click.also ?? []);
+    return {
+      kind: page,
+      items: list.flatMap(entry => entry.click.items),
+      rows: list.flatMap(entry => entry.click.rows),
+      changes: list.flatMap(entry => entry.click.changes),
+      ...(ops.length ? { plugins: { ops, said: pluginSaid } } : {}),
+      ...(also.length ? { also } : {}),
+      said: '',
+    };
+  });
+  return applyByKind(clicks, through => turnedWords(true, rowNames(through), rowNouns(through.map(row => row.kind))), {
+    now: 'on',
+    reasons: skipReasons,
+    tail: turnTail(true, already.length, skipped.length) || undefined,
+    failedRow: (name, failed) => `${name}: not in ${toolsPhrase(failed, homeTools)}`,
+  });
 }
 
 /** What Remove keeps, said before it and after it. */
@@ -182,7 +229,7 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, la
   const homeTools = state.home?.sync.managed ?? [];
   const isReplaced = (entry: { kind: ItemKind; name: string }) => entry.kind === replaced?.kind && entry.name === replaced.name;
   const of = (...answers: string[]) => (result.sourced ?? []).filter(entry => answers.includes(entry.answer));
-  const names = (entries: { name: string }[]) => andList(entries.map(entry => entry.name));
+  const names = (entries: { name: string }[]) => fewNames(entries.map(entry => entry.name));
   const are = (entries: unknown[]) => (entries.length === 1 ? 'is' : 'are');
   const dropped = of('drop'), updated = of('update'), made = of('make'), linked = of('link'), left = of('differs', 'another', 'deleted'), kept = of('keep');
   const waiting = of('wait').filter(entry => !entry.merge), merges = (result.sourced ?? []).filter(entry => entry.merge), mergedIn = merges.filter(entry => entry.merge === 'merged');
@@ -193,10 +240,12 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, la
       const now = !entry.on ? ', kept Off' : entry.written.length ? `, now in ${toolsPhrase(entry.written, homeTools)}` : '';
       return (isReplaced(entry) ? `${entry.name} has the source’s version${now}; the one it had is kept as a version.` : `${entry.name} was updated from its source${now}.`);
     }),
-    waiting.length ? `${names(waiting)} changed at the source: choose on ${waiting.length === 1 ? 'its row' : 'each one’s row'}.` : '',
+    waiting.length ? `${names(waiting)} changed at the source and here: choose on ${waiting.length === 1 ? 'its row' : 'each one’s row'}.` : '',
     ...merges.map(entry => mergeWords(entry.kind, entry.name, entry.merge!, entry.written, homeTools)),
     ...kept.map(({ name }) => `${name} stays as you have it, and the source’s version no longer waits: it is kept as a version, and the source’s next change is compared with it.`),
-    made.length ? `${names(made)} ${are(made)} in Central Knot. ${made.length === 1 ? 'It is' : made.length === 2 ? 'Both are' : `All ${made.length} are`} off.` : '',
+    made.length ? (made.length === 1
+      ? `${made[0]!.name} is in Central Knot. It is off.`
+      : `${andList(kindCounts(made))} (${names(made)}) are in Central Knot. ${made.length === 2 ? 'Both' : `All ${made.length}`} are off.`) : '',
     linked.length ? `${names(linked)} ${are(linked)} in Central Knot already, the same, and ${linked.length === 1 ? 'is' : 'are'} now from it.` : '',
     left.length ? `Not brought in: ${names(left)} (${left.length === 1 ? 'its row says' : 'their rows say'} why).` : '',
     result.notWhole ? `Not all of ${label} could be read (its row says why), so the source turned no ${orList(result.notWhole.map(kind => nouns(kind).one))} off.` : '',
@@ -210,9 +259,10 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, la
   const undo = !turnOn && one?.history ? { id: one.history, label: undoLabel(one) } : undefined;
   const opens = [...dropped, ...changed, ...made, ...linked][0];
   return {
-    text: said.length ? said.join(' ') : `Synced ${label}: nothing came in from it.`, warns: dropped.length > 0 || !!result.notWhole || unmerged.length > 0,
-    ...(changed.length + keptAll.length ? { note: `See each change, or undo it, in History.` } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
-    ...(made.length ? { made: made.map(entry => ({ kind: entry.kind, key: itemKey(entry.name), name: entry.name })) } : {}),
+    text: said.length ? said.join(' ') : `Synced ${label}: nothing came in from it.`, warns: dropped.length > 0 || waiting.length > 0 || !!result.notWhole || unmerged.length > 0,
+    ...(changed.length + keptAll.length ? { note: 'History' } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
+    // fromSourceStep carries key; itemKey is a fallback only for callers without it.
+    ...(made.length ? { made: made.map(entry => ({ kind: entry.kind, key: entry.key ?? itemKey(entry.name), name: entry.name })) } : {}),
     // Open the page where something changed: not for a read that only says what can't be read, or what waits.
     ...(opens ? { open: pageOfPart[opens.kind] } : {}),
   };
@@ -234,8 +284,12 @@ function mergeWords(kind: ItemKind, name: string, merge: MergeDone, into: Harnes
 // ---------- Words ----------
 
 const LINK_INFO = 'Any link to a repository, branch, folder or file; owner/repo or a git clone address works too. Uses this computer’s git sign-in.';
-const SYNC_INFO = 'Syncs from the link now, and once a day while Automatic sync is on: changed items update unless changed here; removed ones turn off, with Undo.';
-const WAIT_INFO = 'Merge puts the source’s changes into yours, or changes nothing and names what clashes; Replace mine takes the source’s and keeps yours as a version. Keep mine leaves yours current, keeps the source’s as a version, and compares the source’s next change with that version.';
+const SYNC_INFO = 'Syncs from the link now, and once a day while Automatic sync is on: changed items update unless changed here; removed ones turn off, with Turn on to put them back.';
+const WAIT_INFO = [
+  'Merge: puts the source’s changes into yours and keeps yours as a version (with Undo), or changes nothing and names what clashes.',
+  'Replace mine: takes the source’s version and keeps yours as a version (with Undo).',
+  'Keep mine: leaves yours current and keeps the source’s as a version (with Undo); waits again only if the source changes further.',
+] as const;
 const EMPTY_INFO = 'A link that skills, agents and MCP servers are read from. Each arrives Off.';
 const NOT_COMING_INFO = 'A whole plugin installs only from a marketplace that lists it.';
 
@@ -243,7 +297,7 @@ const NOT_COMING_INFO = 'A whole plugin installs only from a marketplace that li
  * What one item at a source, or one item linked to it, is to the library, as its line says it: the source's table's own answer
  * (types.ts SourceNameState), in a look (`preview`: what Add does) or on a source's row (what the next Sync this source does).
  */
-function stateWords(name: SourceName, preview: boolean): { text: string; warns?: boolean; info?: string } {
+function stateWords(name: SourceName, preview: boolean): { text: string; warns?: boolean; info?: string | readonly string[] } {
   const called = name.name ?? name.key, next = preview ? 'Add' : 'the next Sync this source';
   switch (name.state) {
     case 'nothing': case 'same': return { text: name.on ? 'In Central Knot, On' : 'In Central Knot, Off' };
@@ -307,9 +361,10 @@ function nameRow(name: SourceName, preview: boolean, action?: HTMLElement | null
 }
 
 /** Turn it on, on an In Central Knot, Off or removed item's line. */
-const turnOnButton = (item: { key: string; name: string }, kind: ItemKind, id: string, locked: boolean) =>
+const turnOnButton = (item: { key: string; name: string }, kind: ItemKind, id: string, locked: boolean, sourceId?: string) =>
   button({ variant: 'link', size: 'micro', label: turnIt(true), id, disabled: locked,
-    attrs: { title: turnOnTitle(item.name) }, onclick: () => void turnOn(item, pageOfPart[kind]) });
+    attrs: { title: turnOnTitle(item.name), ...endsOnHover(turnOnTitle(item.name), () => previewClicks([{ kind, key: item.key, name: item.name }], sourceId)) },
+    onclick: () => void turnItemsOn([{ kind, key: item.key, name: item.name }], sourceId) });
 
 /**
  * An item this source removed (types.ts LibraryFacts fromSource `removed`), from the Library: what it is now, and Turn on,
@@ -352,8 +407,7 @@ function previewPanel(preview: SourcePreview) {
   if (preview.toPlugins) return handOffPanel(preview, preview.toPlugins, cancel);
   const label = linkLabel(preview.link), coming = preview.names.filter(name => name.state === 'make' || name.state === 'link');
   const allowed = !preview.refused && !!state.home?.sync.access.allowed;
-  const counts = [...new Set(coming.map(name => name.kind))].map(kind => plural(coming.filter(name => name.kind === kind).length, nouns(kind).one, nouns(kind).many));
-  const addLabel = coming.length ? `Add ${andList(counts)}` : 'Add the source';
+  const addLabel = coming.length ? `Add ${andList(kindCounts(coming))}` : 'Add the source';
   return h('div.source-preview', { id: 'source-preview', role: 'region', 'aria-label': `What ${label} holds` },
     h('div.source-preview-head', {}, h('strong.source-link', { title: preview.link }, label), h('span.source-where.tone-muted', {}, whereWords(preview))),
     preview.refused ? sayLine('circle-alert', 'tone-danger', preview.refused) : null,
@@ -409,7 +463,7 @@ function sourceRow(source: SourceView) {
       button({ variant: 'link', size: 'micro', label: 'Keep mine', id: idOf('keep', name), disabled: locked,
         attrs: { title: `Keep your ${called(name)} current: this source’s version no longer waits and is kept as a version, and the source’s next change`
           + ' is compared with it. Nothing is written to a tool, and Undo takes it back' }, onclick: () => void onLine(source, name, 'keep') }))
-    : (name.state === 'nothing' || name.state === 'same') && name.on === false ? turnOnButton({ key: name.key, name: called(name) }, name.kind, idOf('turn-on', name), locked) : null);
+    : (name.state === 'nothing' || name.state === 'same') && name.on === false ? turnOnButton({ key: name.key, name: called(name) }, name.kind, idOf('turn-on', name), locked, source.id) : null);
   const whereFold = fold({
     id: `source-where-${source.id}`, toggleId: `source-where-toggle-${source.id}`, label: detailsLabel,
     open: sources.openWhere.has(source.id),

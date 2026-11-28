@@ -693,6 +693,7 @@ export const applyClick = (click: Click | (() => Promise<Click | Outcome>)) => b
   const resolved = typeof click === 'function' ? await click() : click;
   if ('changes' in resolved) {
     const done = await carryOut(resolved, page);
+    // Turning an item on/off from Library sources updates its In Central Knot, Off/On lines.
     if (state.page === 'sources') await loadSources();
     sayDone(done, resolved);
   } else tell({ ...resolved, page });
@@ -737,6 +738,7 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed:
   } = {}) => busy('Applying…', async page => {
   const several = new Set(clicks.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
   for (const click of clicks) parts.push({ click, done: await carryOut(click, page) });
+  // Turning several items on from Library sources updates their In Central Knot, Off/On lines.
   if (state.page === 'sources') await loadSources();
   const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
   const stops = saidByKind(parts.flatMap(part => (part.done.refused ? [[part.click.kind, part.done.refused] as [PageKind, string]] : [])), several);
@@ -890,22 +892,34 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   const unswitched = switchedBack.length || turnsBack.length ? await runSwitches(switchedBack, true, turnsBack) : undefined;
   const kindOfEntry = new Map(parts.flatMap(part => part.made.map(id => [id, part.kind] as const)));
   // History is stored newest-last (history.ts); reversing first keeps entries written in the same millisecond newest-first.
-  const events = (await api().history()).events.filter(event => kindOfEntry.has(event.id)).reverse()
+  const allEvents = (await api().history()).events;
+  const events = allEvents.filter(event => kindOfEntry.has(event.id)).reverse()
     .sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
   const gone = [...kindOfEntry].filter(([id]) => !events.some(event => event.id === id));
+  const changedSince = (event: HistoryEvent, entry: NonNullable<ReturnType<typeof libraryEntry>>) =>
+    !!event.undoneBy || allEvents.slice(allEvents.indexOf(event) + 1).some(later => !kindOfEntry.has(later.id)
+      && libraryEntry(later)?.kind === entry.kind && libraryEntry(later)?.key === entry.key);
   type UndoEntry = { key?: string; entry: DestinationResult; answeredLater?: boolean };
   const raw = new Map(parts.map(part => [part.kind, [] as UndoEntry[]])), restored = new Map(parts.map(part => [part.kind, new Map<string, Set<HarnessId> | null>()])), stops = new Map<PageKind, string>();
+  const left: NamedRow[] = [], leftReasons: string[] = [];
+  const leave = (row: NamedRow, why: string) => { left.push(row); leftReasons.push(`${rowNames([row], about.rows)[0]}: ${why}`); };
   const reloads: ReloadChange[] = unswitched ? pluginReloads(unswitched.done) : [];
   let anyDid = !!unswitched?.done.some(entry => succeeded(entry.report));
   for (const event of events) {
     const kind = kindOfEntry.get(event.id)!;
     if (stops.has(kind)) continue;
+    const entry = libraryEntry(event);
+    if (entry && changedSince(event, entry)) { leave({ ...entry, name: event.item }, 'changed since, so it was left as it is.'); continue; }
     const result = await api().restore(event.id, home.home);
-    if (result.stopped) { stops.set(kind, result.stopped); continue; }
+    if (result.stopped) {
+      if (entry && result.stopped.startsWith('That change has nothing left to undo')) leave({ ...entry, name: event.item }, 'already as before.');
+      else stops.set(kind, result.stopped);
+      continue;
+    }
     const held = result.results.some(entry => heldWhole(entry) || keptBack(entry));
     if (result.made?.length || result.harnessWrites > 0 || !held) anyDid = true;
     reloads.push(...result.reloads);
-    const key = libraryEntry(event)?.key, list = raw.get(kind)!;
+    const key = entry?.key, list = raw.get(kind)!;
     // A later restore of the same item in this Undo answers an earlier tool problem: replaced if that tool failed again,
     // or dropped below once settled. restore runs with `only`, so every result in result.results belongs to this item.
     if (key) {
@@ -922,6 +936,7 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   }
   setHome(await api().refresh());
   await refreshPlugins(true);
+  // Undoing a Turn on from Library sources restores its In Central Knot, Off lines.
   if (state.page === 'sources') await loadSources();
   // Settled: managed, readable, and matching what the library now wants (not held or owed a write/removal; nothing applied if deleted).
   const settledIn = (kind: PageKind, key: string, tool: HarnessId) => {
@@ -951,21 +966,22 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   keepOwn([...results].map(([kind, list]) => ({ kind, results: list, notices: [] })));
   const missing = [...groupBy(gone, ([, kind]) => kind)].map(([kind, of]): [PageKind, string] =>
     [kind, `${plural(of.length, 'History entry', 'History entries')} it was to put back ${of.length === 1 ? 'is' : 'are'} no longer in History.`]);
-  const reasons = [...saidByKind([...stops, ...missing], several), ...switchReasons(unswitched)], undone = !reasons.length && ![...results.values()].flat().some(keptBack);
+  const reasons = [...saidByKind([...stops, ...missing], several), ...leftReasons, ...switchReasons(unswitched)], undone = !reasons.length && ![...results.values()].flat().some(keptBack);
   // What did go back, where some of it didn't: the rows of the kinds whose entries all went back as they were, and whose plugin
   // switches, if they had any to turn back, all went back too.
   const short = new Set([...stops.keys(), ...gone.map(([, kind]) => kind)]), names = (rows: NamedRow[]) => [...new Set(rowNames(rows, about.rows))];
   const switchesShort = new Set(unswitched && switchProblems(unswitched).length ? parts.filter(part => part.back.length || part.turns?.length).map(part => part.kind) : []);
-  const all = names(about.rows), asBefore = names(about.rows.filter(row => !short.has(row.kind) && !switchesShort.has(row.kind) && !results.get(row.kind)?.some(keptBack)));
+  const all = names(about.rows), asBefore = names(about.rows.filter(row => !short.has(row.kind) && !switchesShort.has(row.kind) && !left.some(each => sameRow(each, row)) && !results.get(row.kind)?.some(keptBack)));
   const failed = names(about.rows.filter(row => switchesShort.has(row.kind) || kept.get(row.kind)?.some(each => keptBack(each.entry) && (each.key ? each.key === row.key : each.entry.item.toLowerCase() === row.name.toLowerCase()))));
   const are = (list: string[]) => `${fewNames(list)} ${list.length === 1 ? 'is' : 'are'} as before`;
+  const leftText = left.length ? `${asBefore.length ? `Undone: ${are(asBefore)}. Left as ${left.length === 1 ? 'it is' : 'they are'}: ${fewNames(names(left))}.` : `Nothing was undone: ${fewNames(names(left))} ${left.length === 1 ? 'was' : 'were'} left as ${left.length === 1 ? 'it is' : 'they are'}.`}` : '';
   const single = about.sentence && undone && !unswitched && events.length === 1 && events[0]!.only ? events[0]! : undefined;
   const singleKind = single && kindOfEntry.get(single.id);
   const singleMade = single && state.history.data?.find(each => each.id === state.history.data?.find(past => past.id === single.id)?.undoneBy);
   const singleView = singleKind ? state.home?.[singleKind] : undefined;
   const singleSaid = singleMade && singleKind && librarySentence(singleMade, libraryWords[singleKind], singleView?.tools ?? [], singleView?.library[libraryEntry(single!)!.key], true)?.text;
   tellWritten({ page, items: all, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
-    text: singleSaid ? `${single!.item}: ${singleSaid.replace(/^./, first => first.toLowerCase())}` : undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` }, reloads, anyDid);
+    text: singleSaid ? `${single!.item}: ${singleSaid.replace(/^./, first => first.toLowerCase())}` : undone ? `Undone: ${are(all)}.` : left.length && !short.size ? leftText : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` }, reloads, anyDid);
   for (const row of about.rows) flashRow(row);
   if (about.regroups) unpin();
 });
@@ -1446,6 +1462,8 @@ export interface Outcome {
     label: string; id: string; run: () => void; title?: string;
     /** Why it is off now, asked at each drawing (a home's Go back while the page acts). */
     whyOff?: () => string | undefined;
+    /** Clicks this button sends, for forecasting an ended profile on hover and beside it (matrix.ts endsMark / endsOnHover). */
+    ends?: { clicks: () => Pick<Click, 'kind' | 'changes'>[]; act: string; id: string };
   };
   /** A second button after `act`: the next step the result offers (the whole plugin's switch, "Turn its plugins off in Codex"). */
   next?: { label: string; id: string; run: () => void; title?: string };
