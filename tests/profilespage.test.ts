@@ -106,3 +106,50 @@ test('With no profile in use, the page opens the one last switched to, titled as
   findById(rendered, 'status-profile-edit')?.onclick?.({});
   assert.deepEqual([app.page, profileState.open], ['profiles', 'last'], 'it lands on Profiles, with Last open');
 });
+
+test('Rows Central Knot holds and plugin skills get a file mark after the name; plugin agents and servers get none; pressing opens the panel under that row and drops it on profile switch or empty Find', async () => {
+  const { newItem } = await import('../src/library.ts');
+  const { profileState, setRenderer } = await import('../src/app.ts');
+  const draw = () => (rendered = profilesPage() as unknown as FakeNode);
+  setRenderer(() => { draw(); });
+  const tools: HarnessId[] = ['claude-cli', 'pi-cli'];
+  const held = (key: string, source?: string) => ({ ...newItem(key, key), on: true, hash: `h-${key}`, ...(source ? { source } : {}) });
+  const fact = (key: string) => ({ key, name: key, on: true, copies: {}, except: [] });
+  app.home = {
+    home: '/tmp/profiles-files-home', readId: 1, snapshots: [],
+    sync: { access: { allowed: true }, gate: { state: 'ready' }, caughtUp: [], managed: tools },
+    skills: { tools, items: [fact('notes'), fact('placed')], library: { notes: held('notes'), placed: held('placed', 'p1') }, gate: { state: 'ready' } },
+    mcp: { tools, items: [fact('docs')], library: { docs: held('docs') }, gate: { state: 'ready' } },
+    agents: { tools, items: [fact('reviewer')], library: { reviewer: held('reviewer') }, gate: { state: 'ready' } },
+    pluginItems: [{ tool: 'claude-cli', plugin: 'alpha', marketName: 'team', source: '/market', listed: true,
+      items: [{ kind: 'skill', name: 'triage', description: '', path: 'skills/triage' }, { kind: 'mcp', name: 'issues', description: '' }, { kind: 'agent', name: 'helper', description: '' }] }],
+    profiles: { profiles: [{ id: 'work', name: 'Work', items: ['skill:notes'], switchesPluginItems: true }, { id: 'other', name: 'Other', items: ['skill:notes'], switchesPluginItems: true }],
+      plugins: [{ id: 'p1', source: '/market', marketName: 'team', plugin: 'alpha', on: true }] },
+  } as unknown as HomeView;
+  app.page = 'profiles';
+  profileState.open = 'work';
+  const rowOfItem = (id: string) => findNode(rendered, el => el.dataset?.item === id);
+  const has = (id: string, part: string) => !!findNode(rowOfItem(id), el => el.classList.contains(part));
+  draw();
+  assert.deepEqual(['skill:notes', 'mcp:docs', 'agent:reviewer', 'plugin:skill:alpha@team/triage', 'plugin:skill:alpha@team/placed', 'plugin:mcp:alpha@team/issues', 'plugin:agent:alpha@team/helper'].map(id => has(id, 'row-file-btn')),
+    [true, true, true, true, true, false, false]);
+  findNode(rowOfItem('skill:notes'), el => el.classList.contains('row-file-btn'))!.click();
+  assert.deepEqual([has('skill:notes', 'details-file-only'), rowOfItem('skill:notes')?.classList.contains('file-anchored'), has('plugin:skill:alpha@team/triage', 'details-file-only')], [true, true, false]);
+  findNode(rowOfItem('plugin:skill:alpha@team/triage'), el => el.classList.contains('row-file-btn'))!.click();
+  assert.deepEqual([has('skill:notes', 'details-file-only'), has('plugin:skill:alpha@team/triage', 'details-file-only'), rowOfItem('plugin:skill:alpha@team/triage')?.classList.contains('file-anchored')], [false, true, true]);
+  // Rename's Escape claims the event so an open file stays open.
+  findById(rendered, 'profile-rename')!.click();
+  const renameEsc = { key: 'Escape', defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+  (findById(rendered, 'profile-name') as FakeNode & { onkeydown?: (e: unknown) => void }).onkeydown?.(renameEsc);
+  assert.deepEqual([renameEsc.defaultPrevented, has('plugin:skill:alpha@team/triage', 'details-file-only')], [true, true]);
+  // Switching profiles closes the previous profile's open panel.
+  findById(rendered, 'profile-row-other')!.click();
+  assert.equal(findNode(rendered, el => el.classList.contains('details-file-only')), undefined);
+  // Filtering Find to 0 rows calls placePanel so clearing Find does not reopen the closed panel.
+  findNode(rowOfItem('skill:notes'), el => el.classList.contains('row-file-btn'))!.click();
+  assert.equal(has('skill:notes', 'details-file-only'), true);
+  const input = findById(rendered, 'profile-find') as FakeNode & { oninput?: (e: unknown) => void };
+  input.oninput?.({ target: { value: 'zzz-none' } });
+  findById(rendered, 'profile-find-clear')!.click();
+  assert.equal(findNode(rendered, el => el.classList.contains('details-file-only')), undefined);
+});

@@ -2171,10 +2171,13 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .pf-row { display: grid; grid-template-columns: minmax(0, 1fr) clamp(208px, 26cqi, 280px); align-items: center; min-height: 37px; box-shadow: inset 0 -1px 0 var(--control-line); }
 .pf-row:not(.pf-head):hover { background: var(--hover); }
 .pf-row:not(.pf-head):focus-within { background: var(--hover); }
+/* The Profiles row an item's file is open under (profilespage.ts), tinted with its panel as one block. */
+.pf-row.file-anchored, .pf-row.file-anchored:hover, .pf-row.file-anchored:focus-within { background: var(--picked); box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--control-line); }
+.pf-row > .details-file-only { grid-column: 1 / -1; min-width: 0; padding: 4px 16px 12px; }
 .pf-head { position: sticky; top: 0; z-index: 2; background: var(--surface); min-height: 40px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
 .pf-head .pf-name { padding-left: 16px; gap: 4px; }
 .pf-name { position: relative; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; }
-.pf-name-text { flex: 0 1 auto; min-width: 48px; font-weight: 500; overflow-wrap: anywhere; }
+.pf-name-text { flex: 0 1 auto; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
 /* A long name wraps instead of being cut: rows grow, keeping their minimum height */
 .pf-row:not(.pf-head) .pf-name { padding-block: 6px; }
 /* A skill that comes on in Claude Code with the ticked row above it, its plugin being whole there (profilespage.ts withBrought). */

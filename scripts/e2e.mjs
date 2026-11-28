@@ -3021,6 +3021,15 @@ async function practiceFlow() {
     await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Focus')).click()`); await a.settle();
     await a.click('#profile-changes');
   } else check('Changes N button exists while previewing', false);
+  const pfShot = async (name, look, blur = false) => {
+    if (!shots) return;
+    if (blur) await a.run(`document.activeElement?.blur?.()`);
+    await a.run(`window.centralKnot.setAppearance(${JSON.stringify(look)})`);
+    await wait(80);
+    await a.shot(name);
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
+  };
   await withSidebarOpen(a, ...SMALLEST, async () => {
     const picker = await a.run(`(() => {
       const sel = document.getElementById('profile-picker');
@@ -3043,12 +3052,40 @@ async function practiceFlow() {
       same('picking Incident at 860×528 opens it and clears Changes', [await a.text('.profile-header h2'), await a.exists('#profile-changes')], ['Incident', false]);
     }
     same('nothing cut off on Profiles at 860×528 with sidebar open', [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+    // File mark after each item's name: one press opens its text under its row, a second moves it, menu and Find claim Escape, next Escape closes it.
+    const pfMark = id => `.pf-row[data-item="${id}"] .pf-name-text + .row-file-btn`;
+    const pfFile = () => a.run(`(() => { const box = document.querySelector('.file-open-box'), row = box?.closest('.pf-row'); return { item: row?.dataset.item ?? null, anchored: !!row?.classList.contains('file-anchored'), text: box?.querySelector('pre.content')?.textContent ?? '', boxes: document.querySelectorAll('.file-open-box').length }; })()`);
+    const openPf = async (id, line) => {
+      await a.click(pfMark(id));
+      for (let i = 0; i < 40 && !(await pfFile()).text.includes(line); i++) await wait(50);
+      await a.settle();
+      return pfFile();
+    };
+    await pfShot('profiles-file-marks-860-light', 'light', true);
+    same('at 860, every listed item has a file mark right after its name', await a.all('.pf-row[data-item]', `!!e.querySelector('.pf-name-text + .row-file-btn')`), [true, true, true, true]);
+    const notesFile = await openPf('skill:notes', 'Keep the facts and the writer’s intent.');
+    same('at 860, pressing notes’s mark opens its text under its row, nothing cut off', [notesFile.item, notesFile.anchored, notesFile.text.includes('Keep the facts and the writer’s intent.'), notesFile.boxes, ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], ['skill:notes', true, true, 1]);
+    await pfShot('profiles-file-open-860-light', 'light');
+    const standupFile = await openPf('skill:standup', 'Read the commits.');
+    same('at 860, pressing standup’s mark moves the panel there, nothing cut off', [standupFile.item, standupFile.anchored, standupFile.text.includes('Read the commits.'), standupFile.boxes, ...await a.run(CUT_OFF)], ['skill:standup', true, true, 1]);
+    await a.click('#status-profile');
+    await a.press('Escape');
+    const menuEsc = [await a.exists('.pf-menu'), (await pfFile()).boxes];
+    await a.run(`(() => { const i = document.querySelector('#profile-find'); i.focus(); i.value = 'stand'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    await a.press('Escape');
+    const findEsc = [await a.run(`document.querySelector('#profile-find')?.value`), (await pfFile()).boxes];
+    await a.press('Escape');
+    same('status bar menu and Find claim their own Escape while the file stays open; next Escape closes it and refocuses its mark',
+      [menuEsc, findEsc, (await pfFile()).boxes, await a.run(`document.activeElement === document.querySelector(${JSON.stringify(pfMark('skill:standup'))})`)],
+      [[false, 1], ['', 1], 0, true]);
   });
   await withSidebarOpen(a, 1316, 819, async () => {
     same('at 1316×819 the list column shows, the picker hides, and nothing is cut off',
       [await a.run(`(() => { const p = document.querySelector('.pf-picker'); return p ? getComputedStyle(p).display : null; })()`), await a.run(`getComputedStyle(document.querySelector('.profiles-list .list-scroll')).display !== 'none'`),
         ...await a.run(CUT_OFF)],
       ['none', true]);
+    await pfShot('profiles-file-marks-1316-dark', 'dark', true);
   });
   await fullSize(a);
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Focus')).click()`); await a.settle();
@@ -4911,6 +4948,24 @@ async function practiceFlow() {
   await a.click('#plugins-undo');
   same('Undo turns it back on: config.toml is as it was', [readFileSync(codexConfig, 'utf8') === configBefore, await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`)], [true, 'true']);
   same('nothing on the plugin pages waited for a later click: no Apply, no Discard, no chosen switch', await a.run('window.ckWaiting'), []);
+  // Profiles with a plugin's skill (marked) and server (unmarked) beside his own items.
+  if (shots) {
+    writeClaudeInstall(practice, 'ck-test-market', 'issue-tracker', '9.9.9', {
+      'skills/triage/SKILL.md': readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8'),
+      '.mcp.json': JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp'] } } }),
+    });
+    await a.click('#nav-profiles');
+    await a.click('#header-refresh');
+    for (let i = 0; i < 40 && !(await a.exists('.pf-row[data-item="plugin:mcp:issue-tracker@ck-test-market/issues"]')); i++) await wait(100);
+    await shotOpen('profiles-plugin-and-own-860-light', SMALLEST, 'light', async () => {
+      await a.run(`document.querySelector('.pf-row[data-item="plugin:skill:issue-tracker@ck-test-market/triage"]')?.scrollIntoView({ block: 'center' })`);
+      await a.settle();
+    });
+    await fullSize(a);
+    if (installsBefore === undefined) rmSync(installRecord); else writeFileSync(installRecord, installsBefore);
+    rmSync(join(practice, '.claude/plugins/cache/ck-test-market/issue-tracker/9.9.9'), { recursive: true, force: true });
+    await a.click('#nav-plugins');
+  }
   writeFileSync(codexConfig, configBefore.slice(0, configBefore.indexOf('\n[marketplaces.ck-test-market]')));
   // document-tools' parts from an earlier version, moved at one look too: pdf-reader, edited in Pi since (Pi's skills folder known
   // first, as an earlier version's pass noted it), is his own now, said once; spreadsheet, left out of Pi, stays out of it.
