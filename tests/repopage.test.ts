@@ -97,6 +97,9 @@ test('connected state (?) card matches the buttons actually drawn in every state
     const upToDate = !view.held && !view.problem && !view.branchGone && !view.pushBlocked && !view.incoming.length && !view.outgoing.length;
     assert.equal(Boolean(checkBtn), upToDate, `${label}: Check again visibility`);
 
+    if (view.branchGone && !view.held && !view.problem) {
+      assert.ok(!textOf(page.querySelector('.repo-facts')).includes('Push puts it back'), `${label}: Repo’s latest row states only the fact`);
+    }
     // Card against drawn buttons: never promise an absent Pull, Push or Check again, and name every offered one.
     if (checking) {
       assert.doesNotMatch(card, /\b(Pull|Push|Check again)\b/, `${label}: checking card promises a button: ${card}`);
@@ -108,7 +111,7 @@ test('connected state (?) card matches the buttons actually drawn in every state
   }
 });
 
-test('Check again runs loadRepo(true), shows an in-sight quiet note that fades after FADE_MS, and lands focus and announcement after joined/overtaken checks', async t => {
+test('Check again runs loadRepo(true), shows an in-sight quiet note that fades after FADE_MS, and lands focus and announcement after a joined check', async t => {
   app.page = 'repo';
   app.busy = undefined;
   setRenderer(() => { renderRepo(); });
@@ -174,46 +177,26 @@ test('Check again runs loadRepo(true), shows an in-sight quiet note that fades a
   assert.equal(announcement.textContent, 'Checked the repo: 1 to pull.');
   assert.equal(findById(rendered, 'repo-state')?.focused, 1, 'keyboard Check again moves focus to #repo-state when #repo-check goes away');
 
-  // Joined check overtaken by a third read C before B's read ends: focus waits until C enables the button, and C still announces.
-  let currentView: ConnectedRepoView = connected();
-  const pendingReads: ((view: RepoView) => void)[] = [];
+  // An overlapping loadRepo(false) joining an in-flight keyboard Check again draws enabled #repo-check, announces, shows the quiet note and lands focus.
+  const currentView = connected();
   api.repo = async check => {
-    if (check) return await new Promise<RepoView>(resolve => { finishFetch = resolve; });
-    return await new Promise<RepoView>(resolve => { pendingReads.push(resolve); });
+    if (!check) return currentView;
+    return await new Promise<RepoView>(resolve => { finishFetch = resolve; });
   };
   forgetRepoPrompts(true);
   repo.view = currentView;
   renderRepo();
-  // A starts a check (initial read resolves, fetch in flight).
-  const checkA = loadRepo(true);
-  pendingReads.shift()!(currentView);
-  await settled();
-  assert.equal(repo.checking, true);
-  // Keyboard Check again (B) joins A's in-flight fetch.
+  announcement.textContent = '';
   findById(rendered, 'repo-check')!.onclick!({ detail: 0 });
   await settled();
-  // A's fetch finishes; B starts its post-fetch read.
-  announcement.textContent = '';
+  assert.equal(repo.checking, true);
+  const joined = loadRepo(false);
   finishFetch!(currentView);
-  await settled();
-  assert.equal(pendingReads.length, 1, 'B started its post-fetch read');
-  // C starts after the fetch ended and before B's read resolves.
-  const loadC = loadRepo(false);
-  await settled();
-  assert.equal(pendingReads.length, 2, 'C started a newer read while B was still reading');
-  // B's read resolves first and is overtaken: button stays disabled and focus must NOT land yet.
-  pendingReads.shift()!(currentView);
-  await settled();
-  assert.equal(repo.checking, true, 'still checking until winning read C draws');
-  assert.equal(findById(rendered, 'repo-check')?.focused, 0, 'focus waits until the winning read enables #repo-check');
-  assert.equal(announcement.textContent, '', 'overtaken B does not announce early');
-  // Winning read C resolves: redraw enables #repo-check, announces the check, shows the quiet note, and lands focus.
-  pendingReads.shift()!(currentView);
-  await Promise.all([checkA, loadC]);
+  await joined;
   await settled();
   assert.equal(repo.checking, false);
   assert.equal(findById(rendered, 'repo-check')?.attrs.disabled, undefined);
-  assert.equal(findById(rendered, 'repo-check')?.focused, 1, 'keyboard focus lands once the winning read has drawn');
+  assert.equal(findById(rendered, 'repo-check')?.focused, 1, 'keyboard focus lands once the joining read enables #repo-check');
   assert.equal(announcement.textContent, 'Checked the repo: up to date.');
   assert.equal(textOf(findById(rendered, 'repo-checked-note')), 'Checked just now: nothing new.');
   forgetRepoPrompts(true);

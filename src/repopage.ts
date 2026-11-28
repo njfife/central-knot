@@ -57,12 +57,8 @@ export function forgetRepoPrompts(homeChanged = false): void {
   repo.confirmDisconnect = false;
   repo.layoutOpen = false;
   clearCheckedNote();
-  showQuietNote = false;
-  focusAfterCheck = false;
-  if (!homeChanged) return;
-  repo.view = undefined;
-  lastReadFailure = undefined;
-  checkPending = false;
+  checkIntent = undefined;
+  if (homeChanged) { repo.view = undefined; lastReadFailure = undefined; }
 }
 
 /** Each load's turn: an older load that finishes late never overwrites a newer one, or ends its "Checking…". */
@@ -79,12 +75,8 @@ export function loadRepoSoon(): void {
 let inFlight: Promise<RepoView | null> | undefined;
 /** Whether any load since the last check asked for one: whichever load ends up newest does it, so an overtaken load's ask isn't lost. */
 let wantCheck = false;
-/** A fetch ended while another read overtook it: the winning read announces it and shows any quiet note once it draws. */
-let checkPending = false;
-/** An explicit Check again asked for an in-sight note if the repo is still up to date. */
-let showQuietNote = false;
-/** A keyboard press of Check again awaits the winning read so focus lands only once the button is enabled (or on #repo-state). */
-let focusAfterCheck = false;
+/** A Check again press waiting for its check to draw, so the winning read shows the quiet note and lands keyboard focus. */
+let checkIntent: { byKeyboard: boolean } | undefined;
 
 /** An error from the main process in plain words (Electron prefixes the method it came through). */
 const errorText = (error: unknown) => String(error instanceof Error ? error.message : error).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
@@ -93,22 +85,6 @@ const errorText = (error: unknown) => String(error instanceof Error ? error.mess
 let lastReadFailure: string | undefined;
 /** What a read can change of what this page and the sidebar's count show, as one value to compare (loadRepo). */
 const shownNow = () => JSON.stringify([repo.view, repo.problem, repo.checking, repo.checkedNote]);
-
-/** Completes a finished check once the winning read is ready to draw: quiet note, redraw, status-bar announcement and keyboard focus. */
-function finishCheck(view: RepoView | undefined, failed: boolean, redraw: () => void): void {
-  const announced = checkPending;
-  const quiet = showQuietNote;
-  const focus = focusAfterCheck;
-  checkPending = false;
-  showQuietNote = false;
-  focusAfterCheck = false;
-  const upToDate = !failed && !!view?.connected && repoPhase(view, waitingCounts(view)) === 'up-to-date';
-  if (announced && quiet && upToDate && state.page === 'repo') showCheckedNote();
-  else if (!upToDate) clearCheckedNote();
-  redraw();
-  if (announced && !failed && view?.connected && state.page === 'repo') announce(checkedText(view));
-  if (focus) (document.getElementById('repo-check') ?? document.getElementById('repo-state'))?.focus();
-}
 
 /**
  * Reads the repo's view; `check` then asks the repo for its latest commit (a fetch), showing the view meanwhile. Loads may overlap
@@ -119,9 +95,9 @@ function finishCheck(view: RepoView | undefined, failed: boolean, redraw: () => 
 export async function loadRepo(check = false): Promise<void> {
   clearTimeout(soon);
   const turn = ++loads;
-  // A check already in flight is joined, never started again: once it ends, the winning read draws, announces and lands focus.
+  wantCheck ||= check;
+  // A check already in flight is joined, never started again: once it ends, this load reads the page as it then is.
   const joined = inFlight;
-  if (!joined) wantCheck ||= check;
   if (joined) await joined.catch(() => undefined);
   let view: RepoView | undefined;
   let failed: string | undefined;
@@ -135,37 +111,37 @@ export async function loadRepo(check = false): Promise<void> {
   check = wantCheck && !joined;
   wantCheck = false;
   repo.view = view;
-  const willFetch = check && !!view?.connected && view.access.allowed && !view.held;
-  if (!inFlight && !willFetch) repo.checking = false;
+  const willCheck = check && !!view?.connected && view.access.allowed && !view.held;
+  if (!inFlight) repo.checking = false;
+  const intent = !inFlight && !willCheck ? checkIntent : undefined;
+  if (intent) checkIntent = undefined;
+  const upToDate = !failed && !!view?.connected && repoPhase(view, waitingCounts(view)) === 'up-to-date';
+  if (joined && intent && upToDate && state.page === 'repo') showCheckedNote();
+  else if (!upToDate) clearCheckedNote();
   // Drawn only when the read changed what is shown: a redraw that changes nothing would replace a text field he is typing in, and its Undo.
-  const redraw = () => { if (shownNow() !== shown) rerender(); };
-  if (!willFetch) {
-    if (!inFlight && (checkPending || focusAfterCheck || showQuietNote)) {
-      finishCheck(view, !!failed, redraw);
-    } else {
-      if (view?.connected && repoPhase(view, waitingCounts(view)) !== 'up-to-date') clearCheckedNote();
-      redraw();
-    }
-    return;
-  }
+  if (shownNow() !== shown) rerender();
+  // An overtaken check dropped its own status-bar line; the load that joined it announces what the check found.
+  if (joined && !failed && view?.connected && state.page === 'repo') announce(checkedText(view));
+  if (intent?.byKeyboard) (document.getElementById('repo-check') ?? document.getElementById('repo-state'))?.focus();
+  if (!willCheck) return;
   clearCheckedNote();
-  checkPending = false;
   repo.checking = true;
   rerender();
-  inFlight = api().repo(true)
-    .then(result => {
-      checkPending = true;
-      return result;
-    })
-    .finally(() => {
-      inFlight = undefined;
-    });
+  inFlight = api().repo(true).finally(() => { inFlight = undefined; });
   try { view = (await inFlight) ?? view; } catch { /* the view already shown stands */ }
-  // A load that started meanwhile joined this check and its winning read draws, announces and lands focus.
+  // A load that started meanwhile joined this check and shows its result, "Checking…" ended.
   if (turn !== loads) return;
+  const postIntent = checkIntent;
+  checkIntent = undefined;
   repo.view = view;
   repo.checking = false;
-  finishCheck(view, false, rerender);
+  const stillUpToDate = !!view?.connected && repoPhase(view, waitingCounts(view)) === 'up-to-date';
+  if (postIntent && stillUpToDate && state.page === 'repo') showCheckedNote();
+  else if (!stillUpToDate) clearCheckedNote();
+  // What the check found, in the status bar, so it never disagrees with the page.
+  if (view?.connected && state.page === 'repo') announce(checkedText(view));
+  rerender();
+  if (postIntent?.byKeyboard) (document.getElementById('repo-check') ?? document.getElementById('repo-state'))?.focus();
 }
 
 /** After a write: the page and the home both read again, so every page shows what Pull or Push left on disk. */
@@ -244,11 +220,10 @@ document.addEventListener('keydown', event => { if (event.key === 'Escape' && re
 
 /** After Pull or Push: if its button went away (nothing left to move), focus moves to the page's state line. */
 const keepFocus = (id: string) => { if (!document.getElementById(id)) document.getElementById('repo-state')?.focus(); };
-/** After Check again: clears any old note and lets the winning read show the new quiet note and land keyboard focus. */
+/** After Check again: clears any old note and records the button press so the winning draw shows the quiet note and lands focus. */
 const checkAgain = (byKeyboard: boolean) => {
   clearCheckedNote();
-  showQuietNote = true;
-  focusAfterCheck ||= byKeyboard;
+  checkIntent = { byKeyboard };
   void loadRepo(true);
 };
 
@@ -544,7 +519,7 @@ function connectedPage(view: ConnectedRepoView) {
         h('div.repo-address', {}, icon('git-branch', 16, 'tone-muted'), h('span.repo-address-text', {}, h('span.mono.repo-url', {}, view.url), h('span.repo-branch', { title: 'Branch' }, view.branch))),
         h('dl.facts.repo-facts', {},
           h('dt', {}, 'This computer is at'), h('dd', {}, view.base ? commitText(view.base) : h('span.tone-muted', {}, 'Nothing pulled or pushed yet')),
-          h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, view.branchGone ? h('span.tone-warning', {}, `The repo no longer has the branch ${view.branch}. Push puts it back.`) : !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, sameCommitText(counts))),
+          h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, view.branchGone ? h('span.tone-warning', {}, `The repo no longer has the branch ${view.branch}.`) : !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, sameCommitText(counts))),
           h('dt', {}, 'Activity'), h('dd', {}, h('span.repo-activity', {}, activity)))),
       phase === 'problem' ? h('p.repo-stale', { id: WAITING_ID }, icon('info', 12), `${view.latest ? 'These lists are from the last time the repo was reached' : 'The repo hasn’t been reached yet'}; Pull and Push wait until it can be.`) : null,
       phase === 'held' ? null
@@ -598,8 +573,8 @@ function connectForm(allowed: boolean) {
   const ready = () => !acting() && allowed && !!repo.draftUrl.trim();
   const go = () => { if (ready()) void connect(); };
   const refresh = () => { const control = document.getElementById('repo-connect') as HTMLButtonElement | null; if (control) control.disabled = !ready(); };
-  const field = (id: string, label: string, placeholder: string, value: string, set: (text: string) => void, { hint, info, below }: { hint?: string; info?: HTMLElement; below?: string } = {}) => h('div.repo-field', { 'data-info-block': info ? true : undefined },
-    h('div.repo-field-head', {}, h('label.market-add-label', { for: id }, label, hint ? h('span.repo-field-hint', {}, hint) : null), info),
+  const field = (id: string, label: string, placeholder: string, value: string, set: (text: string) => void, { hint, info, below }: { hint?: string; info?: HTMLElement; below?: string } = {}) => h('div.repo-field', {},
+    h('div.repo-field-head', { 'data-info-block': info ? true : undefined }, h('label.market-add-label', { for: id }, label, hint ? h('span.repo-field-hint', {}, hint) : null), info),
     h('input.market-add-input', { id, type: 'text', placeholder, value, spellcheck: 'false', autocomplete: 'off', disabled: !!acting() || !allowed,
       'aria-describedby': [below ? `${id}-below` : '', info ? infoCardId(`${id}-info`) : ''].filter(Boolean).join(' ') || undefined,
       'aria-invalid': repo.problem && id === `repo-${repo.problemField}` ? 'true' : undefined,

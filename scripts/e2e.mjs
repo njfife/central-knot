@@ -5425,6 +5425,12 @@ async function repoBaseFlow() {
     && (await first.text('.repo-connect-note'))?.trim() === 'Connecting changes nothing in your tools.'
     && await first.run(`(() => { const d = document.getElementById('repo-what-goes-where'), s = document.getElementById('repo-what-goes-where-toggle'), l = document.querySelector('.repo-layout'); return d?.open === false && l?.checkVisibility() === false && d.getBoundingClientRect().height <= s.getBoundingClientRect().height + 2; })()`), startPage);
   await checkCard(first, 'repo-url-info', URL_INFO_CARD, 'Repo address (?) card holds clone and SSH examples');
+  if (shots) {
+    await first.run(`document.activeElement?.blur?.()`);
+    await first.click('#repo-url-info');
+    await shotAt(first, 'repo-url-info-card-860-light', SMALLEST, 'light');
+    await first.press('Escape');
+  }
   await first.click('#repo-what-goes-where-toggle');
   const foldText = await first.text('#repo-what-goes-where') ?? '';
   check('opening What goes where shows the 4 paths and Managed set words, without the sign-in note or See what’s Managed link',
@@ -5483,6 +5489,7 @@ async function repoBaseFlow() {
     await second.text(`${baseRow} .repo-row-change`),
     firstIncoming.includes('Changed here too. Pull uses the repo’s version; yours stays in History.'),
   ], ['New', true]);
+  await until(() => second.exists('#repo-pull:not([disabled])'));
   await checkCard(second, 'repo-state-info', PULL_ONLY_CARD, 'Git repo Pull-only state card');
   await pull(second, 'Be brief.\n');
   same('Pull sets the base, and Claude Code, which gets it, has it', [baseText('second'), claudeText('second').includes('Be brief.')], ['Be brief.\n', true]);
@@ -5490,7 +5497,7 @@ async function repoBaseFlow() {
   same('an edit in the first home waits to go out with a short badge', await setBase(first, 'Be briefer.\n'), 'saved');
   await first.click('#nav-overview');
   await first.click('#nav-repo');
-  await until(() => first.exists(`section[aria-labelledby="repo-outgoing"] ${baseRow}`));
+  await until(() => first.exists(`section[aria-labelledby="repo-outgoing"] ${baseRow}`) && first.exists('#repo-push:not([disabled])'));
   same('outgoing row uses the short Changed badge', await first.text(`section[aria-labelledby="repo-outgoing"] ${baseRow} .repo-row-change`), 'Changed');
   await checkCard(first, 'repo-state-info', PUSH_ONLY_CARD, 'Git repo Push-only state card');
   same('an edit in the first home goes out', await push(first), 'pushed');
@@ -5574,10 +5581,14 @@ async function repoBaseFlow() {
   git('--git-dir', remote, 'symbolic-ref', 'HEAD', 'refs/heads/archived');
   await first.click('#repo-check');
   await until(() => first.exists('div.repo-in-sync #repo-push'));
-  check('Check again finds a gone branch, offers Push in div.repo-in-sync, and announces it',
-    (await first.text('div.repo-in-sync') ?? '').includes('Nothing else differs. Push puts the branch main back in the repo.')
+  check('Check again finds a gone branch, states the fact once in Repo’s latest, offers Push in div.repo-in-sync, and announces it',
+    (await first.text('.repo-facts') ?? '').includes('The repo no longer has the branch main.')
+    && !(await first.text('.repo-facts') ?? '').includes('Push puts it back.')
+    && (await first.text('div.repo-in-sync') ?? '').includes('Nothing else differs. Push puts the branch main back in the repo.')
     && (await first.text('#announcement') ?? '').includes('Checked the repo: its branch is gone.'), await first.text('.repo-page'));
   await checkCard(first, 'repo-state-info', BRANCH_GONE_CARD, 'Git repo branch-gone state card');
+  await first.run(`document.activeElement?.blur?.()`);
+  await shotAt(first, 'repo-branch-gone-860-light', SMALLEST, 'light');
   if (shots) {
     await first.click('#repo-state-info');
     await shotAt(first, 'repo-branch-gone-card-860-light', SMALLEST, 'light');
