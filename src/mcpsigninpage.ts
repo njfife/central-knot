@@ -2,18 +2,17 @@
 // that tool's own command said of the server at its column's last Check. Nothing runs when the page opens: Check runs one tool's
 // command (main.ts mcp-signin:check → mcpsigninrun.ts checkSignin), Check all runs the columns one after another, one check at a
 // time, beside it the line saying what a check does on this computer; a cell that needs a sign-in offers that tool's own command
-// to copy, or, where its cell offers that tool's sign-in (mcpsignin.ts offersSignin), Sign in (signIn), with Stop while it waits
-// and, for a tool that prints the address it signs in at, Reopen (reopenButton); nothing else is started. What each check and
-// sign-in said lives in app.ts state.mcpSignin for the home it was made in, until Central Knot quits; nothing is stored. The rows
-// keep the places they had when he came to the page (inPlace). The rows, which cells a check holds for, the cells' words, a
-// session-only head, the line, the cards and the commands are mcpsignin.ts's; the controls', `MCP server`, Local, `In the plugin
-// …`, the marks' labels, a check's refusal and the empty state are this file's.
+// to copy, or, where its cell offers that tool's sign-in (mcpsignin.ts offersSignin), Sign in (signIn), with Stop while it waits;
+// nothing else is started. What each check and sign-in said lives in app.ts state.mcpSignin for the home it was made in, until
+// Central Knot quits; nothing is stored. The rows keep the places they had when he came to the page (inPlace). The rows, which cells a check holds for, the
+// cells' words, a session-only head, the line, the cards and the commands are mcpsignin.ts's; the controls', `MCP server`,
+// Local, `In the plugin …`, the marks' labels, a check's refusal and the empty state are this file's.
 import { pinnedRows, rerender, state } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, emptyState, h, infoMark } from './dom.ts';
 import { pin } from './itemrow.ts';
 import { askedNow, cannotRun, cellNow, checkLine, connectedCard, grouped, IN_SESSION, listCommand, LOCAL_CARD, offersSignin, ownTime, SAID,
-  SESSION_CARD, signinKey, signinRows, signinStarted, signinWaits, type CellSays, type SigninRow } from './mcpsignin.ts';
+  SESSION_CARD, signinRows, signinStarted, signinWaits, type CellSays, type SigninRow } from './mcpsignin.ts';
 import { pagePlatform } from './machine.ts';
 import { clockTime } from './model.ts';
 import { copyButton, noToolsState, notRead } from './pages.ts';
@@ -109,19 +108,12 @@ const nameCell = (row: SigninRow, mark: Mark) => h('th.signin-name', { scope: 'r
   row.transport === 'stdio' ? h('span.signin-local', {}, 'Local', mark('local')) : null,
   row.plugin ? h('span.signin-plugin', {}, `In the plugin ${row.plugin}`) : null);
 
-/** Sign in or Try again, which starts the tool's own sign-in, or Stop (`reopens`: Reopen is beside it): a cell's sign-in button (mcpsignin.ts CellSays act). */
-function actButton(tool: HarnessId, row: SigninRow, act: NonNullable<CellSays['act']>, id: string, reopens: boolean) {
+/** Sign in or Try again, which starts the tool's own sign-in, or Stop: a cell's sign-in button (mcpsignin.ts CellSays act). */
+function actButton(tool: HarnessId, row: SigninRow, act: NonNullable<CellSays['act']>, id: string) {
   const stop = act.label === 'Stop';
-  const stopTitle = reopens ? 'Ends the sign-in.' : 'Ends the sign-in. Closed the browser’s tab before finishing? Stop, then Try again.';
   return button({ size: 'micro', label: act.label, name: stop ? 'Stop the sign-in' : `${act.label}: ${act.runs}`, id, disabled: stop ? false : signingIn(),
-    attrs: { title: stop ? stopTitle : `Runs ${act.runs}; the sign-in opens in your browser` },
+    attrs: { title: stop ? 'Ends the sign-in. Closed the browser’s tab before finishing? Stop, then Try again.' : `Runs ${act.runs}; the sign-in opens in your browser` },
     onclick: () => void (stop ? window.centralKnot.stopSignin(state.mcpSignin.home) : signIn(tool, row)) });
-}
-/** Reopen, while a sign-in waits there: main opens the address its tool printed again, sent the same ask as Sign in (the copy it was started for), never the address. */
-function reopenButton(tool: HarnessId, row: SigninRow, id: string) {
-  const run = state.mcpSignin.signins?.[signinKey(tool, row.id)];
-  return button({ size: 'micro', label: 'Reopen', name: 'Reopen the sign-in page', id, attrs: { title: 'Opens the sign-in page in your browser again: closed its tab before finishing?' },
-    onclick: () => void (run && window.centralKnot.reopenSignin(tool, state.mcpSignin.home, row.id, run.copy)) });
 }
 
 /** A cell, its id and its buttons' by its row's id, so none follows a place in the list. */
@@ -136,7 +128,7 @@ function cellView(tool: HarnessId, row: SigninRow, mark: Mark, offers: boolean) 
   return h(`td.signin-cell${says.tone ? `.tone-${says.tone}` : ''}`, { id: `signin-cell-${id}`, title: says.title },
     h('span.signin-words', {}, says.words === SAID.connected ? keep(says.words, mark('connected'))
       : says.why ? keep(says.words, infoMark(`signin-why-${id}`, 'why it didn’t finish', says.why)) : says.words, says.act ? null : copy),
-    says.act ? h('span.signin-acts', {}, actButton(tool, row, says.act, `signin-act-${id}`, !!says.reopen), says.reopen ? reopenButton(tool, row, `signin-reopen-${id}`) : null, copy) : null,
+    says.act ? h('span.signin-acts', {}, actButton(tool, row, says.act, `signin-act-${id}`), copy) : null,
     shown ? h('code.signin-command', {}, shown) : null);
 }
 
