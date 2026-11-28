@@ -284,7 +284,7 @@ export interface BoxRoom { scroller: HTMLElement; sticky?: number; padding?: num
 /**
  * A page as a file panel's place (pagePlace): its page; the name its open file was opened at (`occurrenceId`); the home and
  * visit that file belongs to (`on`: thisVisit); whether its names open a found copy's or a plugin's row too (`foundAndPlugins`);
- * its scroll box overrides where the page does not scroll inside `.scroll` (`boxRoom`); the marks drawn since it last placed its panel (`drawn`).
+ * its scroll box overrides where the page uses another scroller or sticky headers (`boxRoom`); the marks drawn since it last placed its panel (`drawn`).
  */
 export interface PagePlace extends FilePlace { page: Page; occurrenceId?: string; on?: string; foundAndPlugins?: boolean; boxRoom?: (box: HTMLElement) => BoxRoom | undefined; drawn?: Set<string> }
 /** A name's mark (itemFile): the name's occurrence, the row its file is read from, the mark. */

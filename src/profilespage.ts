@@ -14,7 +14,8 @@
 // opening its current version under that row (profilesFiles, rowKey → filepanel.ts); whole-only plugin servers and agents have none.
 // A profile held by a plugin off in a tool offers in Switch's place, and on each row held in another plugin or tool, the Library
 // line's own press to turn it on there, its result and Undo in this page's band, else the link to its page, the header saying why (wayPast, turnOnControl).
-// Every rule and preview is profileplan.ts's (listedChanges, listedChangeCount, switchPlan, pluginPlan, inUse, switchSaid, switchOffer, statusMenuRows, switchPreview, keptOn, leftOutWords, toolsOf), as profiles.ts carries it out.
+// Every rule and preview is profileplan.ts's (listedChanges, listedChangeCount, switchPlan, pluginPlan, inUse, switchSaid,
+// switchOffer, statusMenuRows, switchPreview, keptOn, leftOutWords, toolsOf), as profiles.ts carries it out.
 import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { brandMark, kindGlyph, lineFacts, openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
 import { lineControl } from './pluginline.ts';
