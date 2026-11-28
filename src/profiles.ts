@@ -8,7 +8,8 @@
 // all of it told to History in one entry of its own, written first (librarypass.ts PassOptions told) and then left holding only
 // the plugin copies and Copilot CLI rules each tool confirmed. Its Undo is each library item's own Turn on or Turn off, each with its own entry, and
 // each plugin copy's own switch back (plus any uncovered Copilot CLI rule), all told in one entry of the Undo's own, which marks the switch's entry undone. Nothing per
-// tool is kept here but those entries and a profile's own `tools` and `out`, and which profile is in use is never stored. A
+// tool is kept here but those entries and a profile's own `tools` and `out`, and which profile is in use is never stored, nor the
+// one last switched to (a switch's entry names its profile by `toId` too: profilesWithLast finds it from History for the views). A
 // file from before profiles were sets of items (format 1) is read here for the page and moved once by profilemigrate.ts. A
 // switch to a profile that holds `tools` or `out` also sets each of its items' keep-outs (profileplan.ts effectiveOut), told in
 // its entry (`except`) and put back by its Undo.
@@ -32,7 +33,7 @@ import type { KindLibrary } from './librarypass.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
 import { reverse, succeeded, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { click } from './pluginswitch.ts';
-import { changes, clearsCopilotOff, copilotKeptOnBy, copilotUndo, heldWords, wholeCounts, liveItems, onAfterUndo, outNow, pluginPlan, pluginUndo, retools, switchPlan, toolsChanged, unchanged, undoPlan, wholeRuns, withCopilotOff, type CopilotRule, type CopyTurn, type ExceptTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns, type WholeRun } from './profileplan.ts';
+import { changes, clearsCopilotOff, copilotKeptOnBy, copilotUndo, heldWords, wholeCounts, lastSwitched, liveItems, onAfterUndo, outNow, pluginPlan, pluginUndo, retools, switchPlan, toolsChanged, unchanged, undoPlan, wholeRuns, withCopilotOff, type CopilotRule, type CopyTurn, type ExceptTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns, type WholeRun } from './profileplan.ts';
 import type { ReloadChange } from './reload.ts';
 import { applyServers, serverKind, serversView } from './servers.ts';
 import { errorCode, libraryGate, plainError, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
@@ -98,6 +99,14 @@ export async function readProfileFile(home: string): Promise<{ view: ProfilesVie
 /** The home's profiles, for the page and the menus, with the plugins the home records (types.ts ProfilesView `plugins`). */
 export const readProfiles = async (home: string): Promise<ProfilesView> =>
   ({ ...(await readProfileFile(home)).view, plugins: (await recordedIds(home)).plugins.map(({ id, plugin, marketName, on }) => ({ id, plugin, marketName, on })) });
+/**
+ * The home's profiles as main.ts reads them for every view, every save's result and the menus (readProfiles), with the one last
+ * switched to, worked out from History now (types.ts ProfilesView `last`: profileplan.ts lastSwitched), so a rename or a tick keeps it.
+ */
+export async function profilesWithLast(context: ShareContext): Promise<ProfilesView> {
+  const view = await readProfiles(context.home), last = lastSwitched(await readHistory(context), view.profiles);
+  return last ? { ...view, last } : view;
+}
 
 /**
  * Writes `profiles.json` in `format`: by default as its content needs (4 while a profile holds `tools` or `out`, else 3); format 2
@@ -427,7 +436,7 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stopped(`${gate.refused} Nothing was switched.`);
   const steps = runs.flatMap(run => run.ops), kept = retools(turns.except);
-  const event = profileEvent(context, profile.name, { toName: profile.name, on: named(turns.on), off: named(turns.off), ...(kept.length ? { except: kept } : {}),
+  const event = profileEvent(context, profile.name, { toName: profile.name, toId: profile.id, on: named(turns.on), off: named(turns.off), ...(kept.length ? { except: kept } : {}),
     ...(copies.length ? { plugins: copies.map(switched) } : {}), ...(steps.length ? { wholeSteps: steps } : {}), ...(clears.length ? { copilotCleared: clears } : {}) });
   await appendHistory(context, [event]);
   const done = await turnTogether(context, tools, turns, true, copies, read.libraries, plugins, runs), rules = await runCopilotRules(context, clears, false);
