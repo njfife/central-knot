@@ -283,7 +283,7 @@ function foundSection(t: Table, rows: (ItemRow | PluginRow)[]) {
 }
 
 /** One unread plugin's reason in the warning card, naming the plugin once and avoiding pronoun ambiguity. */
-function unreadReason(install: HomeView['pluginItems'][number], withTool: boolean): string {
+function unreadReason(install: InstalledPlugin, withTool: boolean): string {
   const tool = names[install.tool];
   const problem = install.problem!;
   if (problem.startsWith(`${tool} lists it,`)) {
