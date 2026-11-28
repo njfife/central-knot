@@ -95,9 +95,10 @@ export interface SigninAsk { home: string; tool: HarnessId; row: string; copy: s
 /**
  * What main has when it starts one: where it would run (the home open), whether Central Knot may write it (share.ts writeAccess),
  * the tools managed there, its rows as read now (mcpsignin.ts signinRows), and the port a tool's sign-in for a server of its, by
- * its name there, listens on for the browser's answer, where it is one of its own (mcpsignin.ts callbackPort: OpenCode's).
+ * its name there, listens on for the browser's answer, where it is one of its own (mcpsignin.ts hasOwnPort, callbackPort: OpenCode's),
+ * read when asked.
  */
-export interface SigninNow { where: CheckWhere; writable: boolean; managed: HarnessId[]; rows: SigninRow[]; listensOn: (tool: HarnessId, name: string) => number | undefined }
+export interface SigninNow { where: CheckWhere; writable: boolean; managed: HarnessId[]; rows: SigninRow[]; listensOn: (tool: HarnessId, name: string) => Promise<number | undefined> }
 /**
  * Why main starts nothing for `ask`, in the cell's words; none where it may start: the home open is the one asked for; it is this
  * computer's own, one it may write, and a cell of that tool offers Sign in on `platform` (mcpsignin.ts offersSignin); the tool is managed; and
@@ -174,8 +175,9 @@ async function runSignin(ask: SigninAsk, now: () => Promise<SigninNow>, limitMs:
   if (!binary) return { failed: 'missing' };
   const last = await now(), changed = signinRefusal(ask, last);
   if (changed) return { notStarted: changed };
-  const name = last.rows.find(row => row.id === ask.row)!.cells[ask.tool]!.name!, port = last.listensOn(ask.tool, name);
-  if (port !== undefined && await portAnswers(port, signal)) return { portInUse: port };
+  const name = last.rows.find(row => row.id === ask.row)!.cells[ask.tool]!.name!, port = await last.listensOn(ask.tool, name);
+  // Stop wins: pressed before the port is asked, or while it is, nothing is started and the press ends Stopped.
+  if (port !== undefined && !signal.aborted && await portAnswers(port, signal) && !signal.aborted) return { portInUse: port };
   const env = ask.tool === 'codex-cli' ? browserApart(pathBeside(binary)) : undefined;
   const result = signal.aborted ? undefined : await runIn(last.where, binary, signInArgs(ask.tool, name)!,
     { timeoutMs: limitMs, signal, graceMs: STOP_GRACE_MS, drainMs: DRAIN_MS, input: '', inOrder: true, env }, `sign-in in ${toolNames[ask.tool]}`, log);

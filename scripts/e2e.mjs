@@ -12675,7 +12675,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   await until(async () => listened().length === 2 && browserPids().length === 1, 'Codex’s sign-in, its helper and its browser');
   same('the cell says it waits on the browser, with Stop; another Sign in waits, Check doesn’t',
     [await codexCell(team), await a.run(`(button => [button.disabled, button.title])(document.querySelector(${JSON.stringify(await act('oauth'))}))`), await a.run(`document.querySelector('#signin-check-codex-cli').disabled`)],
-    [['Finish in your browser…', 'Stop', null, null], [true, 'Another sign-in is under way: finish or stop it first'], false]);
+    [['Finish in your browser…', 'Stop', null, null], [true, 'Another sign-in is waiting: finish or stop it first'], false]);
   same('Stop’s hover says what it does and when to press it', await a.run(`document.querySelector(${JSON.stringify(await act(team))}).title`), 'Ends the sign-in. Closed the browser’s tab before finishing? Stop, then Try again.');
   same('a double press runs Codex’s own sign-in once, its server’s name one argument after `--`, and Codex opens the browser itself',
     [readNow(logins).split('\n').filter(Boolean).map(line => JSON.parse(line)), started().slice(loginsFrom).map(([, tool, , entries, args]) => [tool, entries, args]), readNow(browserAsked).split('\n').filter(Boolean).length],
@@ -13339,20 +13339,33 @@ const probe = net.connect(port, '127.0.0.1').once('connect', () => { probe.destr
   await press('pi-cli', '--help', 'accept');
   await ended('pi-cli', '--help');
   same('a server named --help: one argument, and Pi’s help is not Signed in', [lines(logins).at(-1), await words('pi-cli', '--help')], [JSON.stringify(['pi', 'mcp', 'login', '--help', '--timeout', '180']), 'Sign-in didn’t finish']);
-  // Refused: Pi's own line behind the (?), Try again and Copy back; nothing of Pi's left.
+  /** A cell's (?) card opened at 860, the sidebar open: whether it lies clear of the cell's Try again, which it tells him to press; its words. */
+  const cardAt860 = async (tool, name) => {
+    const mark = `signin-why-${tool}-${await rowId(name)}`, isOpen = () => a.run(`!!document.getElementById(${JSON.stringify(`${mark}-card`)})?.matches(':popover-open')`);
+    await sizeTo(a, ...SMALLEST);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.run(`document.getElementById(${JSON.stringify(mark)}).scrollIntoView({ block: 'center' })`);
+    if (!(await isOpen())) await a.click(byId(mark));
+    const clear = await a.run(`(() => { const card = document.getElementById(${JSON.stringify(`${mark}-card`)}).getBoundingClientRect(), button = document.querySelector(${JSON.stringify(await id('act', tool, name))}).getBoundingClientRect();
+      return card.bottom <= button.top || card.top >= button.bottom || card.right <= button.left || card.left >= button.right; })()`);
+    return { clear, words: await a.text(byId(`${mark}-card`)), close: async () => { if (await isOpen()) await a.click(byId(mark)); await fullSize(a); } };
+  };
+  // Refused: Pi's own line behind the (?), its card clear of Try again; Try again and Copy back; nothing of Pi's left.
   await press('pi-cli', 'oauth', 'refuse');
   await ended('pi-cli', 'oauth');
-  const why = `signin-why-pi-cli-${await rowId('oauth')}`;
-  await a.click(byId(why));
-  same('refused: what Pi said behind the (?), Try again and Copy command, nothing of Pi’s left', [await cell('pi-cli', 'oauth'), await a.text(byId(`${why}-card`)), await leftOf('pi')],
-    [['Sign-in didn’t finish', 'Try again', 'Copy command', null], 'Sign-in to MCP server "oauth" failed: access_denied', []]);
-  await a.click(byId(why));
+  const piCard = await cardAt860('pi-cli', 'oauth');
+  if (shots) { await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); await wait(300); await a.shot('mcp-signin-pio-pi-why-860-light'); }
+  await piCard.close();
+  same('refused: what Pi said behind the (?), its card clear of Try again; Try again and Copy command; nothing of Pi’s left', [await cell('pi-cli', 'oauth'), piCard.words, piCard.clear, await leftOf('pi')],
+    [['Sign-in didn’t finish', 'Try again', 'Copy command', null], 'Sign-in to MCP server "oauth" failed: access_denied', true, []]);
   // Waiting: Stop alone, its hover as Codex's; Stop ends Pi and the helper it left; the browser lives on.
   await press('pi-cli', 'oauth', 'wait');
   await waiting('pi-cli', 'oauth');
   same('waiting: Finish in your browser… with Stop alone, whose hover says a closed tab is Stop, then Try again',
     [await cell('pi-cli', 'oauth'), await a.run(`document.querySelector(${JSON.stringify(await id('act', 'pi-cli', 'oauth'))}).title`)],
     [['Finish in your browser…', 'Stop', null], 'Ends the sign-in. Closed the browser’s tab before finishing? Stop, then Try again.']);
+  same('meanwhile every other Sign in is off and says why: another sign-in is waiting, finish or stop it', await a.run(`(button => [button.disabled, button.title, button.getAttribute('aria-description')])(document.querySelector(${JSON.stringify(await id('act', 'opencode-cli', 'oauth'))}))`),
+    [true, 'Another sign-in is waiting: finish or stop it first', 'Another sign-in is waiting: finish or stop it first']);
   await picture('waiting', SMALLEST, 'light', 'pi-cli', 'oauth');
   await picture('waiting', [1316, 819], 'dark', 'pi-cli', 'oauth');
   await a.click(await id('act', 'pi-cli', 'oauth'));
@@ -13368,10 +13381,11 @@ const probe = net.connect(port, '127.0.0.1').once('connect', () => { probe.destr
 
   // OpenCode signs in only where it says so; refused, it ends 0 and Done.
   await opening();
+  const openedFrom = lines(opened).length;
   await press('opencode-cli', team, 'accept');
   await until(async () => (await words('opencode-cli', team)).startsWith('Signed in'), 'OpenCode signed in');
   same('OpenCode’s own command, the name one argument; it opens the browser once; nothing of its left, its port free',
-    [lines(logins).at(-1), lines(opened).at(-1), await leftOf('opencode')], [JSON.stringify(['opencode', 'mcp', 'auth', team]), 'http://127.0.0.1:1/authorize?state=team\'s%20docs', []]);
+    [lines(logins).at(-1), lines(opened).slice(openedFrom), await leftOf('opencode')], [JSON.stringify(['opencode', 'mcp', 'auth', team]), ['http://127.0.0.1:1/authorize?state=team\'s%20docs'], []]);
   await press('opencode-cli', 'oauth', 'refuse');
   await ended('opencode-cli', 'oauth');
   same('OpenCode refused, though it ended 0: Sign-in didn’t finish, Try again and Copy; nothing of its left', [await cell('opencode-cli', 'oauth'), await leftOf('opencode')], [['Sign-in didn’t finish', 'Try again', 'Copy command', null], []]);
@@ -13381,13 +13395,12 @@ const probe = net.connect(port, '127.0.0.1').once('connect', () => { probe.destr
   const heldFrom = lines(logins).length;
   await press('opencode-cli', 'oauth', 'wait');
   await until(async () => (await words('opencode-cli', 'oauth')) === 'Port 19876 is in use', 'port 19876 in use');
-  const portWhy = `signin-why-opencode-cli-${await rowId('oauth')}`;
-  await a.click(byId(portWhy));
-  same('port 19876 in use: Try again first, then Copy; its (?) says whose port and what to do; OpenCode not started; the listener untouched',
-    [await cell('opencode-cli', 'oauth'), await a.text(byId(`${portWhy}-card`)), lines(logins).length - heldFrom, owner.exitCode === null && owner.signalCode === null, await portFree(19876)],
-    [['Port 19876 is in use', 'Try again', 'Copy command', null], 'OpenCode’s sign-in listens on this port. Close what holds it, then Try again.', 0, true, false]);
-  await picture('port-why', SMALLEST, 'light', 'opencode-cli', 'oauth', async () => { if (!(await a.run(`!!document.getElementById(${JSON.stringify(`${portWhy}-card`)})?.matches(':popover-open')`))) await a.click(byId(portWhy)); });
-  if (await a.run(`!!document.getElementById(${JSON.stringify(`${portWhy}-card`)})?.matches(':popover-open')`)) await a.click(byId(portWhy));
+  const portCard = await cardAt860('opencode-cli', 'oauth');
+  if (shots) { await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); await wait(300); await a.shot('mcp-signin-pio-port-why-860-light'); }
+  await portCard.close();
+  same('port 19876 in use: Try again, nothing to copy; its (?) says whose port and what to do, clear of Try again; OpenCode not started; the listener untouched',
+    [await cell('opencode-cli', 'oauth'), portCard.words, portCard.clear, lines(logins).length - heldFrom, owner.exitCode === null && owner.signalCode === null, await portFree(19876)],
+    [['Port 19876 is in use', 'Try again', null], 'OpenCode’s sign-in listens on this port. Close what holds it, then Try again.', true, 0, true, false]);
   // Failed cells side by side, six tools: Pi's refused, OpenCode's port.
   await press('pi-cli', 'oauth', 'refuse');
   await ended('pi-cli', 'oauth');

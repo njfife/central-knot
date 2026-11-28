@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
-import { answerFor, askedNow, callbackPort, cannotRun, cellKey, cellNow, cellSays, cellTools, checkLine, connectedCard, followView, grouped, lastSaid, ownTime, readAnswer, signInArgs, signInCommand,
+import { answerFor, askedNow, callbackPort, cannotRun, hasOwnPort, cellKey, cellNow, cellSays, cellTools, checkLine, connectedCard, followView, grouped, lastSaid, ownTime, readAnswer, signInArgs, signInCommand,
   signinEnd, signinKey, signinRows, signinStarted, offersSignin, signinsNeeded, type SigninCell, type SigninChecks, type SigninRow, type SigninRun } from '../src/mcpsignin.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { timeOrDay } from '../src/model.ts';
@@ -216,9 +216,6 @@ const needing = (rows: SigninRow[], signins: SigninRun[] = []): SigninChecks => 
 test('The command a Sign in runs and the one its Copy gives are one table’s: the arguments as given, the command with the name one shell word', () => {
   assert.deepEqual(signInArgs('codex-cli', 'team\'s docs'), ['mcp', 'login', '--', 'team\'s docs']);
   assert.equal(signInCommand('codex-cli', 'team\'s docs'), 'codex mcp login -- \'team\'\\\'\'s docs\'');
-  // Pi's run gives it the limit Central Knot keeps, after the name; its Copy stays the command he would type.
-  assert.deepEqual([signInArgs('pi-cli', 'team\'s docs'), signInCommand('pi-cli', 'team\'s docs')], [['mcp', 'login', 'team\'s docs', '--timeout', '180'], 'pi mcp login \'team\'\\\'\'s docs\'']);
-  assert.deepEqual(signInArgs('opencode-cli', 'team\'s docs'), ['mcp', 'auth', 'team\'s docs']);
   assert.equal(signInArgs('copilot-cli', 'github'), undefined);
 });
 
@@ -241,11 +238,24 @@ test('How a sign-in ended is its tool’s own words where its exit code alone do
   assert.deepEqual([signinEnd('codex-cli', 0, 'Successfully logged in\n'), signinEnd('codex-cli', 1, 'listen EADDRINUSE\n')], [{ signedIn: true }, { unfinished: 'listen EADDRINUSE' }]);
 });
 
-test('The port OpenCode’s sign-in listens on is the server’s own: its redirectUri’s, else its callbackPort, else 19876; no other tool has one', () => {
-  const port = (oauth?: unknown) => callbackPort('opencode-cli', oauth === undefined ? {} : { oauth });
+test('A sign-in’s reason never shows an address its tool printed: Pi’s last line its address, OpenCode’s error line holding one', () => {
+  // Pi ended after printing the address to sign in at, saying nothing more: no reason, so no (?).
+  assert.deepEqual(signinEnd('pi-cli', 1, 'Sign in to MCP server "team" in your browser:\nhttp://127.0.0.1:1/authorize?client_id=ck&state=s1\n'), { unfinished: '' });
+  // OpenCode's reason with the address in it: the words left when the address is taken off.
+  assert.deepEqual(signinEnd('opencode-cli', 0, '■  Authentication failed\n│\n■  Could not reach https://auth.example.com/token?code=abc: ECONNREFUSED\n│\n└  Done\n'), { unfinished: 'Could not reach: ECONNREFUSED' });
+});
+
+test('A sign-in that ended signed in reads Signed in, an EADDRINUSE in what it printed (in an address) notwithstanding; the port is read only from one that failed', () => {
+  const said = '◇  Authorize in your browser:\n│\n●  http://127.0.0.1:1/authorize?state=EADDRINUSE\n│\n◇  Authentication successful!\n│\n└  Done\n';
+  assert.deepEqual(signinEnd('opencode-cli', 0, said, 19876), { signedIn: true });
+  assert.deepEqual(signinEnd('opencode-cli', 0, '■  Authentication failed\n│\n■  listen EADDRINUSE: address already in use 127.0.0.1:19876\n│\n└  Done\n', 19876), { portInUse: 19876 });
+});
+
+test('The port OpenCode’s sign-in listens on is the server’s own: its redirectUri’s, else its callbackPort, else 19876; no other tool listens on one of its own', () => {
+  const port = (oauth?: unknown) => callbackPort(oauth === undefined ? {} : { oauth });
   assert.deepEqual([port(), port({ callbackPort: 19999 }), port({ redirectUri: 'http://127.0.0.1:8123/cb' }), port({ callbackPort: 19999, redirectUri: 'http://localhost:8124/cb' }),
-    port({ redirectUri: 'https://127.0.0.1/cb' }), port({ redirectUri: 'not an address' }), port(false), callbackPort('opencode-cli', undefined)], [19876, 19999, 8123, 8124, 443, 19876, 19876, 19876]);
-  assert.equal(callbackPort('pi-cli', { oauth: { callbackPort: 19999 } }), undefined);
+    port({ redirectUri: 'https://127.0.0.1/cb' }), port({ redirectUri: 'not an address' }), port(false), callbackPort(undefined)], [19876, 19999, 8123, 8124, 443, 19876, 19876, 19876]);
+  assert.deepEqual(harnessIds.filter(hasOwnPort), ['opencode-cli']);
 });
 
 test('Where a sign-in is needed the cell offers Sign in on this computer’s home: Codex off Windows, Pi and OpenCode on Linux alone; elsewhere, and in every other tool, Copy', () => {
@@ -253,10 +263,6 @@ test('Where a sign-in is needed the cell offers Sign in on this computer’s hom
   const offered = (here: boolean) => Object.fromEntries(harnessIds.map(tool => [tool, platforms.filter(platform => offersSignin(tool, here, platform))]));
   assert.deepEqual(offered(true), { 'claude-cli': [], 'copilot-cli': [], 'codex-cli': ['linux', 'darwin'], 'pi-cli': ['linux'], 'opencode-cli': ['linux'], 'antigravity-cli': [] });
   assert.deepEqual(Object.values(offered(false)).flat(), []);
-  // macOS and Windows keep Pi's and OpenCode's Copy, its command as before.
-  const pi = server('team'), piChecks: SigninChecks = { home: '/h', columns: { 'pi-cli': { at: '2026-11-27T10:00:00Z', answer: { servers: { team: { is: 'needs-sign-in' } } }, asked: [cellKey(pi, pi.cells['pi-cli']!)] } } };
-  assert.deepEqual(cellNow(piChecks, 'pi-cli', pi, offersSignin('pi-cli', true, 'darwin')), { words: 'Needs sign-in', tone: 'warning', command: 'pi mcp login team', heed: true, need: true });
-  assert.deepEqual(cellNow(piChecks, 'pi-cli', pi, offersSignin('pi-cli', true, 'linux')), { words: 'Needs sign-in', tone: 'warning', act: { label: 'Sign in', runs: 'pi mcp login team' }, heed: true, need: true });
   const oauth = server('oauth'), checks = needing([oauth]);
   assert.deepEqual(cellNow(checks, 'codex-cli', oauth, true), { words: 'Needs sign-in', tone: 'warning', act: { label: 'Sign in', runs: 'codex mcp login -- oauth' }, heed: true, need: true });
   assert.deepEqual(cellNow(checks, 'codex-cli', oauth, false), { words: 'Needs sign-in', tone: 'warning', command: 'codex mcp login -- oauth', heed: true, need: true });
@@ -284,12 +290,6 @@ test('A sign-in’s cell: Stop while it waits, Signed in with its time, and on a
   // Codex's copy gone from a row another tool still has, while its sign-in waits: the row's Codex cell keeps its Stop, needing none.
   const elsewhere = { ...oauth, cells: { 'claude-cli': { name: 'oauth', off: false } } };
   assert.deepEqual(cellNow(needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy }]), 'codex-cli', elsewhere, true), { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true, need: false });
-  // Pi's and OpenCode's waiting cell is Codex's: Stop alone. OpenCode's port in use says whose it is and what to do behind its (?).
-  const pi = server('oauth');
-  assert.deepEqual(cellNow({ home: '/h', columns: {}, signins: kept({ tool: 'pi-cli', row: 'oauth', copy: cellKey(pi, pi.cells['pi-cli']!) }) }, 'pi-cli', pi, true), { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true, need: true });
-  const openCode = cellNow({ home: '/h', columns: {}, signins: kept({ tool: 'opencode-cli', row: 'oauth', copy: cellKey(pi, pi.cells['opencode-cli']!), at, end: { portInUse: 19999 } }) }, 'opencode-cli', pi, true);
-  assert.deepEqual(openCode, { words: 'Port 19999 is in use', tone: 'warning', why: 'OpenCode’s sign-in listens on this port. Close what holds it, then Try again.', command: 'opencode mcp auth oauth',
-    act: { label: 'Try again', runs: 'opencode mcp auth oauth' }, heed: true, need: true });
   // A Check of the column begun after it ended says what Codex answers then; one begun before it ended doesn't.
   const checked = (began: string) => ({ ...needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy, at, end: { signedIn: true } }]), columns: { 'codex-cli': { ...needing([oauth]).columns['codex-cli']!, began } } });
   assert.deepEqual([cellNow(checked('2026-11-27T10:06:00Z'), 'codex-cli', oauth, true).words, cellNow(checked('2026-11-27T10:04:00Z'), 'codex-cli', oauth, true).words], ['Needs sign-in', `Signed in ${timeOrDay(at)}`]);
@@ -408,7 +408,7 @@ test('What a sign-in ended with is kept for its copy alone: dropped at a view wh
 test('Main starts a sign-in only for the home open, a managed tool it starts sign-ins for, and the very copy the page showed', () => {
   const oauth = server('oauth'), copy = cellKey(oauth, oauth.cells['codex-cli']!);
   const ask: SigninAsk = { home: '/h', tool: 'codex-cli', row: 'oauth', copy };
-  const now: SigninNow = { where: { home: '/h', actual: true, toolsHome: '/h', searchPath: '' }, writable: true, managed: ['codex-cli', 'pi-cli'], rows: [oauth], listensOn: () => undefined };
+  const now: SigninNow = { where: { home: '/h', actual: true, toolsHome: '/h', searchPath: '' }, writable: true, managed: ['codex-cli', 'pi-cli'], rows: [oauth], listensOn: async () => undefined };
   const where = (more: Partial<SigninNow['where']>) => ({ where: { ...now.where, ...more } });
   const cases: [string, Partial<SigninAsk>, Partial<SigninNow>, string, string | undefined][] = [
     ['the server as the page showed it', {}, {}, 'linux', undefined],
@@ -721,7 +721,7 @@ const closeBrowsers = async (sandbox: Awaited<ReturnType<typeof standIns>>) => {
   for (const pid of (await readFile(join(sandbox.base, 'browsers'), 'utf8').catch(() => '')).split('\n').filter(Boolean)) try { process.kill(Number(pid), 'SIGKILL'); } catch { /* already ended */ }
 };
 /** What main has now for `rows` (the home open, Codex managed) in the sandbox's home. */
-const nowIn = (sandbox: Awaited<ReturnType<typeof standIns>>, rows: SigninRow[]) => async (): Promise<SigninNow> => ({ where: sandbox.where(), writable: true, managed: ['codex-cli'], rows, listensOn: () => undefined });
+const nowIn = (sandbox: Awaited<ReturnType<typeof standIns>>, rows: SigninRow[]) => async (): Promise<SigninNow> => ({ where: sandbox.where(), writable: true, managed: ['codex-cli'], rows, listensOn: async () => undefined });
 const askFor = (sandbox: Awaited<ReturnType<typeof standIns>>, row: SigninRow): SigninAsk => ({ home: sandbox.home, tool: 'codex-cli', row: row.id, copy: cellKey(row, row.cells['codex-cli']!) });
 /** Whether something listens on `port` (on 127.0.0.1) still: a new listener there can't be opened. */
 const portTaken = (port: number) => new Promise<boolean>(done => { const probe = createServer().once('error', () => done(true)).listen(port, '127.0.0.1', () => probe.close(() => done(false))); });
@@ -827,6 +827,19 @@ test('No ending reaches the browser Codex opened: it lives on after Signed in, a
     } finally { await closeBrowsers(sandbox); await sandbox.done(); }
   }
   assert.deepEqual(lives, [[{ signedIn: true }, true], [{ failed: 'stopped' }, true], [{ failed: 'timeout' }, true]]);
+});
+
+test('Stop before OpenCode’s port has been asked wins: nothing is started and the press ends Stopped, though something answers on that port', { skip: noSignInHere || process.platform !== 'linux', timeout: 15_000 }, async () => {
+  const sandbox = await standIns(), held = createServer();
+  try {
+    await new Promise<void>(done => held.listen(0, '127.0.0.1', done));
+    const port = (held.address() as { port: number }).port, oauth = server('oauth');
+    await sandbox.put('opencode', 'echo "Authentication successful"', '');
+    const run = startSignin({ home: sandbox.home, tool: 'opencode-cli', row: oauth.id, copy: cellKey(oauth, oauth.cells['opencode-cli']!) },
+      async () => ({ where: sandbox.where(), writable: true, managed: ['opencode-cli'], rows: [oauth], listensOn: async () => port }));
+    stopSignin();
+    assert.deepEqual([await run, await sandbox.calledWith()], [{ failed: 'stopped' }, []]);
+  } finally { held.close(); await sandbox.done(); }
 });
 
 // Last in this file: Quit closes the door to new checks and sign-ins for the rest of the process, as it does for the app.
