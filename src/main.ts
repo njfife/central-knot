@@ -32,7 +32,7 @@ import { forgetRefusals, installedPlugins, pluginRecordFiles, recordReadable, sa
 import { readPluginRecord } from './pluginrecord.ts';
 import { wantedIn } from './library.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
-import { mcpFile } from './mcp.ts';
+import { mcpFile, readTool } from './mcp.ts';
 import { switchPath } from './skillswitch.ts';
 import { applyServers, restoreServer, serverEntry, serversView, serverVersion } from './servers.ts';
 import { storedEntry } from './serverstore.ts';
@@ -51,7 +51,7 @@ import { readKeptPeriod, readSessionPeriod } from './sessionday.ts';
 import { canonicalHome, createSessionKeeper } from './sessionkeep.ts';
 import { dayByDay, sessionRows } from './sessionrow.ts';
 import { checkSignin, startSignin, stopChecks, stopSignin } from './mcpsigninrun.ts';
-import { signinRows } from './mcpsignin.ts';
+import { callbackPort, hasOwnPort, signinRows } from './mcpsignin.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { parseHookRef, readHookSource } from './hooksource.ts';
@@ -1698,11 +1698,14 @@ app.whenReady().then(async () => {
   handleNow('mcp-signin:check', async (tool, home, names) => (current && home === current.home && isTool(tool)
     ? (await checkSignin({ home: current.home, actual: current.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, tool, strings(names) ?? [], Number(process.env.CK_SIGNIN_LIMIT_MS), log)) ?? null : null));
   // MCP sign-in started on a click (mcpsigninrun.ts startSignin), outside the queue, as it waits on the browser. What main has of
-  // the home now (signinNow) is the Library's own reading, no pass. CK_SIGNIN_START_LIMIT_MS: an end-to-end run's shorter limit.
+  // the home now (signinNow) is the Library's own reading, no pass; where the tool's sign-in listens on a port of its own, its
+  // server's entry is read from that tool's settings when asked, for the port (mcpsignin.ts hasOwnPort, callbackPort: OpenCode's
+  // alone). CK_SIGNIN_START_LIMIT_MS: an end-to-end run's shorter limit.
   const signinNow = async () => {
     const shared = context(), managed = await managedNow(shared, await readFor(handoff.id));
+    const listensOn = async (tool: HarnessId, name: string) => (hasOwnPort(tool) ? callbackPort((await readTool(shared, tool)).entries.find(entry => entry.name === name)?.extras) : undefined);
     return { where: { home: current!.home, actual: current!.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, writable: (await writeAccess(shared)).allowed,
-      managed, rows: signinRows(await profileHome(managed)) };
+      managed, rows: signinRows(await profileHome(managed)), listensOn };
   };
   handleNow('mcp-signin:start', async (tool, home, row, copy) => (current && isTool(tool) && typeof home === 'string' && typeof row === 'string' && typeof copy === 'string'
     ? startSignin({ tool, home, row, copy }, signinNow, Number(process.env.CK_SIGNIN_START_LIMIT_MS), log) : { notStarted: 'Changed since the page showed it' }));
