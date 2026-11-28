@@ -310,6 +310,13 @@ export function fitBars(): void {
       else if (!iconsOnly && 'tipShown' in button.dataset) { button.removeAttribute('title'); delete button.dataset.tipShown; }
     }
   }
+  // A harness's tab-and-switcher bar stacks the whole switcher onto row 2 rather than collapsing labels inside .fit-bar.
+  const harnessBar = document.querySelector<HTMLElement>('.harness-bar');
+  const tabList = harnessBar?.querySelector<HTMLElement>('.harness-tabs');
+  if (harnessBar && tabList && harnessBar.querySelector('.harness-switch') && harnessBar.clientWidth) {
+    harnessBar.classList.remove('harness-bar-stacked');
+    if (harnessBar.scrollWidth > harnessBar.clientWidth + 1 || tabList.scrollWidth > tabList.clientWidth + 1) harnessBar.classList.add('harness-bar-stacked');
+  }
 }
 
 /**
