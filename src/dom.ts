@@ -493,7 +493,7 @@ if (typeof document !== 'undefined') {
  *   New native `title` attributes only name an icon, a mark, a "—", a label cut short, or a command's hint (older disabled
  *   reasons in whyOff/lockAttrs and checkbox's help still use `title`).
  */
-export function infoMark(id: string, label: string, text: string): HTMLElement {
+export function infoMark(id: string, label: string, text: Child | Child[]): HTMLElement {
   const enter = hoverInfo(id, true), leave = hoverInfo(id, false);
   const mark = h('button.info-mark', {
     type: 'button', id, 'aria-label': `About ${label}`, 'aria-describedby': infoCardId(id),

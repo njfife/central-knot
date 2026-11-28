@@ -6,13 +6,13 @@
 // mark only says what it has.
 import { acting, noteMove, noToolManaged, rerender, showPage, state as app } from './app.ts';
 import { noToolsState } from './pages.ts';
-import { button, closeButton, emptyState, h, icon, infoMark, rereadBand, whyOff, withToolCount } from './dom.ts';
+import { afterLayout, button, closeButton, emptyState, h, icon, infoMark, rereadBand, whyOff, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { pluginKey, resultParts, resultSentence, shortOf, undoTitle, type LastRun, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
-import { FIND_FROM, blocked, categoriesOf, copyStale, installedFrom, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
+import { FIND_FROM, NO_LONGER_OFFERED, blocked, categoriesOf, copyStale, installedFrom, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, pluginsResultPlace, runReloads, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { listResult, problemLines, profileSpan, reloadChips, reloadLines, wholeToggle } from './matrix.ts';
@@ -107,16 +107,24 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
   const behind = [others.length ? otherVersionsLine(others) : '', differing.length ? `${andList(differing)} ${differing.length > 1 ? 'differ' : 'differs'} from the marketplace’s copy` : ''].filter(Boolean).join(', ');
   const open = () => browse({ plugin: plugin.name });
   const library = libraryLink(entry, plugin, `plibrary-${marketIndex}-${plugin.name}`, 'row');
+  const gone = noLongerOffered(entry, plugin);
+  // The standing "No longer offered" sentence sits behind its mark's tooltip on the list rather than taking a row line.
+  const about = gone && plugin.description === NO_LONGER_OFFERED ? undefined : plugin.description;
   return h('div.ov-row.plugin-row', { role: 'row', 'data-plugin': plugin.name, onclick: open },
     h('div.ov-managed.plugin-row-switch', { role: 'cell' }, pluginSwitch(view, entry, plugin, `pswitch-${marketIndex}-${plugin.name}`)),
     h('div.ov-name.plugin-row-name', { role: 'cell' },
       h('button.plugin-row-open', { type: 'button', id: `popen-${marketIndex}-${plugin.name}`, 'aria-label': `Open ${pluginTitle(plugin)}`, onclick: (event: Event) => { event.stopPropagation(); open(); } },
         // The category pill is left out while that category is the filter: every row would say the same.
-        h('span.plugin-row-title', {}, pluginTitle(plugin)), offered ? h('span.plugin-row-version', { title: 'The version the marketplace offers' }, offered) : null,
-        noLongerOffered(entry, plugin) ? h('span.plugin-chip.plugin-chip-gone', {}, 'No longer offered') : null,
-        plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
-      // The description (wrapping up to two lines) and what it holds / Library link; while a click note stands in their place,
-      // the line stays hidden in the same grid cell so a click never changes the row's height and the rows below keep their places.
+        // Version and chips stay in one group so a category chip moves with its version rather than sitting alone.
+        h('span.plugin-row-title', {}, pluginTitle(plugin)),
+        offered || gone || (plugin.category && !market.nav.category)
+          ? h('span.plugin-row-tags', {},
+            offered ? h('span.plugin-row-version', { title: `The version the marketplace offers: ${offered}` }, offered) : null,
+            gone ? h('span.plugin-chip.plugin-chip-gone', { title: NO_LONGER_OFFERED }, 'No longer offered') : null,
+            plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null)
+          : null),
+      // The description (inline when 1–2 lines so counts sit beside its end, clamped to 2 lines when longer) and what it holds / Library link;
+      // while a click note stands in their place, the line stays hidden in the same grid cell so a click never changes the row's height.
       (() => {
         const meta = holds || left || library
           ? h('span.plugin-row-meta', {},
@@ -128,7 +136,7 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
           : null;
         const click = clickNote(entry, plugin.name, true);
         const line = h('span.plugin-row-line', click ? { 'aria-hidden': 'true', inert: true } : {},
-          plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
+          about ? h('span.plugin-row-about', { title: about }, about) : null,
           meta);
         return click ? h('span.plugin-row-slot', {}, line, click) : line;
       })(),
@@ -160,8 +168,18 @@ function filters(entry: MarketplaceView): HTMLElement | null {
   return parts.length ? h('div.market-filter', {}, parts) : null;
 }
 
-const everyToolInfo = (tools: HarnessId[]) =>
-  `On puts a plugin in every tool that takes it except those kept out; Off turns it off everywhere, kept installed where a tool can. Stripes: on, with at least one tool kept out or off. Open a row to choose tools one by one. Columns: ${tools.map(tool => names[tool]).join(', ')}.`;
+const EVERY_TOOL_CARD = 'On puts it in every tool that takes it. Off turns it off in every tool; nothing is uninstalled. A striped switch: on, with a tool off or kept out. Add brings an installed plugin under this switch. Open a row for one tool.';
+const columnsInfo = (tools: HarnessId[]) => `Columns: ${tools.map(tool => names[tool]).join(', ')}.`;
+
+/** Clamp descriptions over two lines while leaving 1–2 line descriptions inline so counts sit beside their last line. */
+afterLayout(() => {
+  for (const about of document.querySelectorAll<HTMLElement>('.plugin-table .plugin-row-about')) {
+    about.classList.remove('clamped');
+    const range = document.createRange();
+    range.selectNodeContents(about);
+    if (new Set([...range.getClientRects()].map(rect => Math.round(rect.top / 4))).size > 2) about.classList.add('clamped');
+  }
+});
 
 function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: number) {
   const shown = shownPlugins(entry);
@@ -175,13 +193,16 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
     ...pluginColumns.filter(tool => noCli.length < 2 || !noCli.includes(tool)).map(tool => blocked(view, entry, tool) ?? '')])].filter(Boolean);
   const someCan = view.canWrite && (pluginColumns.some(tool => !blocked(view, entry, tool)) || view.tools.length > pluginColumns.length);
   // Every tool (?) heads the switch and name columns when a switch can act; each tool column carries its mark over its short name
-  // (icon-only below 700 px of table, where the (?) card names the tools in column order).
+  // (icon-only where room is short for the tool count, hoverable and Tab-focusable for its full name, with columns in order in the card).
+  const colsText = columnsInfo(view.tools);
   const head = h('div.ov-row.ov-head', { role: 'row' },
     someCan
       ? h('div.ov-name.plugin-head-every', { role: 'columnheader', 'aria-colspan': '2', 'aria-label': 'Every tool', 'data-info-block': true },
-        'Every tool', infoMark('plugin-switch-info', 'Every tool', everyToolInfo(view.tools)))
-      : [h('div.ov-managed', { role: 'columnheader', 'aria-label': 'On or off' }), h('div.ov-name', { role: 'columnheader' }, 'Plugin')],
-    view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader', title: names[tool], 'aria-label': names[tool] },
+        'Every tool', infoMark('plugin-switch-info', 'Every tool', [EVERY_TOOL_CARD, h('span.plugin-icons-only-note', {}, ` ${colsText}`)]))
+      : [h('div.ov-managed', { role: 'columnheader', 'aria-label': 'On or off' }),
+        h('div.ov-name', { role: 'columnheader', 'aria-label': 'Plugin', 'data-info-block': true },
+          'Plugin', h('span.plugin-columns-only-icons', {}, infoMark('plugin-columns-info', 'Tool columns', colsText)))],
+    view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader', tabindex: '0', title: names[tool], 'aria-label': names[tool], 'data-tool-name': names[tool] },
       brandMark(tool, 16), h('span.plugin-tool-short', { 'aria-hidden': 'true' }, shortNames[tool]))),
     h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   // With more than one plugin behind, one button runs every update in this marketplace at once, those the filter hides too.
