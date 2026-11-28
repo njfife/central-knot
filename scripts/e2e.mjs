@@ -1168,11 +1168,11 @@ async function harnessFlow() {
     const OFF_CARD = 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so.';
     const rowTags = (kind, key) => h.all(`.ov-row[data-key="${rowPart('', kind, key)}"] .row-tag`);
 
-    // Routine tags hidden under Found and Off; non-routine tags kept (shortened under Off, warning tone on can't be taken in, dot before description); Find restores full tags under Results; Off heading omits generic elsewhere note.
-    same('Found and Off drop routine tags while keeping can’t be taken in, copies differ, and shortened switched off in a tool; Off heading has no generic elsewhere note',
+    // Routine tags hidden under Found and Off; non-routine tags kept (shortened under Off, warning tone on can't be added, dot before description); Find restores full tags under Results; Off heading stays quiet without a live note.
+    same('Found and Off drop routine tags while keeping can’t be added, copies differ, and shortened switched off in a tool; Off heading has no live note',
       [await rowTags('skills', 'found-only'), await rowTags('skills', 'bad-found'), await rowTags('skills', 'clash'),
         await rowTags('skills', 'off-a'), await rowTags('skills', 'off-switched'), await headingSays(h, 'off')],
-      [[], ['can’t be taken in'], ['copies differ'], [], ['switched off in Codex'], 'Off3']);
+      [[], ['can’t be added'], ['copies differ'], [], ['switched off in Codex'], 'Off3']);
     const tagVisuals = await h.run(`(() => {
       const dot = key => { const el = document.querySelector('.ov-row[data-key="' + key + '"] .ov-name-about'); return el ? getComputedStyle(el, '::before').content : null; };
       const bad = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'bad-found')}"] .row-tag');
@@ -1188,7 +1188,7 @@ async function harnessFlow() {
         offStrong: !!offColor && offColor === getComputedStyle(offName).color && offColor !== getComputedStyle(offAbout).color && offColor !== getComputedStyle(differs).color,
       };
     })()`);
-    same('kept tags (copies differ too) separate from descriptions with ·, plain rows have no ·, neutral tags take stronger text tone, and can’t be taken in shares copies differ’s warning tone',
+    same('kept tags (copies differ too) separate from descriptions with ·, plain rows have no ·, neutral tags take stronger text tone, and can’t be added shares copies differ’s warning tone',
       tagVisuals, { clashDot: '"·"', offDot: '"·"', plainDot: 'none', badWarn: true, offStrong: true });
     const waitForEl = async sel => { for (let tries = 0; tries < 40 && !(await h.exists(sel)); tries++) await wait(100); };
     const findText = async typed => { await h.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`); await h.settle(); };
@@ -1245,29 +1245,29 @@ async function harnessFlow() {
       [await rowTags('skills', 'off-c'), await rowTags('skills', 'found-only')],
       [['still in Codex until sync runs'], ['not in Central Knot']]);
 
-    // Library Skills: 4 Off rows with 1 pending Codex removal, card closed; keyboard-focusable marks on Found, Only through a plugin and Off; stable heading heights.
-    same('Library Skills: no heading says Synchronize everything in Settings, On has no mark, and Off 4 shows 1 still in Codex until sync runs with card closed',
+    // Library Skills: 4 Off rows with 1 pending Codex removal (tagged on its row), Off heading stays quiet with card closed; keyboard-focusable marks on Found, Only through a plugin and Off; stable heading heights.
+    same('Library Skills: no heading says Synchronize everything in Settings, On has no mark, and Off 4 stays quiet with card closed',
       [(await h.all('.ov-section', 'e.textContent')).some(text => /Synchronize everything, in Settings/.test(text)),
         await h.exists('.ov-section[data-section="on"] .info-mark'),
         await h.run(`!document.getElementById('section-off-info-card')?.matches(':popover-open')`),
         await headingSays(h, 'found'),
         await headingSays(h, 'off')],
-      [false, false, true, 'Found4', 'Off4·1 still in Codex until sync runs']);
+      [false, false, true, 'Found4', 'Off4']);
     const onH = await heightOf('.ov-section[data-section="on"]');
     const foundNoLiveH = await heightOf('.ov-section[data-section="found"]');
     const pluginH = await heightOf('.ov-section-plugins');
-    const offWithLiveH = await heightOf('.ov-section[data-section="off"]');
-    same('heading heights match across On, Found without live line, Only through a plugin, and Off with a live line',
-      [foundNoLiveH, pluginH, offWithLiveH], [onH, onH, onH]);
+    const offH = await heightOf('.ov-section[data-section="off"]');
+    same('heading heights match across On, Found without live line, Only through a plugin, and Off',
+      [foundNoLiveH, pluginH, offH], [onH, onH, onH]);
     for (const [id, wantText] of [['section-found-info', FOUND_OFF_CARD], ['section-plugins-info', PLUGIN_CARD], ['section-off-info', OFF_CARD]]) {
       same(`Library: ${id} opens its card by keyboard and closes on Escape`, await keyboardCard(id),
         { focused: id, opened: true, cardText: wantText, closed: true, keptFocus: id });
     }
-    // Pin a changed Off row: count drops to 3, misleading live note hides while height stays unchanged.
+    // Pin a changed Off row: count drops to 3 while heading height and card stay unchanged.
     await h.click(`#${rowPart('switch', 'skills', 'off-a')}`);
-    same('Library: pinning a row turned On under Off drops the count to 3, hides the live line, and keeps heading height',
+    same('Library: pinning a row turned On under Off drops the count to 3 and keeps heading height and card',
       [await headingSays(h, 'off'), await heightOf('.ov-section[data-section="off"]'), await h.text('#section-off-info-card')],
-      ['Off3', offWithLiveH, OFF_CARD]);
+      ['Off3', offH, OFF_CARD]);
     await h.click(`#${rowPart('switch', 'skills', 'off-a')}`);
     await h.click('#header-refresh');
 
@@ -1286,9 +1286,9 @@ async function harnessFlow() {
           { focused: id, opened: true, cardText: wantText, closed: true, keptFocus: id });
       }
       if (tab === 'skills') {
-        same('Claude Code’s Skills tab: Off 4 shows 1 still in Codex until sync runs with card closed',
+        same('Claude Code’s Skills tab: Off 4 stays quiet with card closed',
           [await headingSays(h, 'off'), await h.run(`!document.getElementById('section-off-info-card')?.matches(':popover-open')`)],
-          ['Off4·1 still in Codex until sync runs', true]);
+          ['Off4', true]);
       }
       if (tab === 'agents') {
         const beforeH = await heightOf('.ov-section[data-section="found"]');
@@ -1577,13 +1577,47 @@ async function harnessFlow() {
       await wait(80);
     }
 
-    // Library still shows all 6 tool marks and open key with no toolbar disclosure.
+    // Library keeps all 6 tool marks and folds What the marks mean at the list foot (shut at first, no empty band, 24px target, fits at 860 when open, forgotten on re-entry).
+    await sizeTo(t, ...SMALLEST);
     await openKind(t, 'skills');
-    same('Library still shows all 6 tool marks per row and an open legend', [
-      await t.run(`document.querySelectorAll('.ov-row[data-key="${rowPart('', 'skills', 'skill-01')}"] .tool-mark').length`),
-      await t.exists('#mark-legend'),
-      await t.exists('.legend .legend-item'),
-    ], [6, false, true]);
+    const libShut = await t.run(`(() => {
+      const foot = document.querySelector('.legend-foot'), d = document.getElementById('mark-legend'), s = document.getElementById('mark-legend-toggle');
+      const rows = document.querySelectorAll('.ov-row[data-key]');
+      const last = rows[rows.length - 1]?.getBoundingClientRect(), sr = s?.getBoundingClientRect(), fr = foot?.getBoundingClientRect();
+      return {
+        marks: document.querySelectorAll('.ov-row[data-key="${rowPart('', 'skills', 'skill-01')}"] .tool-mark').length,
+        inFoot: !!foot && !!d && foot.contains(d) && !d.closest('.toolbar'),
+        open: !!d?.open,
+        label: s?.textContent?.trim() ?? null,
+        tall: !!sr && sr.height >= 24,
+        body: !!document.getElementById('mark-legend-body'),
+        items: document.querySelectorAll('.legend-item').length,
+        noEmptyBand: !!last && !!sr && !!fr && (sr.top - last.bottom) <= 12 && fr.height <= 48 && !foot.querySelector('.legend-band, .legend'),
+      };
+    })()`);
+    same('Library keeps all 6 tool marks and starts with What the marks mean shut at the list foot with no empty band',
+      libShut, { marks: 6, inFoot: true, open: false, label: 'What the marks mean', tall: true, body: false, items: 0, noEmptyBand: true });
+    await t.run(`document.getElementById('mark-legend-toggle')?.scrollIntoView({ block: 'end' })`);
+    await t.click('#mark-legend-toggle');
+    await t.run(`document.getElementById('mark-legend-body')?.scrollIntoView({ block: 'end' })`);
+    const libOpen = await t.run(`(() => {
+      const scroller = document.querySelector('.scroll.matrix'), foot = document.querySelector('.legend-foot');
+      const d = document.getElementById('mark-legend'), body = document.getElementById('mark-legend-body');
+      const sr = scroller?.getBoundingClientRect();
+      const items = [...(body?.querySelectorAll('.legend-item') ?? [])];
+      return {
+        open: !!d?.open,
+        inFoot: !!foot && !!body && foot.contains(body),
+        ungrouped: items.length >= 3 && !items.some(el => el.textContent.includes(' / ')),
+        fits860: !!scroller && !!foot && !!sr && scroller.scrollWidth <= scroller.clientWidth + 1 && foot.scrollWidth <= foot.clientWidth + 1 && items.every(el => el.getBoundingClientRect().right <= sr.right + 1),
+      };
+    })()`);
+    same('pressing What the marks mean on Library opens ungrouped key entries at the foot with nothing cut off at 860',
+      libOpen, { open: true, inFoot: true, ungrouped: true, fits860: true });
+    await t.click('#nav-overview');
+    await t.click('#nav-library');
+    same('re-entering Library forgets open What the marks mean state',
+      [await t.run(`!!document.getElementById('mark-legend')?.open`), await t.exists('#mark-legend-body')], [false, false]);
     same('no page errors, tool page fit', t.pageErrors, []);
   } finally {
     await t.quit();
@@ -7532,8 +7566,11 @@ async function openCodeFlow() {
   await p.click('#outcome-undo');
   check('Undo turns it back on', await switchOn(p, 'skills', 'oc-only') && readNow(join(practice, '.claude/skills/oc-only/SKILL.md')) === text('oc-only'), await p.text('.bands'));
   await p.click(`#${rowPart('switch', 'skills', 'oc-only')}`); await p.click('#header-refresh');
-  same('read again while Off, it is under Off, whose heading says OpenCode has a copy of its own', [(await sectionsNow(p, 'skills')).at(-1)?.[1].includes('oc-only'), (await p.text('.ov-section[data-section="off"] .ov-section-after'))?.replace(/^·\s*/, '')],
-    [true, '1 own copy in OpenCode']);
+  same('read again while Off, it is under Off, its row tag says OpenCode has another copy, and the Off heading stays quiet',
+    [(await sectionsNow(p, 'skills')).at(-1)?.[1].includes('oc-only'),
+      await p.text(`.ov-row[data-key="${rowPart('', 'skills', 'oc-only')}"] .row-tag`),
+      await p.exists('.ov-section[data-section="off"] .ov-section-after')],
+    [true, 'another copy in OpenCode', false]);
   await p.click(`#${rowPart('switch', 'skills', 'oc-only')}`);
   // Taken in, notes goes to every tool but OpenCode, which reads Claude Code's copy: OpenCode's line says so, with no switch
   // of Central Knot's (nothing of it goes there), and its settings are untouched.

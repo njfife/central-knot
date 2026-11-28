@@ -487,7 +487,7 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   const place = placeOf(item);
   if (place === 'found') {
     const differ = asksWhichCopy(row) ? ', with different copies' : '';
-    if (!canAdd(row)) return 'Not in Central Knot · it can’t be taken in now (see below).';
+    if (!canAdd(row)) return 'Not in Central Knot · it can’t be added now (see below).';
     const below = where('cannot').length ? ' (see below)' : '';
     const rule = everything && row.takeInAnswers ? ` ${ruleSays(row.takeInAnswers.rule)}` : '';
     return `Not in Central Knot · ${foundWhere(row, item, tools)}${differ}. Add it to keep it in Central Knot${whereAdded(row, item, tools)}${below}.${rule}`;
@@ -566,7 +566,7 @@ const keptOutLoading = ({ own, another }: { own: readonly string[]; another: rea
 
 /**
  * What Synchronize everything does with a found item, as its row says it while the rule is on (the take-in table's answer for
- * the rule; library.ts takeInAnswer). Nothing where its row already says it can't be taken in, nor for a copy still being
+ * the rule; library.ts takeInAnswer). Nothing where its row already says it can't be added, nor for a copy still being
  * saved, which the page never sees (its look has no settle clock).
  */
 export function ruleSays(answer: TakeInAnswer): string {
@@ -699,7 +699,7 @@ export function sentences(words: RowWords) {
     if (place === 'off') return { text: (underOff ? offExtra(row, item, tools, true) : undefined) ?? offPlace(row, item, tools, leftOut), title: unseen.length ? unseen.map(tool => row.unseen![tool]).join(' ')
       : owed ? `Off. Central Knot keeps this ${noun}; its ${copy} leaves ${owed} when sync runs.` : `Central Knot keeps this ${noun} and its versions. ${otherReadLines(row, tools).join(' ') || none}` };
     const found = `A tool has this ${noun}; Central Knot doesn’t yet. Add it to keep it in Central Knot${whereAdded(row, item, tools)}.`;
-    if (place === 'found' && !canAdd(row)) return { text: 'can’t be taken in', title: 'Its line in the opened row says why.', warn: true };
+    if (place === 'found' && !canAdd(row)) return { text: 'can’t be added', title: 'Its line in the opened row says why.', warn: true };
     if (place === 'found') return { text: 'not in Central Knot', title: found };
     const out = item!.except.filter(tool => tools.includes(tool)), keptOut = `Kept out of ${andList(out.map(toolName))}. Its switch there, in the opened row, puts it back.`;
     // A tool that can't take it and has no copy is as lasting as one it is kept out of: the tag names where it is.

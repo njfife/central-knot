@@ -46,7 +46,7 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, fo
 import type { IconName } from './icons.ts';
 import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rankIn, rowId, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type RowUsage, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inHarnessDoes, switchDrawn, TOOL_STATE_WORDS, toolSwitch, type SwitchDrawn, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, showsPlaceTag, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inHarnessDoes, switchDrawn, TOOL_STATE_WORDS, toolSwitch, type SwitchDrawn, inLibrary, loadingIn, madeFrom, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, showsPlaceTag, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
@@ -447,7 +447,7 @@ const newView = () => ({
   whereOpen: undefined as boolean | undefined,
   /** Whether the unused band's "What’s counted" disclosure is open. */
   unusedCounted: false,
-  /** Whether the tool tab's "Mark key" disclosure is open. */
+  /** Whether the "What the marks mean" disclosure is open. */
   legendOpen: false,
   /** The order a way in asked for (openKind `order`: the Overview's Most used), shown on the visit it is first drawn on (`visit`); Sort's kept choice stays as it was. */
   askedOrder: undefined as { order: RowOrder; visit?: number } | undefined,
@@ -1388,7 +1388,7 @@ function forgetOtherHomes(t: Table, name: keyof typeof views) {
   if (now === was) return;
   tableHomes[name] = now;
   // A view's first table has no other home's to forget (a link may have opened its row before it was drawn).
-  if (was !== undefined) Object.assign(t.view, { comparing: undefined, openFile: undefined, confirmDelete: undefined, from: 'anywhere', unusedCounted: false });
+  if (was !== undefined) Object.assign(t.view, { comparing: undefined, openFile: undefined, confirmDelete: undefined, from: 'anywhere', unusedCounted: false, legendOpen: false });
 }
 
 // ---------- See change: what an edit did, before Undo ----------
@@ -1708,8 +1708,11 @@ function takenInNotice(t: Table, notice: TakenInNotice & Pick<Told, 'of' | 'once
  * shows no chip and gives the Library's back as it was. Asking again for the table on screen changes nothing.
  */
 function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, files = false): Table {
-  // An armed Delete belongs to the visit it was clicked on: another page disarms it.
-  if (state.visit !== tablesVisit) { for (const each of Object.values(views)) each.confirmDelete = undefined; tablesVisit = state.visit; }
+  // An armed Delete and the open key belong to the visit they were clicked on: another page clears them.
+  if (state.visit !== tablesVisit) {
+    for (const each of Object.values(views)) Object.assign(each, { confirmDelete: undefined, legendOpen: false });
+    tablesVisit = state.visit;
+  }
   const asked = views[name].askedOrder;
   if (asked && (asked.visit ??= state.visit) !== state.visit) views[name].askedOrder = undefined;
   const t: Table = { kinds, tool: harness, view: views[name] };
@@ -1754,7 +1757,7 @@ let drawnSegment: PageKind | 'all' | undefined;
 function useLibrary(): Table {
   const view = views.library, shown = segment(), moved = drawnSegment !== undefined && drawnSegment !== shown;
   drawnSegment = shown;
-  if (moved) view.confirmDelete = undefined;
+  if (moved) Object.assign(view, { confirmDelete: undefined, legendOpen: false });
   return tableOf('library', segmentKinds());
 }
 /** A tool's tab of one kind under Harnesses: that kind alone, with that tool first, in the kind's own view. */
@@ -2500,7 +2503,7 @@ function rowMarks(t: Table, skill: ItemRow, size = 14, table = true) {
 const inColumns = (t: Table, holds: Tool[], draw: (tool: Tool) => HTMLElement) =>
   t.tool ? holds.map(draw) : columns(t).map(tool => (holds.includes(tool) ? draw(tool) : h('span.tool-mark.mark-blank', { 'aria-hidden': 'true' })));
 
-/** The key: under the Library table, or toggled from the tool tab's toolbar ("What the marks mean") grouping keyWords by visual look. */
+/** The key, behind "What the marks mean": at the Library's foot, or in a tool tab's toolbar (grouped by visual look). */
 function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
   if (!columns(t).length) return null;
   const seen = new Map<keyof typeof keyWords, { look: MarkLook; glyph?: IconName }>();
@@ -2513,9 +2516,9 @@ function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
     : entries.map(item => ({ ...item, label: keyWords[item.key] }));
   const keyed = h('div.legend', { 'aria-label': 'Key' }, shown.map(item => h('span.legend-item', {}, toolMark(item.look, t.tool, item.glyph, 12), item.label)));
   if (!keyed.childElementCount) return null;
-  if (!t.tool) return { foot: keyed };
   const toggle = fold({ id: 'mark-legend', toggleId: 'mark-legend-toggle', label: 'What the marks mean', open: t.view.legendOpen, controls: 'mark-legend-body', onToggle: open => { t.view.legendOpen = open; rerender(); } });
-  return { toggle, body: t.view.legendOpen ? h('div.legend-band', { id: 'mark-legend-body' }, keyed) : undefined };
+  const body = t.view.legendOpen ? h('div.legend-band', { id: 'mark-legend-body' }, keyed) : undefined;
+  return t.tool ? { toggle, body } : { foot: h('div.legend-foot', {}, toggle, body ?? null) };
 }
 
 /** One row: its switch (in Select's mode, its tick), its name, a mark per tool, and the chevron that opens its details. */
@@ -2937,7 +2940,7 @@ function section(t: Table, role: Role, rows: ItemRow[], truly: ItemRow[]) {
   const about = own ? matching : rows;
   const card = role === 'found' ? foundCard() : role === 'off' ? offCard() : '';
   const mark = card ? infoMark(`section-${role}-info`, label, card) : null;
-  const note = role === 'found' ? foundNote(about) : role === 'off' ? offNote(t, about) : '';
+  const note = role === 'found' ? foundNote(about) : '';
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`,
       { role: 'row', 'data-section': role, ...(mark ? { 'data-info-block': true } : {}) },
@@ -2987,25 +2990,6 @@ function foundNote(list: ItemRow[]): string {
   if (!state.home?.sync.syncEverything) return '';
   const choosing = list.filter(skill => skill.takeInAnswers && 'wait' in skill.takeInAnswers.rule).length;
   return choosing ? `${choosing} ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy` : '';
-}
-
-/**
- * The Off heading's live line, in order: tools that still have some on through a plugin; removals waiting until sync runs;
- * copies Central Knot didn't place; or a single Off row's other-reader/switched-off sentence (with several rows, each row's tag says so).
- */
-function offNote(t: Table, list: ItemRow[]): string {
-  const through = columns(t).filter(tool => list.some(skill => skill.pluginOn?.includes(tool)));
-  if (through.length) return `some on in ${andList(through.map(tool => names[tool]))} through a plugin`;
-  const owed = list.filter(skill => skill.plan?.remove.length);
-  const still = [...new Set(owed.flatMap(skill => skill.plan!.remove))];
-  if (owed.length) return `${owed.length} still in ${andList(still.map(tool => names[tool]))} until sync runs`;
-  const ownTools = list.flatMap(skill => ownCopies(skill, itemOf(skill), toolsFor(t, skill.kind)));
-  const where = [...new Set(ownTools)];
-  if (ownTools.length) return `${plural(ownTools.length, 'own copy', 'own copies')} in ${andList(where.map(tool => names[tool]))}`;
-  // A single Off row names the tools still reading it or holding it switched off; with several rows, each row's own tag says so.
-  const ways = list.flatMap(row => [...otherReadLines(row, toolsFor(t, row.kind)), ...switchedOffWords(row, toolsFor(t, row.kind))]);
-  if (ways.length && list.length === 1) return ways.join(' ');
-  return '';
 }
 
 /** An opened row's head line of what its switch or Add would end ("If on, Everyday stops being …"); none while its own click is out (clicklist.ts wantedOn). */

@@ -1,4 +1,4 @@
-// Library Used cell words by Sort (matrix.ts usedCellWords), reload step rendering (reloadLines, reloadChips), row-hiding rules (matrix.ts tableOf), tool-tab single mark, Mark key disclosure, section jump and docked description priority.
+// Library Used cell words by Sort (matrix.ts usedCellWords), reload step rendering (reloadLines, reloadChips), row-hiding rules (matrix.ts tableOf), tool-tab single mark, What the marks mean disclosure, section jump and docked description priority.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { dayWords, DAY_MS } from '../src/model.ts';
@@ -344,7 +344,7 @@ test('tool tab section jump lists all drawn section names without counts, sets d
   assert.equal(findAll(singleTree, el => el.className.split(/\s+/).includes('section-jump')).length, 0);
 });
 
-test('Library and its Files view keep all tool marks, open legend, and no section jump', () => {
+test('Library and its Files view keep all tool marks, fold What the marks mean at the foot (one entry per key, forgotten on way in), and have no section jump', () => {
   installFiveToolFixture();
   openKind('skills');
   const libTree = libraryTable() as unknown as FakeNode;
@@ -352,8 +352,29 @@ test('Library and its Files view keep all tool marks, open legend, and no sectio
   const libPlugin = findAll(libTree, el => el.className.split(/\s+/).includes('ov-plugin-row'))[0]!;
   assert.equal(findAll(libAlpha, el => el.className.split(/\s+/).includes('tool-mark')).length, 5);
   assert.equal(findAll(libPlugin, el => el.className.split(/\s+/).includes('tool-mark')).length, 5);
-  assert.equal(findById(libTree, 'mark-legend'), undefined);
-  assert.ok(findAll(libTree, el => el.className.split(/\s+/).includes('legend-item')).map(el => textOf(el)).includes('Has it another way, not from Central Knot'));
+  const foot = findAll(libTree, el => el.className.split(/\s+/).includes('legend-foot'))[0];
+  const toolbar = findAll(libTree, el => el.className.split(/\s+/).includes('toolbar'))[0]!;
+  assert.equal(findById(toolbar, 'mark-legend'), undefined, 'Library does not place What the marks mean in the toolbar');
+  const legendFold = findById(foot, 'mark-legend');
+  assert.ok(legendFold && legendFold.tag === 'details', 'Library places What the marks mean at the list foot');
+  assert.equal('open' in legendFold.attrs, false, 'Library What the marks mean starts closed');
+  const toggleEl = findById(legendFold, 'mark-legend-toggle')!;
+  assert.equal(textOf(toggleEl), 'What the marks mean');
+  assert.equal(toggleEl.attrs['aria-controls'], 'mark-legend-body');
+  assert.equal(findById(libTree, 'mark-legend-body'), undefined, 'Library legend body stays absent while closed');
+  assert.equal(findAll(libTree, el => el.className.split(/\s+/).includes('legend-item')).length, 0);
+
+  (legendFold as unknown as { ontoggle: (e: { currentTarget: { open: boolean } }) => void }).ontoggle({ currentTarget: { open: true } });
+  const openTree = libraryTable() as unknown as FakeNode;
+  const body = findById(findAll(openTree, el => el.className.split(/\s+/).includes('legend-foot'))[0], 'mark-legend-body');
+  assert.ok(body, 'opening Library What the marks mean draws #mark-legend-body at the list foot');
+  const items = findAll(body, el => el.className.split(/\s+/).includes('legend-item')).map(el => textOf(el));
+  assert.ok(items.includes('Has it another way, not from Central Knot'));
+  assert.equal(items.some(label => label.includes(' / ')), false, 'Library keeps one entry per key rather than grouping by visual look');
+
+  // Re-entering via another visit or openKind forgets the open state.
+  app.visit += 1;
+  assert.equal(findById(libraryTable() as unknown as FakeNode, 'mark-legend-body'), undefined);
   assert.equal(findAll(libTree, el => el.className.split(/\s+/).includes('section-jump')).length, 0);
 
   const filesTree = skillsBrowser(() => ({ where: [], contents: [] }), () => {}) as unknown as FakeNode;
