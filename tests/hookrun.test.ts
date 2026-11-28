@@ -11,12 +11,12 @@ import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { findHook, readHookSource } from '../src/hooksource.ts';
+import { findHook, parseHookRef, readHookSource } from '../src/hooksource.ts';
 import { hookTimeoutSec, runHook, stopHookRun, stopHookRuns, whatHookWouldAdd, type HookRunContext } from '../src/hookrun.ts';
 import { pickStartSource } from '../src/pluginoutcomes.ts';
 import { readPluginItems, sessionSettings } from '../src/pluginitems.ts';
 import { run } from '../src/plugins.ts';
-import { HOOK_RUN_COPILOT_PLUGIN, sessionStrip } from '../src/sessionhooks.ts';
+import { hookFingerprint, hookRunWords, sessionStrip } from '../src/sessionhooks.ts';
 import type { HarnessId, HookSourceRef } from '../src/types.ts';
 import { standIn } from './standin.ts';
 import { slashPath } from './wincompat.ts';
@@ -71,6 +71,10 @@ async function sandbox(installed: ('claude' | 'codex' | 'copilot')[] = ['claude'
     COPILOT_PLUGIN_ROOT: '/stale/copilot-root',
     COPILOT_PLUGIN_DATA: '/stale/copilot-data',
     COPILOT_SESSION_ID: 'stale-copilot-session',
+    COPILOT_PROJECT_DIR: '/stale/copilot-project',
+    COPILOT_HOOK_DIR: '/stale/copilot-hook-dir',
+    COPILOT_HOOK_DEPTH: '9',
+    COPILOT_CLI: '0',
     CK_TEST_HOME_ONLY: 'claude,codex,copilot',
   };
   const ctx = (extra: Partial<HookRunContext> = {}): HookRunContext => ({
@@ -158,6 +162,7 @@ process.stdout.write('Prompt context\\n');
       'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_SESSION_ID',
       'CLAUDE_PLUGIN_ROOT', 'CLAUDE_PLUGIN_DATA', 'CLAUDE_PLUGIN_OPTION_API',
       'PLUGIN_ROOT', 'PLUGIN_DATA', 'CODEX_THREAD_ID', 'COPILOT_PLUGIN_ROOT', 'COPILOT_PLUGIN_DATA', 'COPILOT_SESSION_ID',
+      'COPILOT_PROJECT_DIR', 'COPILOT_HOOK_DIR', 'COPILOT_HOOK_DEPTH', 'COPILOT_CLI',
     ]) assert.equal(captured.env[forbidden], undefined, `${forbidden} must be scrubbed`);
 
     // Direct argv with ${CLAUDE_PROJECT_DIR} substitution + UserPromptSubmit input & no CLAUDE_ENV_FILE.
@@ -568,13 +573,11 @@ test('Gates and refusals: wrong home mode, Windows, uninstalled tool, plugin hoo
     const winRes = await runHook(box.ctx({ platform: 'win32' }), ref);
     assert.equal(winRes.outcome, 'refused');
     assert.match(winRes.problem ?? '', /Windows/);
-    // Unmatched installed plugin ref, Copilot CLI installed plugin ref, and marketplace ref are refused.
+    // Unmatched installed plugin refs (Claude Code, Copilot CLI) and marketplace ref are refused.
     const pluginRef: HookSourceRef = { from: 'installed', tool: 'claude-cli', plugin: 'p', marketName: 'm', declaredIn: '/x', event: 'SessionStart', at: 0, command: 'echo x', fingerprint: 'fp' };
     assert.equal((await runHook(box.ctx(), pluginRef)).outcome, 'refused');
     const copilotPluginRef: HookSourceRef = { from: 'installed', tool: 'copilot-cli', plugin: 'p', marketName: 'm', declaredIn: '/x', event: 'sessionStart', at: 0, command: 'echo x', fingerprint: 'fp' };
-    const copilotPluginRes = await runHook(box.ctx(), copilotPluginRef);
-    assert.equal(copilotPluginRes.outcome, 'refused');
-    assert.equal(copilotPluginRes.problem, HOOK_RUN_COPILOT_PLUGIN);
+    assert.equal((await runHook(box.ctx(), copilotPluginRef)).outcome, 'refused');
     const marketRef: HookSourceRef = { from: 'marketplace', plugin: 'p', marketName: 'm', declaredIn: '/x', event: 'SessionStart', at: 0, command: 'echo x', fingerprint: 'fp' };
     const marketRes = await runHook(box.ctx(), marketRef);
     assert.equal(marketRes.outcome, 'refused');
@@ -1266,6 +1269,200 @@ test('Own Claude Code shell hook substitutes ${CLAUDE_PROJECT_DIR} as text; Code
       DEF_NUM: '0',
       DEF_STR: '',
     });
+  } finally { await box.done(); }
+});
+
+test('Installed Copilot CLI plugin hook: folders, env vars, command vs cwd/env placeholders, inline hook, off refusal, and no-marketplace refusal', { skip: unixSkip, timeout: 15_000 }, async () => {
+  const box = await sandbox(['copilot']);
+  try {
+    const installPath = join(box.home, '.copilot/installed-plugins/e6.market/dot.plug');
+    const expectedData = join(box.home, '.copilot/plugin-data/e6.market/dot.plug');
+    const subX = join(installPath, 'x');
+    const marker = join(box.base, 'copilot-plugin.marker');
+    const stdinFile = join(box.base, 'copilot-plugin-stdin.json');
+    await mkdir(subX, { recursive: true });
+    await put(join(installPath, 'hooks/hello.sh'), `#!/bin/sh
+cat > ${JSON.stringify(stdinFile)}
+echo ran >> ${JSON.stringify(marker)}
+exec ${JSON.stringify(process.execPath)} -e '
+const fs = require("node:fs");
+const payload = {
+  root: process.env.COPILOT_PLUGIN_ROOT,
+  pluginRoot: process.env.PLUGIN_ROOT,
+  claudeRoot: process.env.CLAUDE_PLUGIN_ROOT,
+  data: process.env.COPILOT_PLUGIN_DATA,
+  claudeData: process.env.CLAUDE_PLUGIN_DATA,
+  project: process.env.COPILOT_PROJECT_DIR,
+  claudeProject: process.env.CLAUDE_PROJECT_DIR,
+  hookDir: process.env.COPILOT_HOOK_DIR ?? null,
+  depth: process.env.COPILOT_HOOK_DEPTH,
+  cli: process.env.COPILOT_CLI,
+  pwd: fs.realpathSync(process.cwd()),
+  hasPluginData: Object.hasOwn(process.env, "PLUGIN_DATA"),
+  args: process.argv.slice(1),
+  envRoot: process.env.FROM_ROOT,
+  envData: process.env.FROM_DATA,
+  envLitUser: process.env.LIT_USER,
+  envLitHookDir: process.env.LIT_HOOK_DIR,
+  envLitMissing: process.env.LIT_MISSING,
+};
+process.stdout.write(JSON.stringify({ additionalContext: JSON.stringify(payload) }) + "\\n");
+' "$@"
+`, 0o755);
+    await put(join(installPath, 'hooks/hooks.json'), JSON.stringify({
+      version: 1,
+      hooks: {
+        sessionStart: [
+          { type: 'command', bash: '${PLUGIN_ROOT}/hooks/hello.sh' },
+          { type: 'command', bash: '${PLUGIN_ROOT}/hooks/hello.sh', cwd: '.' },
+          {
+            type: 'command',
+            bash: "'${PLUGIN_ROOT}/hooks/hello.sh' '${COPILOT_PLUGIN_ROOT}' '${CLAUDE_PLUGIN_ROOT}' '${COPILOT_PLUGIN_DATA}' '${CLAUDE_PLUGIN_DATA}' '${COPILOT_PROJECT_DIR}' '${CLAUDE_PROJECT_DIR}' '${PLUGIN_DATA}' '${COPILOT_HOOK_DIR}'",
+            cwd: '${COPILOT_PLUGIN_ROOT}/x',
+            env: {
+              FROM_ROOT: '${COPILOT_PLUGIN_ROOT}/r',
+              FROM_DATA: '${COPILOT_PLUGIN_DATA}/d',
+              LIT_USER: '${USER_CUSTOM}',
+              LIT_HOOK_DIR: '${COPILOT_HOOK_DIR}',
+              LIT_MISSING: '${NO_SUCH_VAR_XYZ}',
+            },
+          },
+          {
+            type: 'command',
+            exec: '${PLUGIN_ROOT}/hooks/hello.sh',
+            args: ['${COPILOT_PLUGIN_ROOT}', '${CLAUDE_PLUGIN_ROOT}', '${COPILOT_PLUGIN_DATA}', '${CLAUDE_PLUGIN_DATA}', '${COPILOT_PROJECT_DIR}', '${CLAUDE_PROJECT_DIR}', '${PLUGIN_DATA}'],
+            cwd: '${COPILOT_PLUGIN_DATA}',
+          },
+        ],
+      },
+    }));
+    await put(join(box.home, '.copilot/config.json'), JSON.stringify({
+      installedPlugins: [{ name: 'dot.plug', marketplace: 'e6.market', version: '1.2.0', cache_path: installPath, enabled: true }],
+    }));
+
+    const runCtx = box.ctx({ searchPath: '/usr/bin:/bin', env: { ...box.baseEnv, PATH: '/usr/bin:/bin' } });
+    const items = await readPluginItems({ home: box.home, dataDir: box.data, binaries: {} }, ['copilot-cli']);
+    const refs = sessionStrip('copilot-cli', items, {})!.groups[0]!.hooks.map(h => h.source);
+    await assert.rejects(stat(expectedData), { code: 'ENOENT' }, 'data folder absent before first run');
+
+    // Worked example 1: no cwd -> plugin root; data dir created verbatim; all 10 env vars; PLUGIN_DATA unset; stdin cwd is home.
+    const r1 = await runHook(runCtx, refs[0]!);
+    assert.equal(r1.outcome, 'adds');
+    assert.equal(r1.pluginVersion, '1.2.0');
+    assert.equal(r1.cwd, installPath);
+    assert.equal((await stat(expectedData)).isDirectory(), true, 'Copilot CLI data folder created before run');
+    const p1 = JSON.parse(r1.added!);
+    assert.deepEqual(
+      [p1.root, p1.pluginRoot, p1.claudeRoot, p1.data, p1.claudeData, p1.project, p1.claudeProject, p1.hookDir, p1.depth, p1.cli, p1.pwd, p1.hasPluginData],
+      [installPath, installPath, installPath, expectedData, expectedData, box.home, box.home, join(installPath, 'hooks'), '1', '1', installPath, false],
+    );
+    const stdin1 = JSON.parse(await readFile(stdinFile, 'utf8'));
+    assert.equal(stdin1.cwd, box.home);
+
+    // Worked example 2a: cwd "." starts in home.
+    const r2a = await runHook(runCtx, refs[1]!);
+    assert.equal(r2a.outcome, 'adds');
+    assert.equal(r2a.cwd, box.home);
+    assert.equal(JSON.parse(r2a.added!).pwd, box.home);
+
+    // Worked example 2b: single-quoted ${COPILOT_PLUGIN_ROOT} left as written in bash, replaced in cwd and env; 6 replaced in command; other ${VAR} in env left literal.
+    const r2b = await runHook(runCtx, refs[2]!);
+    assert.equal(r2b.outcome, 'adds');
+    assert.equal(r2b.cwd, subX);
+    const p2b = JSON.parse(r2b.added!);
+    assert.equal(p2b.pwd, subX);
+    assert.deepEqual(p2b.args, [
+      '${COPILOT_PLUGIN_ROOT}', installPath, expectedData, expectedData, box.home, box.home, '${PLUGIN_DATA}', '${COPILOT_HOOK_DIR}',
+    ]);
+    assert.equal(p2b.envRoot, `${installPath}/r`);
+    assert.equal(p2b.envData, `${expectedData}/d`);
+    assert.equal(p2b.envLitUser, '${USER_CUSTOM}');
+    assert.equal(p2b.envLitHookDir, '${COPILOT_HOOK_DIR}');
+    assert.equal(p2b.envLitMissing, '${NO_SUCH_VAR_XYZ}');
+
+    // Exec + args form: 6 placeholders expanded, ${COPILOT_PLUGIN_ROOT} and ${PLUGIN_DATA} literal; cwd "${COPILOT_PLUGIN_DATA}" works on fresh data dir.
+    await rm(expectedData, { recursive: true, force: true });
+    const r2c = await runHook(runCtx, refs[3]!);
+    assert.equal(r2c.outcome, 'adds');
+    assert.equal(r2c.cwd, expectedData);
+    const p2c = JSON.parse(r2c.added!);
+    assert.equal(p2c.pwd, expectedData);
+    assert.deepEqual(p2c.args, [
+      '${COPILOT_PLUGIN_ROOT}', installPath, expectedData, expectedData, box.home, box.home, '${PLUGIN_DATA}',
+    ]);
+
+    // Inline hook in plugin.json: COPILOT_HOOK_DIR is absent (scrubbed from inherited env).
+    const inlineInstall = join(box.home, '.copilot/installed-plugins/e6.market/inline.plug');
+    await put(join(inlineInstall, 'plugin.json'), JSON.stringify({
+      name: 'inline.plug',
+      version: '1.0.0',
+      hooks: {
+        sessionStart: [{ type: 'command', exec: '${PLUGIN_ROOT}/run.sh', args: [] }],
+      },
+    }));
+    await put(join(inlineInstall, 'run.sh'), `#!/bin/sh\n${JSON.stringify(process.execPath)} -e 'process.stdout.write(JSON.stringify({ additionalContext: JSON.stringify({ hasHookDir: Object.hasOwn(process.env, "COPILOT_HOOK_DIR"), root: process.env.COPILOT_PLUGIN_ROOT }) }))'\n`, 0o755);
+    await put(join(box.home, '.copilot/config.json'), JSON.stringify({
+      installedPlugins: [
+        { name: 'dot.plug', marketplace: 'e6.market', version: '1.2.0', cache_path: installPath, enabled: true },
+        { name: 'inline.plug', marketplace: 'e6.market', version: '1.0.0', cache_path: inlineInstall, enabled: true },
+      ],
+    }));
+    const inlineItems = await readPluginItems({ home: box.home, dataDir: box.data, binaries: {} }, ['copilot-cli']);
+    const inlineRef = sessionStrip('copilot-cli', inlineItems, {})!.groups.find(g => g.name === 'inline.plug')!.hooks[0]!.source;
+    const inlineRes = await runHook(runCtx, inlineRef);
+    assert.equal(inlineRes.outcome, 'adds');
+    assert.deepEqual(JSON.parse(inlineRes.added!), { hasHookDir: false, root: inlineInstall });
+
+    // Data folder creation failure refuses cleanly.
+    const blockedInstall = join(box.home, '.copilot/installed-plugins/e6.market/blocked.plug');
+    const blockedData = join(box.home, '.copilot/plugin-data/e6.market/blocked.plug');
+    await put(join(blockedInstall, 'hooks/hooks.json'), JSON.stringify({
+      version: 1, hooks: { sessionStart: [{ type: 'command', bash: 'echo nope' }] },
+    }));
+    await put(blockedData, 'not-a-dir');
+    await put(join(box.home, '.copilot/config.json'), JSON.stringify({
+      installedPlugins: [
+        { name: 'dot.plug', marketplace: 'e6.market', version: '1.2.0', cache_path: installPath, enabled: true },
+        { name: 'blocked.plug', marketplace: 'e6.market', version: '1.0.0', cache_path: blockedInstall, enabled: true },
+      ],
+    }));
+    const blockedItems = await readPluginItems({ home: box.home, dataDir: box.data, binaries: {} }, ['copilot-cli']);
+    const blockedRef = sessionStrip('copilot-cli', blockedItems, {})!.groups.find(g => g.name === 'blocked.plug')!.hooks[0]!.source;
+    const blockedRes = await runHook(runCtx, blockedRef);
+    assert.equal(blockedRes.outcome, 'refused');
+    assert.equal(blockedRes.problem, 'Couldn’t create the plugin’s data folder.');
+
+    // Worked example 3: plugin turned off after page read -> refused in existing words, no marker, no data folder made, View source still works.
+    const pluginDataRoot = join(box.home, '.copilot/plugin-data');
+    await rm(pluginDataRoot, { recursive: true, force: true });
+    await assert.rejects(stat(expectedData), { code: 'ENOENT' });
+    const markerBeforeOff = (await readFile(marker, 'utf8')).trim().split('\n').length;
+    await put(join(box.home, '.copilot/config.json'), JSON.stringify({
+      installedPlugins: [{ name: 'dot.plug', marketplace: 'e6.market', version: '1.2.0', cache_path: installPath, enabled: false }],
+    }));
+    assert.equal((await readHookSource({ home: box.home, mode: 'actual', dataDir: box.data }, refs[0]!)).problem, undefined);
+    const offRes = await runHook(runCtx, refs[0]!);
+    assert.equal(offRes.outcome, 'refused');
+    assert.equal(offRes.problem, 'dot.plug is turned off in Copilot CLI.');
+    assert.equal((await readFile(marker, 'utf8')).trim().split('\n').length, markerBeforeOff);
+    await assert.rejects(stat(expectedData), { code: 'ENOENT' }, 'data folder not created when plugin is off');
+    await assert.rejects(stat(pluginDataRoot), { code: 'ENOENT' }, 'plugin-data root not created when plugin is off');
+
+    // Worked example 4: runHook guard alone — a Copilot CLI plugin ref with no marketplace name is refused before anything is made.
+    const directHooks = join(box.home, '.copilot/installed-plugins/_direct/direct-plug/hooks/hooks.json');
+    const directHook = { declaredIn: directHooks, event: 'sessionStart', at: 0, launch: { shell: '${PLUGIN_ROOT}/hooks/direct.sh' } };
+    const directRef: HookSourceRef = {
+      from: 'installed', tool: 'copilot-cli', plugin: 'direct-plug', marketName: '',
+      declaredIn: directHooks, event: 'sessionStart', at: 0, command: '${PLUGIN_ROOT}/hooks/direct.sh',
+      fingerprint: hookFingerprint(directHook),
+    };
+    assert.equal(parseHookRef(directRef), undefined, 'parseHookRef rejects empty marketName for Copilot CLI too');
+    const directRes = await runHook(runCtx, directRef);
+    assert.equal(directRes.outcome, 'refused');
+    assert.equal(directRes.problem, 'Central Knot can’t work out where Copilot CLI keeps this plugin’s data.');
+    assert.equal(hookRunWords('copilot-cli', directRes, '~').sentence, 'Not run: Central Knot can’t work out where Copilot CLI keeps this plugin’s data.');
+    await assert.rejects(stat(join(pluginDataRoot, 'direct-plug')), { code: 'ENOENT' }, 'no data folder made for empty marketplace refusal');
+    await assert.rejects(stat(pluginDataRoot), { code: 'ENOENT' }, 'plugin-data root not created for empty marketplace refusal');
   } finally { await box.done(); }
 });
 

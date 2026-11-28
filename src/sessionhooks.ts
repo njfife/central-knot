@@ -1,6 +1,6 @@
 // A hook as the pages show it (hookLine, hookFingerprint, textHookRows, on a plugin's page and the Instructions page alike), the strip on
 // each tool's card on the Instructions page ("Hooks that can add text", Pi's packages, OpenCode's plugins; its standing warning
-// HOOK_RUN_WARN / hookRunWarn, info-card text hookStripHelp / hookStripCard, and refusals HOOK_RUN_ACTUAL_ONLY / HOOK_RUN_COPILOT_PLUGIN),
+// HOOK_RUN_WARN / hookRunWarn, info-card text hookStripHelp / hookStripCard, and refusal HOOK_RUN_ACTUAL_ONLY),
 // and what a hook run's result says in words (hookRunWords), drawn by instructionspage.ts sessionStripView, pluginpage.ts sessionHookStrip and hooksourceview.ts. Pure: nothing here reads a file or runs a hook. Its facts:
 // - each plugin installed whole in the tool and On there, with its hooks as its installed copy declares them (HomeView
 //   pluginItems, read by pluginitems.ts readPluginItems);
@@ -97,11 +97,10 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
     : { heading: 'Hooks that can add text', groups, ...(note ? { note } : {}) };
 }
 
-/** One source for main's hookrun.ts refusals and hooksourceview.ts stripCantRunReason when hooks can't be run here. */
+/** One source for main's hookrun.ts refusal and hooksourceview.ts stripCantRunReason outside this computer's home. */
 export const HOOK_RUN_ACTUAL_ONLY = 'See what it adds works only on this computer’s home.';
 /** Chosen-folder (?) card wording (quotes the button name; main's refusal stays unquoted in HOOK_RUN_ACTUAL_ONLY). */
 export const HOOK_RUN_ACTUAL_CARD = '“See what it adds” works only on this computer’s home.';
-export const HOOK_RUN_COPILOT_PLUGIN = 'Central Knot can’t run a Copilot CLI plugin’s hook, but View source shows its script.';
 const KEPT_HOOK_OUTCOMES = new Set<HookRunOutcome>(['adds', 'empty', 'copilot-ignored', 'claude-exit-2', 'failed', 'timeout', 'missing', 'not-added']);
 /** Whether a hook run's outcome is kept for later visits (stopped, refused and unknown outcomes are never kept). */
 export const isKeptHookOutcome = (outcome: unknown): outcome is HookRunOutcome =>

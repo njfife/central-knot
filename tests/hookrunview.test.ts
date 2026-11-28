@@ -13,7 +13,7 @@ import { runHook, stopHookRun, type HookRunContext } from '../src/hookrun.ts';
 import { readHookSource } from '../src/hooksource.ts';
 import { sessionSettings } from '../src/pluginitems.ts';
 import { sessionTextCardNote } from '../src/pluginoutcomes.ts';
-import { HOOK_RUN_ACTUAL_CARD, HOOK_RUN_ACTUAL_ONLY, HOOK_RUN_COPILOT_PLUGIN, HOOK_RUN_WARN, hookFingerprint, hookRunWarn, hookRunWords, hookStripCard, hookStripHelp, sessionStrip } from '../src/sessionhooks.ts';
+import { HOOK_RUN_ACTUAL_CARD, HOOK_RUN_ACTUAL_ONLY, HOOK_RUN_WARN, hookFingerprint, hookRunWarn, hookRunWords, hookStripCard, hookStripHelp, sessionStrip } from '../src/sessionhooks.ts';
 import type { HookRunResult, HookSourceRef } from '../src/types.ts';
 import { standIn } from './standin.ts';
 
@@ -227,10 +227,10 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
     outcome: 'refused', problem: 'ReleaseHelper is turned off in Claude Code.',
   }), '~', time);
   assert.equal(refusedPluginOff.sentence, 'Not run: ReleaseHelper is turned off in Claude Code.');
-  const refusedCopilotPlugin = hookRunWords('copilot-cli', baseResult({
-    outcome: 'refused', problem: HOOK_RUN_COPILOT_PLUGIN,
+  const refusedCopilotDirect = hookRunWords('copilot-cli', baseResult({
+    outcome: 'refused', problem: 'Central Knot can’t work out where Copilot CLI keeps this plugin’s data.',
   }), '~', time);
-  assert.equal(refusedCopilotPlugin.sentence, `Not run: ${HOOK_RUN_COPILOT_PLUGIN}`);
+  assert.equal(refusedCopilotDirect.sentence, 'Not run: Central Knot can’t work out where Copilot CLI keeps this plugin’s data.');
   const refusedActualOnly = hookRunWords('claude-cli', baseResult({
     outcome: 'refused', problem: HOOK_RUN_ACTUAL_ONLY,
   }), '~', time);
@@ -284,8 +284,9 @@ test('Check 3: standing warning (See what it adds, plain sentences), help card (
   checkCard(hookStripCard('codex-cli', { note: codexNote }, { first: true, anyRunnable: false, cantRun: HOOK_RUN_ACTUAL_ONLY }), `${HOOK_RUN_ACTUAL_ONLY} ${codexNote}`);
   checkCard(hookStripCard('copilot-cli', { note: copPromptNote }, { first: false, anyRunnable: true }), copPromptNote);
   checkCard(hookStripCard('copilot-cli', { note: copPromptNote }, { first: true, anyRunnable: false }), `${copPromptNote} ${hookStripHelp('copilot-cli', false)}`);
-  checkCard(hookStripCard('copilot-cli', { note: copRowsNote }, { first: false, anyRunnable: true, cantRun: HOOK_RUN_COPILOT_PLUGIN }), `${HOOK_RUN_COPILOT_PLUGIN} ${copRowsNote}`);
-  checkCard(hookStripCard('copilot-cli', { note: copRowsNote }, { first: true, anyRunnable: true, cantRun: HOOK_RUN_COPILOT_PLUGIN }), `${HOOK_RUN_COPILOT_PLUGIN} ${copRowsNote}`);
+  checkCard(hookStripCard('copilot-cli', { note: copRowsNote }, { first: false, anyRunnable: true }), copRowsNote);
+  checkCard(hookStripCard('copilot-cli', { note: copRowsNote }, { first: true, anyRunnable: true }), `${copRowsNote} ${hookStripHelp('copilot-cli', false)}`);
+  checkCard(hookStripCard('copilot-cli', { note: copRowsNote }, { first: false, anyRunnable: false, cantRun: HOOK_RUN_ACTUAL_ONLY }), `${HOOK_RUN_ACTUAL_ONLY} ${copRowsNote}`);
   checkCard(hookStripCard('claude-cli', {}, { first: true, anyRunnable: true }), hookStripHelp('claude-cli', true));
   checkCard(hookStripCard('claude-cli', {}, { first: true, anyRunnable: false, cantRun: HOOK_RUN_ACTUAL_ONLY }), `${HOOK_RUN_ACTUAL_ONLY} ${hookStripHelp('claude-cli', false)}`);
   checkCard(hookStripCard('claude-cli', {}, { first: true, anyRunnable: false }), hookStripHelp('claude-cli', false));
@@ -572,7 +573,10 @@ test('Checks 4, 5, 6, 7, 8: eligibility, hashed ids, double click & held Enter g
   assert.equal(viewMod.canRun(pluginRef, 'actual', 'win32'), false);
   assert.equal(viewMod.canRun(pluginRef, 'custom', 'linux'), false);
   assert.equal(viewMod.canRun(codexPluginRef, 'actual', 'linux'), true);
-  assert.equal(viewMod.canRun(copilotPluginRef, 'actual', 'linux'), false);
+  assert.equal(viewMod.canRun(copilotPluginRef, 'actual', 'linux'), true);
+  assert.equal(viewMod.canRun(copilotPluginRef, 'actual', 'darwin'), true);
+  assert.equal(viewMod.canRun(copilotPluginRef, 'actual', 'win32'), false);
+  assert.equal(viewMod.canRun(copilotPluginRef, 'custom', 'linux'), false);
   assert.equal(viewMod.canRun(marketRef, 'actual', 'linux'), false);
 
   // Non-runnable row renders only View source and never Run it.
@@ -1000,7 +1004,7 @@ test('Short list 3: hookFingerprint sorts env keys by plain code-unit order (<),
   assert.ok(fpAB.indexOf('"B"') >= 0 && fpAB.indexOf('"B"') < fpAB.indexOf('"a"'), `expected B before a in ${fpAB}`);
 });
 
-test('Installed plugin hook row renders Run it for Claude Code (with missingOptions note) and Codex (with trust note), and omits Run it for Copilot CLI', async () => {
+test('Installed plugin hook row renders Run it for Claude Code (with missingOptions note), Codex (with trust note), and Copilot CLI', async () => {
   const dom = makeDom();
   let nextResult = baseResult({ outcome: 'adds', added: 'plugin text', allPrinted: 'plugin text', missingOptions: true });
   dom.handlers.hookRun = async () => nextResult;
@@ -1037,11 +1041,18 @@ test('Installed plugin hook row renders Run it for Claude Code (with missingOpti
   const codexPanelText = dom.textOf(dom.findAll(codexRow, n => n.className === 'hook-run')[0]);
   assert.match(codexPanelText, /Codex adds it only once trusted in \/hooks\./);
 
+  nextResult = baseResult({ outcome: 'adds', added: 'copilot plugin text', allPrinted: '{"additionalContext":"copilot plugin text"}', pluginVersion: '1.0.0' });
   const copilotRow = dom.makeNode('li');
   copilotRow.connected = true;
   copilotRow.append(...viewMod.hookSourceControls(copilotRef, 'hook-source-instructions-copilot-cli-1-0'));
-  assert.equal(dom.findAll(copilotRow, n => 'data-hook-run' in (n.attrs ?? {})).length, 0);
+  const copilotBtn = dom.findAll(copilotRow, n => 'data-hook-run' in (n.attrs ?? {}))[0];
+  assert.ok(copilotBtn);
   assert.equal(dom.findAll(copilotRow, n => 'data-hook-source' in (n.attrs ?? {})).length, 1);
+  copilotBtn.onclick({ detail: 1 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const copilotPanelText = dom.textOf(dom.findAll(copilotRow, n => n.className === 'hook-run')[0]);
+  assert.match(copilotPanelText, /^Would add as Copilot CLI, plugin 1\.0\.0, /);
+  assert.match(copilotPanelText, /copilot plugin text/);
 });
 
 test('canRun hides Run it without the CLI, for off plugins, and for non-text hooks, while allowing app-carried binaries', async () => {
@@ -1101,36 +1112,41 @@ test('hookCantRunReason only speaks when one known cause covers every text hook 
   const codexOn = { tool: 'codex-cli', plugin: 'helper', marketName: 'team', items: [], listed: true, hooks: [textHook] } as any;
   const codexOff = { ...codexOn, off: true };
   const copilotOn = { tool: 'copilot-cli', plugin: 'helper', marketName: 'team', items: [], listed: true, hooks: [{ ...textHook, event: 'sessionStart' }] } as any;
+  const copilotOff = { ...copilotOn, off: true };
+  const fpCop = hookFingerprint({ ...textHook, event: 'sessionStart' });
 
-  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home', snapshots: [snap('claude-cli', 'Installed'), snap('codex-cli', 'Installed')] } as any;
+  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home', snapshots: [snap('claude-cli', 'Installed'), snap('codex-cli', 'Installed'), snap('copilot-cli', 'Installed')] } as any;
   assert.equal(reason({ inAnyTool: false, installs: [], fingerprints: [fpA] }, 'actual', 'linux'), 'Not installed, so these can’t be run here.');
   assert.equal(reason({ inAnyTool: true, installs: [], fingerprints: [fpA] }, 'actual', 'linux'), undefined, 'installed in a tool like Pi never says Not installed');
   assert.equal(reason({ inAnyTool: true, installs: [claudeBroken], fingerprints: [fpA] }, 'actual', 'linux'), undefined, 'unreadable copy says nothing');
   assert.equal(reason({ inAnyTool: true, installs: [claudeOff], fingerprints: [fpA] }, 'actual', 'linux'), 'Off in Claude Code, so these can’t be run here.');
   assert.equal(reason({ inAnyTool: true, installs: [claudeOff, codexOff], fingerprints: [fpA] }, 'actual', 'linux'), 'Off in Claude Code and Codex, so these can’t be run here.');
+  assert.equal(reason({ inAnyTool: true, installs: [copilotOff], fingerprints: [fpCop] }, 'actual', 'linux'), 'Off in Copilot CLI, so these can’t be run here.');
   assert.equal(reason({ inAnyTool: true, installs: [claudeOffNoText], fingerprints: [fpA] }, 'actual', 'linux'), undefined, 'off copy with no text hooks says nothing');
   assert.equal(reason({ inAnyTool: true, installs: [claudeOff], fingerprints: [fpA, fpB] }, 'actual', 'linux'), undefined, 'marketplace-only text hook not covered by off copy says nothing');
-  assert.equal(reason({ inAnyTool: true, installs: [copilotOn], fingerprints: [fpA] }, 'actual', 'linux'), undefined, 'nothing for Copilot CLI');
+  assert.equal(reason({ inAnyTool: true, installs: [copilotOn], fingerprints: [fpCop] }, 'actual', 'linux'), undefined, 'on Copilot CLI with CLI installed returns undefined');
   assert.equal(reason('claude-cli', 'actual', 'linux'), undefined, 'installed CLI returns undefined');
+  assert.equal(reason('copilot-cli', 'actual', 'linux'), undefined, 'installed Copilot CLI returns undefined');
 
-  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home', snapshots: [snap('claude-cli', 'Installed'), snap('codex-cli', 'Config found but app not detected')] } as any;
+  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home', snapshots: [snap('claude-cli', 'Installed'), snap('codex-cli', 'Config found but app not detected'), snap('copilot-cli', 'Config found but app not detected')] } as any;
   assert.equal(reason({ inAnyTool: true, installs: [claudeOff, codexOn], fingerprints: [fpA] }, 'actual', 'linux'), undefined, 'mixed off in Claude + missing Codex CLI says nothing');
   assert.equal(reason({ inAnyTool: true, installs: [codexOn], fingerprints: [fpA] }, 'actual', 'linux'), 'Codex’s command line isn’t on this computer, so these can’t be run here.');
+  assert.equal(reason({ inAnyTool: true, installs: [copilotOn], fingerprints: [fpCop] }, 'actual', 'linux'), 'Copilot CLI’s command line isn’t on this computer, so these can’t be run here.');
   assert.equal(reason({ inAnyTool: true, installs: [codexOn], fingerprints: [fpA, fpB] }, 'actual', 'linux'), undefined, 'older Codex copy missing newer marketplace hook says nothing');
   assert.equal(reason('codex-cli', 'actual', 'linux'), 'Codex’s command line isn’t on this computer, so these can’t be run here.');
-  assert.equal(reason('copilot-cli', 'actual', 'linux'), undefined, 'nothing for Copilot CLI');
+  assert.equal(reason('copilot-cli', 'actual', 'linux'), 'Copilot CLI’s command line isn’t on this computer, so these can’t be run here.');
   assert.equal(reason({ inAnyTool: false, installs: [], fingerprints: [fpA] }, 'custom', 'linux'), undefined, 'nothing for another home');
   assert.equal(reason({ inAnyTool: false, installs: [], fingerprints: [fpA] }, 'fixture', 'linux'), undefined, 'nothing for Practice copy');
   assert.equal(reason({ inAnyTool: false, installs: [], fingerprints: [fpA] }, 'actual', 'win32'), undefined, 'nothing for Windows');
 
-  // stripCantRunReason shares hookGate with canRun (chosen folder and Copilot CLI plugin hooks on Mac/Linux).
+  // stripCantRunReason shares hookGate with canRun (chosen folder on Mac/Linux).
   const ownRef: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: '/p/s.json', event: 'SessionStart', at: 0, command: 'echo x', fingerprint: fpA };
-  const copPluginRef: HookSourceRef = { from: 'installed', tool: 'copilot-cli', plugin: 'helper', marketName: 'team', declaredIn: '/p/h.json', event: 'sessionStart', at: 0, command: 'echo x', fingerprint: fpA };
+  const copPluginRef: HookSourceRef = { from: 'installed', tool: 'copilot-cli', plugin: 'helper', marketName: 'team', declaredIn: '/p/h.json', event: 'sessionStart', at: 0, command: 'echo x', fingerprint: fpCop };
   assert.equal(viewMod.stripCantRunReason([ownRef], 'actual', 'linux'), undefined);
   assert.equal(viewMod.stripCantRunReason([ownRef], 'custom', 'linux'), HOOK_RUN_ACTUAL_CARD);
   assert.equal(viewMod.stripCantRunReason([ownRef], 'fixture', 'linux'), HOOK_RUN_ACTUAL_CARD);
-  assert.equal(viewMod.stripCantRunReason([copPluginRef], 'actual', 'linux'), HOOK_RUN_COPILOT_PLUGIN);
-  assert.equal(viewMod.stripCantRunReason([ownRef, copPluginRef], 'actual', 'linux'), HOOK_RUN_COPILOT_PLUGIN);
+  assert.equal(viewMod.stripCantRunReason([copPluginRef], 'actual', 'linux'), undefined);
+  assert.equal(viewMod.stripCantRunReason([ownRef, copPluginRef], 'actual', 'linux'), undefined);
   assert.equal(viewMod.stripCantRunReason([copPluginRef], 'custom', 'linux'), HOOK_RUN_ACTUAL_CARD);
   assert.equal(viewMod.stripCantRunReason([copPluginRef], 'actual', 'win32'), undefined);
   assert.equal(viewMod.stripCantRunReason([ownRef], 'custom', 'win32'), undefined);
@@ -1265,10 +1281,10 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
   assert.match(dom.textOf(offPage), /Off in Claude Code, so these can’t be run here\./);
   assert.doesNotMatch(dom.textOf(offPage), /known only when they run/);
 
-  // Copilot-only and non-actual home keep View source alone without the 3-case reason line.
+  // Copilot-only installed and on now offers See what it adds; non-actual home keeps View source alone without the 3-case reason line.
   const copEntry = makeEntry({ 'copilot-only': { 'copilot-cli': { state: 'installed', version: '1.0.0', path: '/c' } } }, 'copilot-only');
   const copPage = pluginPage(view, copEntry, 0, copEntry.plugins[0]);
-  assert.equal(dom.findAll(copPage, n => 'data-hook-run' in (n.attrs ?? {})).length, 0);
+  assert.equal(dom.findAll(copPage, n => 'data-hook-run' in (n.attrs ?? {})).length, 1);
   assert.doesNotMatch(dom.textOf(copPage), /so these can’t be run here/);
 
   state.home!.mode = 'custom';
@@ -1313,7 +1329,7 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
       [['session-hooks-info'], ['session-hooks-info-copilot-cli'], ['session-hooks-info-codex-cli']]);
     assert.equal(dom.findAll(copilot, n => n.className.includes('session-note')).length, 0);
     const copTip = dom.textOf(dom.findAll(copilot, n => n.id === 'session-hooks-info-copilot-cli-card')[0]);
-    assert.match(copTip, /^Central Knot can’t run a Copilot CLI plugin’s hook, but View source shows its script\. .*ignores what prompt hooks print\.$/);
+    assert.equal(copTip, sessionTextCardNote('copilot-cli', true));
     assert.doesNotMatch(dom.textOf(dom.findAll(claude, n => n.id === 'session-hooks-info-card')[0]), /this computer’s home/);
     assert.equal(dom.textOf(dom.findAll(codex, n => n.id === 'session-hooks-info-codex-cli-card')[0]), 'Codex runs a hook only after you trust it in its /hooks command.');
     assert.equal(dom.findAll(codex, n => n.className.includes('session-note')).length, 0);
