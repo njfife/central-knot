@@ -555,11 +555,11 @@ export interface ItemNotice {
 }
 
 /**
- * What Synchronize everything took into Central Knot in one pass of one kind (librarypass.ts takeInByRule): the items, by name,
- * and the tools they were found in. Each has its own History entry, with an Add's Undo; `history` is the first, which keys the notice.
+ * What Synchronize everything took into Central Knot in one pass of one kind (librarypass.ts takeInByRule): the items, by name
+ * and matching `keys`, and the tools they were found in. Each has its own History entry, with an Add's Undo; `history` is the first, which keys the notice.
  */
 export interface TakenInNotice {
-  kind: 'taken-in'; items: string[]; from: HarnessId[]; history: string;
+  kind: 'taken-in'; items: string[]; keys: string[]; from: HarnessId[]; history: string;
   /** Each taken-in item's own History entry id, matching `items` (`history` is the first, keying the notice). */ histories?: string[];
   /** As its items' History entries' (HistoryEvent settingsChanged). */ settingsChanged?: string[];
 }

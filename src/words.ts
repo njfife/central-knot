@@ -46,8 +46,11 @@ export const linesOf = (text: string) => text.replace(/\n$/, '').split('\n');
 /** How many lines a text has (0 for none). */
 export const lineCount = (text: string) => (text ? linesOf(text).length : 0);
 
+/** Joins items as a sentence does, with `word` before the last, keeping each item as its own part: [a], [a, " and ", b], [a, ", ", b, " and ", c]. */
+const joinedParts = <T>(items: readonly T[], word: 'and' | 'or'): (T | string)[] =>
+  items.flatMap((item, index) => (index === 0 ? [item] : [index === items.length - 1 ? ` ${word} ` : ', ', item]));
 /** Joins items as a sentence does, with `word` before the last: "a", "a and b", "a, b and c". */
-const joined = (items: string[], word: 'and' | 'or') => (items.length > 2 ? `${items.slice(0, -1).join(', ')} ${word} ${items.at(-1)}` : items.join(` ${word} `));
+const joined = (items: string[], word: 'and' | 'or') => joinedParts(items, word).join('');
 
 /** Names in a sentence, the first three and how many more ("notes, standup, idle and 37 more"); all of them when four or fewer. */
 export const fewNames = (items: string[]) => (items.length > 4 ? `${items.slice(0, 3).join(', ')} and ${items.length - 3} more` : andList(items));
@@ -76,8 +79,9 @@ export function keptOutWords(was: readonly HarnessId[], now: readonly HarnessId[
   return [out.length ? `${lead} ${named(out)}` : '', back.length ? `${out.length ? 'back' : 'Back'} in ${named(back)}` : ''].filter(Boolean).join('; ');
 }
 
-/** "a", "a and b", "a, b and c". */
+/** "a", "a and b", "a, b and c"; `andParts` keeps each item as its own part so a page can attach a control to each. */
 export const andList = (items: string[]) => joined(items, 'and');
+export const andParts = <T>(items: readonly T[]): (T | string)[] => joinedParts(items, 'and');
 /** Tools by name, as an and-list: "Claude Code, Copilot CLI and Codex". */
 export const toolList = (tools: HarnessId[]) => andList(tools.map(tool => toolNames[tool]));
 /** "<Tool> reads it" or "<Tool> and <Tool> read it", for a skill read from another tool's folder (libraryrow.ts, matrix.ts, historyactions.ts). */
