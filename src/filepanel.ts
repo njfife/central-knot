@@ -7,9 +7,9 @@
 // choice, its close, the text, the path), its box's height (settleFileBox) and whether a place's open file stays at a draw
 // (keepOpenFile, asked by matrix.ts tableOf and placePanel). Where a panel is drawn is its caller's, a FilePlace: a table
 // (matrix.ts Table: under a closed row, or in an open row's details' place, matrix.ts openedPart; Escape there is matrix.ts's),
-// or a page that names items (a PagePlace: the Overview's cards, History's rows), in three calls: pagePlace once, for its place
-// and its Escape; itemFile at each name, for the Library's mark there, at that name's occurrence where the page names an item
-// more than once (a name that may be of an item Central Knot deleted: `itemFile(…) ?? keptFile(…)`, its last version kept;
+// or a page that names items (a PagePlace: the Overview's cards, History's rows, Settings' added lines, Harnesses' Manage
+// question), in three calls: pagePlace once, for its place and its Escape; itemFile at each name, for the Library's mark there,
+// at that name's occurrence where the page names an item more than once (a name that may be of an item Central Knot deleted: `itemFile(…) ?? keptFile(…)`, its last version kept;
 // itemFile gives a deleted item nothing where the place opens no found rows); then placePanel with those marks, for the one
 // open and its panel, which the page puts under that name's row, marking the row .file-anchored (its tint on History;
 // settleFileBox measures from it). Two rows naming one item need an occurrenceId each: two names that would share a mark in one
@@ -31,11 +31,16 @@ import { andList, toolNames } from './words.ts';
 export interface OpenFile { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; blocks?: string[]; note?: string; parts?: VersionPart[]; holder?: string } | null }
 /**
  * Where a file panel is drawn: the file open there (`view.openFile`), the tool whose copy it offers first (`tool`: a tool's tab's),
- * whether its panels begin with the item's name and say which version it is (`named`: a page's, pagePlace; versionWords), what the place
- * does as a file opens for an item (`opening`) and once one newly opened is read (`reveal`). A table's say what a table does
- * (matrix.ts fileHooks). `markOf`: the id of the mark its open file was opened at, where it isn't the item's own (a page's).
+ * whether its panels begin with the item's name and say which version it is (`named`: a page's, pagePlace; versionWords),
+ * whether a held item's mark opens only the version Central Knot stores (`storedOnly`: Harnesses' Manage question, no tool's
+ * copy, chooser or path), what the place does as a file opens for an item (`opening`) and once one newly opened is read
+ * (`reveal`). A table's say what a table does (matrix.ts fileHooks). `markOf`: the id of the mark its open file was opened at,
+ * where it isn't the item's own (a page's).
  */
-export interface FilePlace { tool?: Tool; view: { openFile?: OpenFile }; named?: boolean; opening?: (id: string) => void; reveal?: (id: string) => void; markOf?: (id: string) => string }
+export interface FilePlace {
+  tool?: Tool; view: { openFile?: OpenFile }; named?: boolean; storedOnly?: boolean;
+  opening?: (id: string) => void; reveal?: (id: string) => void; markOf?: (id: string) => string;
+}
 
 
 export type CatalogTarget = { kind: 'catalog'; hit: SearchHit };
@@ -71,9 +76,10 @@ interface FileCopy { tool: HarnessId; rootLabel?: string; directory?: string; re
  * The copies a target's panel offers, in column order (tab's tool first): an agent's in each tool with a file for it, a server's
  * in each tool with its entry, each read by itself (one shared hash doesn't
  * make two files the same bytes); a found or plugin skill's, collapsed by real folder, or by hash (found) / version (plugin); none
- * of a library skill's or a kept version's (its stored version instead: storedOf).
+ * of a library skill's, a kept version's or any target on a `storedOnly` place (its stored version instead: storedOf).
  */
 function fileCopies(t: FilePlace, target: FileTarget): FileCopy[] {
+  if (t.storedOnly) return [];
   if (isAgentRow(target)) return (toolsFor(t, 'agents') as HarnessId[]).filter(tool => target.paths?.[tool]).map(tool => ({ tool }));
   if (isServerRow(target)) return (toolsFor(t, 'mcp') as HarnessId[]).filter(tool => entryTools(target).includes(tool)).map(tool => ({ tool }));
   if ((target.kind !== 'skill' && target.kind !== 'skills') || (target.kind === 'skills' && inLibrary(itemOf(target)))) return [];
@@ -134,17 +140,20 @@ const readStored = (of: PageKind, key: string, hash: string, file: string): Prom
   : of === 'mcp' ? window.centralKnot.serverStored(key, hash) : window.centralKnot.skillVersionFile(key, hash, file));
 /**
  * Which version of Central Knot's text a panel shows, and what it says where its read brings nothing (`nothing`: it came back
- * empty): a row's is its item's current version; a kept one, the last version of an item Central Knot deleted, or, where its
- * read brought nothing, only that the item is deleted. Said by a page's panel's header (`now`: each part before one of the
- * header's dots, the first after `glyph`, the bin History's delete rows have; `file`: whether it names the file shown), a page's
- * mark's hover (`open`), the text's accessible name, a table's panel's too (`owner`), and the panel where the read brings
- * nothing (`unread`, a tool's copy's too). A kept version's read brings nothing where it was let go (skillstore.ts
- * pruneDeleted, at History's days), and also where its file is there but can't be read: the read doesn't say which.
+ * empty): a kept one is the last version of an item Central Knot deleted (or, where its read brought nothing, only that it is
+ * deleted); on a `storedOnly` place, Central Knot's version alone; elsewhere, the item's current version. Said by a page's
+ * panel's header (`now`: each part before one of the header's dots, the first after `glyph`, the bin History's delete rows
+ * have; `file`: whether it names the file shown), a page's mark's hover (`open`), the text's accessible name, a table's
+ * panel's too (`owner`), and the panel where the read brings nothing (`unread`, a tool's copy's too). A kept version's read
+ * brings nothing where it was let go (skillstore.ts pruneDeleted, at History's days), and also where its file is there but
+ * can't be read: the read doesn't say which.
  */
-const versionWords = (target: FileTarget, nothing = false): { now: string[]; glyph?: IconName; file: boolean; open: string; owner: string; unread: string } => (isKept(target)
+const versionWords = (t: FilePlace, target: FileTarget, nothing = false): { now: string[]; glyph?: IconName; file: boolean; open: string; owner: string; unread: string } => (isKept(target)
   ? { now: nothing ? ['deleted'] : ['deleted', 'last version kept'], glyph: 'trash-2', file: !nothing, open: 'Open the last version kept',
     owner: 'Central Knot’s last version kept', unread: 'Central Knot no longer keeps this version.' }
-  : { now: ['current version'], file: true, open: 'Open the current version', owner: 'Central Knot’s current version', unread: 'Its file couldn’t be read.' });
+  : t.storedOnly
+    ? { now: ['Central Knot’s version'], file: true, open: 'Open Central Knot’s version', owner: 'Central Knot’s version', unread: 'Its file couldn’t be read.' }
+    : { now: ['current version'], file: true, open: 'Open the current version', owner: 'Central Knot’s current version', unread: 'Its file couldn’t be read.' });
 /**
  * Opens a file (`asked`; a skill's SKILL.md when none) of a stored, found, installed plugin or marketplace skill, an agent's file
  * in the chosen tool (or its definition), a server's entry in the chosen tool (its definition where `asked` is DEFINITION, or
@@ -219,16 +228,16 @@ export function fileButton(t: FilePlace, target: FileTarget) {
  */
 export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare = false, back?: HTMLElement) {
   const id = fileTargetId(target);
-  const name = fileTargetName(target), words = versionWords(target, open.loaded === null);
+  const name = fileTargetName(target), words = versionWords(t, target, open.loaded === null);
   const offered = storedOf(t, target), stored = !!offered && !open.copy;
   const copies = fileCopies(t, target);
   const activeAt = open.copy ? copies.findIndex(copy => copy.tool === open.copy!.tool && copy.rootLabel === open.copy!.rootLabel) : -1;
   const active = stored ? undefined : copies[activeAt >= 0 ? activeAt : 0];
   const tabs = open.files ?? [open.file];
-  // A stored skill's version shows the path of a tool's copy that holds it; an agent's or a server's definition has none; an
-  // agent's file and a server's settings file are the ones its read found (setFile).
+  // A stored skill's version shows the path of a tool's copy that holds it unless the place is storedOnly; an agent's or a
+  // server's definition has none; an agent's file and a server's settings file are the ones its read found (setFile).
   const storedPath = (row: ItemRow) => row.paths?.[toolsFor(t, 'skills').find(each => row.hashes?.[each] === open.token && row.paths?.[each]) ?? ''];
-  const dir = !stored ? active?.directory ?? open.directory : target.kind === 'skills' ? storedPath(target as ItemRow) : undefined;
+  const dir = !stored ? active?.directory ?? open.directory : !t.storedOnly && target.kind === 'skills' ? storedPath(target as ItemRow) : undefined;
   const leaf = isServerRow(target) ? open.files?.[0] ?? '' : open.file;
   const full = dir && (dir.includes('\\') ? `${dir}\\${leaf.replaceAll('/', '\\')}` : `${dir}/${leaf}`);
   const missing = open.loaded === undefined ? 'Reading…' : words.unread;
@@ -284,9 +293,9 @@ export interface BoxRoom { scroller: HTMLElement; sticky?: number; padding?: num
 /**
  * A page as a file panel's place (pagePlace): its page; the name its open file was opened at (`occurrenceId`); the home and
  * visit that file belongs to (`on`: thisVisit); whether its names open a found copy's or a plugin's row too (`foundAndPlugins`);
- * its scroll box overrides where the page uses another scroller or sticky headers (`boxRoom`); the marks drawn since it last placed its panel (`drawn`).
+ * the marks drawn since it last placed its panel (`drawn`: itemFile, placePanel).
  */
-export interface PagePlace extends FilePlace { page: Page; occurrenceId?: string; on?: string; foundAndPlugins?: boolean; boxRoom?: (box: HTMLElement) => BoxRoom | undefined; drawn?: Set<string> }
+export interface PagePlace extends FilePlace { page: Page; occurrenceId?: string; on?: string; foundAndPlugins?: boolean; drawn?: Set<string> }
 /** A name's mark (itemFile): the name's occurrence, the row its file is read from, the mark. */
 export interface FileMark { occurrenceId?: string; target: FileTarget; mark: HTMLElement }
 /** A mark's id on a page: the item's own (`file-<row id>`, as a table's), then the name's occurrence where there is one. */
@@ -294,10 +303,14 @@ const markId = (id: string, occurrenceId?: string) => partId('file', id, ...(occ
 const panelId = (page: Page) => `file-panel-${page}`;
 const boxRooms = new Map<string, (box: HTMLElement) => BoxRoom | undefined>();
 
-/** A page's place, its Escape heard on the window: after every listener on the document, a question's or a confirmation's first. */
-export function pagePlace(page: Page, options: Pick<PagePlace, 'foundAndPlugins' | 'boxRoom'> = {}): PagePlace {
-  if (options.boxRoom) boxRooms.set(panelId(page), options.boxRoom);
-  const place: PagePlace = { page, ...options, view: {}, named: true, markOf: id => markId(id, place.occurrenceId),
+/**
+ * A page's place, its Escape heard on the window: after every listener on the document (a confirmation's on Settings, Profiles
+ * and History, and History's Manage question first; on Harnesses, managecard.ts leaves Escape to this panel while it is open).
+ */
+export function pagePlace(page: Page, options: Pick<PagePlace, 'foundAndPlugins' | 'storedOnly'> & { boxRoom?: (box: HTMLElement) => BoxRoom | undefined } = {}): PagePlace {
+  const { boxRoom, ...placeOptions } = options;
+  if (boxRoom) boxRooms.set(panelId(page), boxRoom);
+  const place: PagePlace = { page, ...placeOptions, view: {}, named: true, markOf: id => markId(id, place.occurrenceId),
     reveal: () => requestAnimationFrame(() => document.getElementById(panelId(page))?.scrollIntoView({ block: 'nearest' })) };
   window.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !event.defaultPrevented && state.page === page && place.view.openFile) setFile(place, undefined, undefined, true);
@@ -331,7 +344,7 @@ function nameMark(place: PagePlace, target: FileTarget, occurrenceId?: string): 
   // Pressed at another name of the open item, its file moves there and is brought into view.
   const moves = !open && place.view.openFile?.id === id;
   const onclick = (event: Event) => { place.occurrenceId = occurrenceId; setFile(place, open ? undefined : target, undefined, false, event); if (moves) place.reveal?.(id); };
-  return { occurrenceId, target, mark: markButton(target, markId(id, occurrenceId), versionWords(target).open, open, onclick) };
+  return { occurrenceId, target, mark: markButton(target, markId(id, occurrenceId), versionWords(place, target).open, open, onclick) };
 }
 /** The open file against the marks drawn now (`shown`): the very mark it was opened at, with its panel; else none, the file let go. */
 export function placePanel(place: PagePlace, shown: readonly (FileMark | undefined)[]): { mark: FileMark; panel: HTMLElement } | undefined {
@@ -360,7 +373,7 @@ function settleFileBox(): void {
   if (!scroller) return;
   const sides = scroller.getBoundingClientRect(), top = box.getBoundingClientRect().top, before = box.parentElement?.previousElementSibling;
   const row = before?.matches('.ov-row') ? before : scroller.querySelector('.file-anchored');
-  const sticky = custom?.sticky ?? 0, from = row ? row.getBoundingClientRect().top : sides.top - scroller.scrollTop + sticky;
+  const sticky = custom?.sticky ?? 0, from = row ? row.getBoundingClientRect().top : sides.top - scroller.scrollTop;
   // A page's panel leaves its scroll margin under it (style.css: a row's height), so the next row shows below its box.
   const end = Math.max(8, parseFloat(getComputedStyle(scroller).paddingBottom) + (custom?.padding ?? 0))
     + (parseFloat(getComputedStyle(box.parentElement!).scrollMarginBottom) || 0);

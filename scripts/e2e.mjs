@@ -1858,6 +1858,73 @@ async function manageFlow() {
   await asking();
   same('pressed again, the switch reads afresh: the hand edit counted, without a Refresh', await a.text('#manage-codex-cli-text'), counted);
   await shotAt(a, 'question-overwrite-860-light', SMALLEST, 'light');
+  // The one named item gets the file mark, opening Central Knot's version under its card's row without moving or resizing cards; Escape closes the panel first, then the question.
+  const gridMetrics = async (page, width, height) => {
+    await sizeTo(page, width, height);
+    return page.run(`(() => {
+      const grid = document.querySelector('.harness-cards'), cards = [...grid.querySelectorAll('.harness-card')];
+      const gw = grid.clientWidth, tracks = getComputedStyle(grid).gridTemplateColumns.trim().split(/\\s+/).length;
+      const expectedCols = Math.max(1, Math.min(cards.length, Math.floor((gw + 12) / 312)));
+      const expectedWidth = (gw - (expectedCols - 1) * 12) / expectedCols;
+      const rects = cards.map(el => { const r = el.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.width), Math.round(r.height)]; });
+      return { count: cards.length, tracks, expectedCols, widthsMatch: rects.every(([, w]) => Math.abs(w - expectedWidth) <= 1.5), rects };
+    })()`);
+  };
+  const before1728 = await gridMetrics(a, 1728, 1117), before1316 = await gridMetrics(a, 1316, 819), before860 = await gridMetrics(a, ...SMALLEST);
+  same('with the panel shut, cards follow the stylesheet column rule at 860, 1316 and 1728',
+    [before860, before1316, before1728].map(m => [m.tracks === m.expectedCols, m.widthsMatch]),
+    [[true, true], [true, true], [true, true]]);
+  if (shots) { await a.run(`document.getElementById('harness-card-codex-cli')?.scrollIntoView({ block: 'end' })`); await shotAt(a, 'question-mark-860-light', SMALLEST, 'light'); await sizeTo(a, ...SMALLEST); }
+  const standupMark = await a.run(`(() => {
+    const group = document.querySelector('#harness-card-codex-cli .manage-question');
+    const text = document.getElementById('manage-codex-cli-text'), mark = text?.querySelector('#file-skills-standup');
+    if (!group || !text || !mark) return null;
+    const before = document.createRange(); before.setStart(text, 0); before.setEndBefore(mark);
+    return { title: mark.title, before: before.toString(), label: group.getAttribute('aria-label'), labelledBy: group.getAttribute('aria-labelledby'), full: text.textContent };
+  })()`);
+  same('the mark says Open Central Knot’s version, sits after Central Knot’s version, and the group label omits the mark’s own label',
+    [standupMark?.title, standupMark?.before.endsWith('Central Knot’s version'), standupMark?.label === standupMark?.full && !standupMark?.label.includes('Open file:'), standupMark?.labelledBy],
+    ['Open Central Knot’s version', true, true, null]);
+  await a.click('#harness-card-codex-cli .manage-question #file-skills-standup');
+  await waitHistory(a, () => a.run(`!!document.querySelector('#file-panel-harnesses pre.content')?.textContent?.trim()`));
+  const panelMeta = await a.run(`(() => {
+    const box = document.getElementById('file-panel-harnesses');
+    return {
+      text: box?.querySelector('pre.content')?.textContent ?? '',
+      now: [...(box?.querySelectorAll('.file-open-now') ?? [])].map(el => el.textContent),
+      tab: box?.querySelector('.file-tab.is-active')?.textContent ?? null,
+      foot: !!box?.querySelector('.file-open-foot'),
+    };
+  })()`);
+  check('pressing the named item’s mark opens Central Knot’s version, never the left-out tool’s copy',
+    panelMeta.text.includes('Read the commits. Write what shipped') && !panelMeta.text.includes('Edited in Codex while it was left out.'), panelMeta.text);
+  same('the panel is headed Central Knot’s version · SKILL.md with no third-tool path footer',
+    [panelMeta.now, panelMeta.tab, panelMeta.foot], [['Central Knot’s version'], 'SKILL.md', false]);
+  same('the asking card and its panel carry the leading accent edge, and the mark keeps room around it',
+    await a.run(`(() => {
+      const codex = getComputedStyle(document.getElementById('harness-card-codex-cli')).boxShadow;
+      const claude = getComputedStyle(document.getElementById('harness-card-claude-cli')).boxShadow;
+      const panel = getComputedStyle(document.querySelector('#file-panel-harnesses > .file-open-box'));
+      const lh = parseFloat(getComputedStyle(document.getElementById('manage-codex-cli-text')).lineHeight);
+      const mark = document.getElementById('file-skills-standup'), ms = getComputedStyle(mark);
+      return [codex.includes('3px 0px 0px'), codex !== claude, panel.borderLeftWidth === '3px', panel.borderLeftColor !== panel.borderRightColor, lh >= Math.round(mark.getBoundingClientRect().height) + 2, parseFloat(ms.marginRight) >= 2];
+    })()`), [true, true, true, true, true, true]);
+  const open860 = await gridMetrics(a, ...SMALLEST);
+  same('with the panel open at 860, nothing is cut off and card geometry stays unchanged', [open860.rects, await a.run(CUT_OFF)], [before860.rects, []]);
+  await shotAt(a, 'question-panel-860-light', SMALLEST, 'light');
+  const open1316 = await gridMetrics(a, 1316, 819);
+  same('with the panel open at 1316, nothing is cut off and card geometry stays unchanged', [open1316.rects, await a.run(CUT_OFF)], [before1316.rects, []]);
+  await shotAt(a, 'question-panel-1316-dark', [1316, 819], 'dark');
+  const open1728 = await gridMetrics(a, 1728, 1117);
+  same('with the panel open at 1728, nothing is cut off and card geometry stays unchanged', [open1728.rects, await a.run(CUT_OFF)], [before1728.rects, []]);
+  await shotAt(a, 'question-panel-1728-light', [1728, 1117], 'light');
+  await fullSize(a);
+  await a.press('Escape');
+  same('first Escape closes only the file panel and returns focus to its mark', [await a.exists('#file-panel-harnesses'), await a.exists('#manage-codex-cli-text'), await a.run(`document.activeElement?.id`)], [false, true, 'file-skills-standup']);
+  await a.press('Escape');
+  same('second Escape closes the question and returns focus to the switch', [await a.exists('#manage-codex-cli-text'), await a.run(`document.activeElement?.id`)], [false, 'manage-codex-cli']);
+  await a.click('#manage-codex-cli');
+  await asking();
   await a.click('#manage-codex-cli-confirm');
   same('turned on again, the band names what the pass did there, in the question’s words', await a.text('.band-done .band-text'),
     'Central Knot manages Codex now: Codex’s copy of standup is saved as a version (History can restore it), and Central Knot’s is written over it. Each change there is in History.');
@@ -2011,8 +2078,65 @@ async function manageFlow() {
   await fullSize(a);
   for (const tool of ['copilot-cli', 'codex-cli']) await manageAgain(a, tool);
   same('every tool managed again', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
+  // A held MCP server edited in another managed tool while Codex is left out: pressing its mark in Codex's Manage question
+  // opens Central Knot's stored definition (never Claude Code's edit), with no copy chooser or tool path, and sits after Central Knot's version.
+  const codexToml = join(practice, '.codex/config.toml'), claudeJson = join(practice, '.claude.json');
+  await openKind(a, 'mcp');
+  await a.click(`#${rowPart('add', 'mcp', 'docs')}`);
+  await waitHistory(a, () => readFileSync(codexToml, 'utf8').includes('https://docs.example.test/mcp'));
+  await a.click('#nav-harnesses');
+  await a.click('#manage-codex-cli');
+  await a.click('#sync-switch');
+  const codexBeforeEdit = readFileSync(codexToml, 'utf8'), claudeBeforeEdit = readFileSync(claudeJson, 'utf8');
+  writeFileSync(codexToml, codexBeforeEdit.replace('https://docs.example.test/mcp', 'https://codex-edit.example.test/mcp'));
+  writeFileSync(claudeJson, claudeBeforeEdit.replace('https://docs.example.test/mcp', 'https://claude-edit.example.test/mcp'));
+  check('both Codex’s and Claude Code’s copies of docs were edited to differ from Central Knot’s stored version',
+    readFileSync(codexToml, 'utf8').includes('codex-edit.example.test') && readFileSync(claudeJson, 'utf8').includes('claude-edit.example.test'));
+  await a.click('#manage-codex-cli');
+  await asking();
+  await a.click('#harness-card-codex-cli .manage-question #file-mcp-docs');
+  await waitHistory(a, () => a.run(`!!document.querySelector('#file-panel-harnesses pre.content')?.textContent?.trim()`));
+  const mcpPanel = await a.run(`(() => {
+    const box = document.getElementById('file-panel-harnesses');
+    return {
+      name: box?.querySelector('.file-open-name')?.textContent ?? null,
+      text: box?.querySelector('pre.content')?.textContent ?? '',
+      chooser: !!box?.querySelector('select'),
+    };
+  })()`);
+  same('pressing a held server’s mark in Codex’s question opens Central Knot’s stored definition, never Claude Code’s edit, with no copy chooser',
+    [mcpPanel.name, mcpPanel.text.includes('https://docs.example.test/mcp'), mcpPanel.text.includes('claude-edit.example.test'), mcpPanel.text.includes('codex-edit.example.test'), mcpPanel.chooser],
+    ['Central Knot’s definition', true, false, false, false]);
+  await a.press('Escape');
+  await a.press('Escape');
   same('no page errors, manage', a.pageErrors, []);
   await a.quit();
+
+  // Five tools at 1728: the cards take the columns the stylesheet's rule gives them with the panel shut, and stay unmoved with it open.
+  const fiveHome = join(scratch, 'manage-five-home'), fiveData = join(scratch, 'manage-five-data');
+  for (const dir of ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills', '.config/opencode/skills']) {
+    skill(join(fiveHome, dir), 'standup', text('standup', 'Stored standup for five tools.'));
+  }
+  mkdirSync(fiveData, { recursive: true });
+  writeFileSync(join(fiveData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: fiveHome } }));
+  const wf = await launch(fiveData);
+  await openKind(wf, 'skills');
+  await wf.click(`#${rowPart('add', 'skills', 'standup')}`);
+  await wf.click('#nav-harnesses');
+  await wf.click('#manage-codex-cli');
+  const fiveCodex = join(fiveHome, '.codex/skills/standup/SKILL.md');
+  writeFileSync(fiveCodex, `${readFileSync(fiveCodex, 'utf8')}\nEdited in Codex in five-tool home.\n`);
+  await wf.click('#manage-codex-cli');
+  await waitHistory(wf, () => wf.exists('#manage-codex-cli-confirm'));
+  const beforeFive = await gridMetrics(wf, 1728, 1117);
+  await wf.click('#harness-card-codex-cli .manage-question #file-skills-standup');
+  await waitHistory(wf, () => wf.run(`!!document.querySelector('#file-panel-harnesses pre.content')?.textContent?.trim()`));
+  const openFive = await gridMetrics(wf, 1728, 1117);
+  same('five tools at 1728 take the stylesheet’s columns with the panel shut and stay unmoved with it open',
+    [beforeFive.count, beforeFive.expectedCols >= 4, beforeFive.tracks, beforeFive.widthsMatch, openFive.tracks, openFive.widthsMatch, openFive.rects, await wf.run(CUT_OFF)],
+    [5, true, beforeFive.expectedCols, true, beforeFive.expectedCols, true, beforeFive.rects, []]);
+  same('no page errors, manage five tools', wf.pageErrors, []);
+  await wf.quit();
 
   // Stale click (Codex managed again from Harnesses in a second window, then History's button pressed here) and a locked home.
   const staleHome = join(scratch, 'manage-stale-home'), d1 = join(scratch, 'manage-stale-1'), d2 = join(scratch, 'manage-stale-2');
@@ -13410,7 +13534,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   /** The page as drawn: the tools' columns, and each row's name, plugin and cells' words (a mark and a Copy's label aside). */
   const page = async () => {
     const tools = await a.all('.signin-head', 'e.dataset.tool');
-    const rows = await a.run(`[...document.querySelectorAll('.signin-table tbody tr')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', ...[...row.querySelectorAll('td')].map(cell => [...(cell.querySelector('.signin-words')?.childNodes ?? [])].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''))])`);
+    const rows = await a.run(`[...document.querySelectorAll('.signin-table tbody tr[data-row]')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', ...[...row.querySelectorAll('td')].map(cell => [...(cell.querySelector('.signin-words')?.childNodes ?? [])].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''))])`);
     return { tools, rows };
   };
   /** A row by its name, and a plugin's by its name and the plugin's: "issues (tracker)". */
@@ -13420,7 +13544,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   /** Each row's words in one tool's column, by the row's name (and plugin). */
   const column = async tool => { const { tools, rows } = await page(); return Object.fromEntries(rows.map(row => [rowName(row), row[2 + tools.indexOf(tool)]])); };
   /** A row's id on the page, by its name (and plugin): what its cells' and Copy's ids end with. */
-  const rowIdOf = async name => (await a.run(`[...document.querySelectorAll('.signin-table tbody tr')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', row.dataset.row])`)).find(row => rowName(row) === name)?.[2];
+  const rowIdOf = async name => (await a.run(`[...document.querySelectorAll('.signin-table tbody tr[data-row]')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', row.dataset.row])`)).find(row => rowName(row) === name)?.[2];
   const cellId = async (tool, name) => `signin-cell-${tool}-${await rowIdOf(name)}`;
   /** A column's head as it reads (a no-break space read as a space, the ends trimmed). */
   const head = async tool => (await a.run(`document.querySelector('.signin-head[data-tool="${tool}"]')?.innerText ?? null`))?.replace(/\u00a0/g, ' ').trim() ?? null;
@@ -13516,6 +13640,64 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
     [['copilot-cli'], 'Sign-in shows only inside a session of that tool. • means the tool has the server; blank means it doesn’t.']);
   same('Local’s card says where the server runs and nothing more', await card('signin-local-mark', 'local-card'), 'Runs on this computer.');
   await fits('not-checked');
+  const fileShot = async (name, theme) => { if (!shots) return; await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] }); await wait(300); await a.shot(`mcp-signin-file-${name}-${theme}`); await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); };
+  const markMetrics = () => a.run(`(() => {
+    const ths = [...document.querySelectorAll('.signin-table thead th')].map(e => Math.round(e.getBoundingClientRect().width));
+    const rows = [...document.querySelectorAll('.signin-table tbody tr[data-row]')].filter(r => !r.querySelector('.signin-plugin')).map(r => {
+      const s = r.querySelector('.signin-server'), m = r.querySelector('.row-file-btn'), walk = document.createTreeWalker(s, NodeFilter.SHOW_TEXT);
+      const rects = [];
+      for (let n; (n = walk.nextNode()); ) { const range = document.createRange(); range.selectNodeContents(n); rects.push(...range.getClientRects()); }
+      const last = rects.at(-1), mr = m?.getBoundingClientRect();
+      const onLast = !!mr && !!last && Math.abs((mr.top + mr.bottom) / 2 - (last.top + last.bottom) / 2) <= 4 && mr.left >= last.right - 1;
+      return { name: s.textContent, lines: new Set(rects.map(rect => Math.round(rect.top))).size, onLast };
+    });
+    return { ths, rows };
+  })()`);
+  await sizeTo(a, 1316, 819); await shape(false);
+  const at1316 = await markMetrics();
+  same('at 1316 the long hyphenated name keeps its file mark on its last line',
+    at1316.rows.find(r => r.name === longName)?.onLast, true);
+  await sizeTo(a, ...SMALLEST); await shape(false);
+  const colsBefore = (await markMetrics()).ths;
+  write('.claude.json', claudeFile({ Filesystem: { type: 'http', url: P(47215) } }));
+  await a.click('#header-refresh');
+  const at860 = await markMetrics();
+  same('at 860 every own server (including a ten-letter capitalised name) keeps its mark on its last line, single-word names on one line, and no column width moves',
+    [at860.ths, at860.rows.every(r => r.onLast && (r.name.includes('-') || r.lines === 1))], [colsBefore, true]);
+  if (shots) { await a.run(`document.querySelector('tr[data-row="filesystem"]').scrollIntoView({ block: 'center' })`); await fileShot('ten-letter-860', 'light'); }
+  const unbroken = ['elasticsearch', 'observabilityservice'];
+  write('.claude.json', claudeFile({ Filesystem: { type: 'http', url: P(47215) }, elasticsearch: { type: 'http', url: P(47216) }, observabilityservice: { type: 'http', url: P(47217) } }));
+  await a.click('#header-refresh');
+  const withUnbroken = await markMetrics();
+  same('at 860 unbroken names (elasticsearch and a twenty-letter name) keep every column width unchanged and each mark on its last line',
+    [withUnbroken.ths, unbroken.every(name => withUnbroken.rows.find(r => r.name === name)?.onLast)], [colsBefore, true]);
+  if (shots) { await a.run(`document.querySelector('tr[data-row="observabilityservice"]').scrollIntoView({ block: 'end' })`); await fileShot('unbroken-name-860', 'light'); }
+  const openEntry = async (name, expect) => {
+    const id = await rowIdOf(name);
+    await a.click(`tr[data-row="${id}"] .row-file-btn`);
+    await until(async () => (await a.text('#file-panel-mcpsignin pre.content'))?.includes(expect), `${name}’s entry`);
+    return a.run(`(() => { const row = document.querySelector('tr[data-row="${id}"]'), next = row?.nextElementSibling, td = next?.querySelector('td');
+      return { anchored: !!row?.classList.contains('file-anchored'), colspan: td?.getAttribute('colspan'), boxes: document.querySelectorAll('.file-open-box').length, text: next?.querySelector('pre.content')?.textContent ?? '' }; })()`);
+  };
+  const oauthEntry = await openEntry('oauth', 'http://127.0.0.1:47202/mcp');
+  same('at 860 pressing a server’s mark opens its entry in a full-width row under it, nothing cut off',
+    [oauthEntry.anchored, oauthEntry.colspan, oauthEntry.boxes, oauthEntry.text.includes('http://127.0.0.1:47202/mcp'), ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)],
+    [true, '7', 1, true]);
+  const fsEntry = await openEntry('Filesystem', 'http://127.0.0.1:47215/mcp');
+  same('at 860 pressing a second capitalised server’s mark moves the panel under it with that server’s entry',
+    [fsEntry.anchored, fsEntry.colspan, fsEntry.boxes, fsEntry.text.includes('http://127.0.0.1:47215/mcp')], [true, '7', 1, true]);
+  await a.click('#signin-session-mark');
+  const cardOpened = await a.run(`!!document.getElementById('signin-session-mark-card')?.matches(':popover-open')`);
+  await a.press('Escape');
+  const cardFirst = [cardOpened, await a.run(`!!document.getElementById('signin-session-mark-card')?.matches(':popover-open')`), await a.exists('#file-panel-mcpsignin')];
+  await a.press('Escape');
+  same('Escape closes an open (?) card first, then closes the entry panel and returns focus to its mark',
+    [cardFirst, await a.exists('#file-panel-mcpsignin'), await a.run(`document.activeElement === document.querySelector('tr[data-row="filesystem"] .row-file-btn')`)],
+    [[true, false, true], false, true]);
+  write('.claude.json', claudeFile());
+  await a.click('#header-refresh');
+  await fullSize(a);
+  await a.run(`document.querySelector('#mcpsignin-scroll').scrollTop = 0`);
   // A server that arrives on disk while he is on the page (Pi's file, read again by itself) takes a place after the rows already
   // there, though by its name it would come first; on Refresh it goes where its name puts it.
   write('.pi/agent/mcp.json', piFile({ 'aaa-new': { url: P(47213) } }));
@@ -13715,7 +13897,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   const [wordsLines, buttonLines, heights] = await a.run(`(() => {
     const cell = document.getElementById(${JSON.stringify(await cellId('codex-cli', 'oauth'))}), words = cell.querySelector('.signin-words');
     const lines = element => Math.round(element.getBoundingClientRect().height / parseFloat(getComputedStyle(element).lineHeight));
-    const row = name => [...document.querySelectorAll('.signin-table tbody tr')].find(each => each.querySelector('.signin-server').textContent === name && !each.querySelector('.signin-plugin'));
+    const row = name => [...document.querySelectorAll('.signin-table tbody tr[data-row]')].find(each => each.querySelector('.signin-server').textContent === name && !each.querySelector('.signin-plugin'));
     return [lines(words), Math.max(...[...cell.querySelectorAll('.signin-acts .btn .btn-label')].map(lines)), [row('oauth'), row('plain')].map(each => Math.round(each.getBoundingClientRect().height))]; })()`);
   console.log(`(mcpSigninFlow: at 860 the refused row is ${heights[0]} px high, its neighbour plain ${heights[1]} px)`);
   same('at 860 the refused cell is bounded: its words at most three lines, each of its two buttons at most two', [wordsLines <= 3, buttonLines <= 2], [true, true]);
@@ -14135,7 +14317,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   await preview.click('#nav-mcpsignin');
   await preview.click('#signin-check-codex-cli');
   await until(async () => !(await preview.run(`document.querySelector('.signin-head[data-tool="codex-cli"]')?.innerText ?? 'Checking…'`)).includes('Checking…'), 'Codex’s check in the preview-only home');
-  const previewRow = await preview.run(`[...document.querySelectorAll('.signin-table tbody tr')].find(row => row.querySelector('.signin-server').textContent === 'oauth' && !row.querySelector('.signin-plugin'))?.dataset.row`);
+  const previewRow = await preview.run(`[...document.querySelectorAll('.signin-table tbody tr[data-row]')].find(row => row.querySelector('.signin-server').textContent === 'oauth' && !row.querySelector('.signin-plugin'))?.dataset.row`);
   const previewFrom = started().length;
   same('a home it may only preview: Codex’s cell keeps its Copy, and main refuses a sign-in sent all the same, running nothing',
     [await preview.exists(byId(`signin-act-codex-cli-${previewRow}`)), await preview.text(byId(`signin-copy-codex-cli-${previewRow}`)),
@@ -14223,7 +14405,7 @@ const probe = net.connect(port, '127.0.0.1').once('connect', () => { probe.destr
   const env = { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), CK_SIGNIN_START_LIMIT_MS: '6000', PATH: `${opener}:${join(scratch, 'bin')}:/usr/bin:/bin`, BROWSER: join(opener, 'xdg-open') };
   let a = await launch(join(scratch, 'pio-data'), [], home, env);
   const until = async (ready, what) => { for (let tries = 0; tries < 200; tries++) { if (await ready()) return; await wait(100); } check(`in time: ${what}`, false); };
-  const rowId = name => a.run(`[...document.querySelectorAll('.signin-table tbody tr')].find(row => row.querySelector('.signin-server').textContent === ${JSON.stringify(name)})?.dataset.row`);
+  const rowId = name => a.run(`[...document.querySelectorAll('.signin-table tbody tr[data-row]')].find(row => row.querySelector('.signin-server').textContent === ${JSON.stringify(name)})?.dataset.row`);
   const id = async (part, tool, name) => byId(`signin-${part}-${tool}-${await rowId(name)}`);
   /** A cell as drawn: its words (a mark aside), then each of its buttons' labels and the line under it. */
   const cell = async (tool, name) => a.run(`(cell => [[...cell.querySelector('.signin-words').childNodes].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''),
