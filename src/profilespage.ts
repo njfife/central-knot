@@ -9,32 +9,34 @@
 // its kind), and in Claude Code what comes on with a ticked item (wholeNote, withBrought; claudeBand under Find); an older
 // profile with `switchesPluginItems` false hides plugin rows behind "Choose plugin items for this profile". Unchanged rows leave
 // their state cell blank (hover keeps live state; `Off · on in …` stays on a plugin row in use; rows left out name tools that
-// keep them on: keptOn; a row whose tools change says where: `Out of Codex`). Each row Central Knot holds, and each plugin's skill,
-// gets a file mark after its name, opening its current version under that row (profilesFiles, rowKey → filepanel.ts). A profile held
-// by a plugin off in a tool offers in Switch's place, and on each row held in another plugin or tool, the Library line's own press to
-// turn it on there, its result and Undo in this page's band, else the link to its page, the header saying why (wayPast, turnOnControl).
+// keep them on: keptOn; a row whose tools change says where: `Out of Codex`). Each library item Central Knot holds, each
+// plugin-linked library copy, and each installed plugin's skill (folded onto an own row included) gets a file mark after its name,
+// opening its current version under that row (profilesFiles, rowKey → filepanel.ts); whole-only plugin servers and agents have none.
+// A profile held by a plugin off in a tool offers in Switch's place, and on each row held in another plugin or tool, the Library
+// line's own press to turn it on there, its result and Undo in this page's band, else the link to its page, the header saying why (wayPast, turnOnControl).
 // Every rule and preview is profileplan.ts's (listedChanges, switchPlan, pluginPlan, inUse, switchPreview, keptOn, leftOutWords, toolsOf), as profiles.ts carries it out.
 import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { brandMark, kindGlyph, lineFacts, openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
 import { lineControl } from './pluginline.ts';
+import { pluginRowKey } from './pluginrows.ts';
 import { lineBusy, market, turnFromLine, viewCurrent, type LineAim } from './pluginstate.ts';
-import { button, checkbox, emptyState, findInput, h, icon, infoMark } from './dom.ts';
+import { afterLayout, button, checkbox, emptyState, findInput, h, icon, infoMark } from './dom.ts';
 import { itemFile, pagePlace, placePanel } from './filepanel.ts';
 import { allTurns, changeWords, claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, itemRowState, nameNow, nowLead, profileNow, keptOn, leftOut, listedChanges, listedPlugins, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, takenWhole, toolsOf, wholeCounts, withTool, wholeTurns, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn } from './profileplan.ts';
 import { DIRECTORY, noSingleSwitch, pageOfPart } from './pluginstatus.ts';
 import { counted } from './pluginswitch.ts';
 import { andList, CHANGED, changedCard, toolList, toolNames } from './words.ts';
-import { itemKey, type ItemKind } from './library.ts';
+import type { ItemKind } from './library.ts';
 import { plural } from './model.ts';
 import type { InstalledPlugin, PluginItem, Profile } from './types.ts';
 
 let find = '';
 /** Whether the status bar's profile menu is open. */
 let menuOpen = false;
-/** Profiles as a file panel's place (filepanel.ts pagePlace), and the Library key each row opens (its own, linked library copy, or plugin skill). */
+/** Profiles as a file panel's place (filepanel.ts pagePlace), and the Library key each row opens (its own, linked library copy, or plugin row). */
 const profilesFiles = pagePlace('profiles', { foundAndPlugins: true });
-const rowKey = (item: LiveItem | PluginLive) => ('key' in item ? item.key
-  : item.copies.map(copy => ('libraryKey' in copy.target ? copy.target.libraryKey : '')).find(Boolean) ?? `${item.plugin}@${item.marketName}/${itemKey(item.name)}`);
+export const rowKey = (item: LiveItem | PluginLive) => ('key' in item ? item.key
+  : item.copies.map(copy => ('libraryKey' in copy.target ? copy.target.libraryKey : '')).find(Boolean) ?? pluginRowKey(item.plugin, item.marketName, item.kind, item.name));
 
 const profiles = () => state.home!.profiles;
 /** Every live library item, and each one's description from its page's row; every plugin's item some tool has (profileplan.ts pluginLive). */
@@ -145,8 +147,10 @@ function itemRow(profile: Profile, item: LiveItem, plan: Plan, file: { mark?: HT
       tick(profile, { id: `pf-${item.id}`, checked: included, label: `${item.name} (${kindWords[item.kind].one}) in ${profile.name}`, help,
         itemsAfterClick: included ? profile.items.filter(entry => entry !== item.id) : [...profile.items, item.id] }),
       inChanges ? kindMark(item.kind) : null,
-      h('span.pf-name-text', { title: description || item.name }, item.name, showKindWord ? h('span.tone-muted', {}, ` · ${kindWords[item.kind].one}`) : null),
-      file.mark,
+      h('span.pf-main', {},
+        h('span.pf-title', {},
+          h('span.pf-name-text', { title: description || item.name }, item.name, showKindWord ? h('span.tone-muted', {}, ` · ${kindWords[item.kind].one}`) : null),
+          file.mark)),
       kept.tools.length ? h('span.pf-notes', {}, h('span.pf-note', {}, `${toolList(kept.tools)} still ${many ? 'load' : 'loads'} it ${loadWords([kept])}.`)) : null),
     // Words that count tools name each behind their (?), reached by click and keyboard.
     h(`span.pf-state${said ? '.pf-state-moves' : ''}`, { role: 'cell', 'data-state': said }, said, change?.full ? infoMark(`pf-full-${item.id}`, item.name, change.full) : null),
@@ -258,9 +262,11 @@ function pluginRow(profile: Profile, item: PluginLive, plan: Plan, file: { mark?
       tick(profile, { id: `pf-${item.id}`, checked: included, label: `${item.name} (${kindWords[item.kind].one} from ${item.plugin}) in ${profile.name}`, help,
         itemsAfterClick: included ? profile.items.filter(entry => entry !== item.id) : [...profile.items, item.id] }),
       inChanges ? kindMark(item.kind) : null,
-      h('span.pf-name-text', { title: item.name }, item.name, showKindWord ? h('span.tone-muted', {}, ` · ${kindWords[item.kind].one}`) : null),
-      file.mark,
-      pluginTag(item.plugin, `From the plugin ${item.plugin}, in the marketplace ${item.marketName}`),
+      h('span.pf-main', {},
+        h('span.pf-title', {},
+          h('span.pf-name-text', { title: item.name }, item.name, showKindWord ? h('span.tone-muted', {}, ` · ${kindWords[item.kind].one}`) : null),
+          file.mark),
+        pluginTag(item.plugin, `From the plugin ${item.plugin}, in the marketplace ${item.marketName}`)),
       notes.length ? h('span.pf-notes', {}, notes) : null),
     h(`span.pf-state${moves ? '.pf-state-moves' : ''}`, { role: 'cell', 'data-state': said }, said),
     file.panel);
@@ -295,6 +301,7 @@ function tableSection(profile: Profile, kind: ItemKind, list: LiveItem[], plugge
 function table(profile: Profile, list: LiveItem[], plugged: PluginLive[], plan: Plan, pinned?: { on: string[]; off: string[]; retooled: string[] }) {
   const byId = new Map<string, LiveItem | PluginLive>([...list, ...plugged].map(item => [item.id, item]));
   const visible = pinned ? [...pinned.on, ...pinned.off, ...pinned.retooled].flatMap(id => (byId.has(id) ? [byId.get(id)!] : [])) : [...list, ...plugged];
+  // profile.id as occurrenceId ties the open file to this profile, so switching profiles, status-bar switches or deleting closes it.
   const marks = new Map(visible.map(item => [item.id, itemFile(profilesFiles, pageOfPart[item.kind], rowKey(item), profile.id)]));
   const file = placePanel(profilesFiles, [...marks.values()]);
   const forItem = (id: string) => ({ mark: marks.get(id)?.mark, panel: file && file.mark === marks.get(id) ? file.panel : null });
@@ -420,9 +427,10 @@ function choosePluginsBand(profile: Profile) {
       onclick: () => void saveProfileDef({ id: profile.id, switchesPluginItems: true }, `${profile.name} now switches plugin items for good. Tick the ones you want on before switching.`, true) }));
 }
 
+const cancelDelete = () => { profileState.confirmDelete = undefined; rerender(); document.getElementById('profile-delete')?.focus(); };
 /** Delete's confirmation: deleting a profile changes nothing in Central Knot or the tools, and Undo makes it again. */
 function deleteActions(profile: Profile) {
-  const cancel = button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'profile-delete-cancel', onclick: () => { profileState.confirmDelete = undefined; rerender(); document.getElementById('profile-delete')?.focus(); } });
+  const cancel = button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'profile-delete-cancel', onclick: cancelDelete });
   return [h('span.profile-confirm', {}, `Delete ${profile.name}? No item changes.`), danger(button({ variant: 'outline', size: 'small', label: 'Delete', id: 'profile-delete-confirm', onclick: () => void deleteProfileDef(profile.id) })), cancel];
 }
 
@@ -577,3 +585,24 @@ export function profileStatus(): HTMLElement | null {
 }
 // A click anywhere else closes the profile menu.
 document.addEventListener('click', event => { if (menuOpen && !(event.target as Element).closest?.('.status-profile-wrap')) { menuOpen = false; rerender(); } });
+// Escape cancels an armed Delete confirmation before pagePlace's window listener closes an open file panel.
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !event.defaultPrevented && state.page === 'profiles' && profileState.confirmDelete) { event.preventDefault(); cancelDelete(); }
+});
+/** Under 880 px .profiles-split scrolls while .pf-scroll expands to its content, so cap the open file box against #profiles-split. */
+function settleNarrowFileBox(): void {
+  const split = document.getElementById('profiles-split'), box = split?.querySelector<HTMLElement>('.file-open-box');
+  if (!split || !box || getComputedStyle(split).overflowY !== 'auto') return;
+  const sides = split.getBoundingClientRect(), top = box.getBoundingClientRect().top, row = split.querySelector<HTMLElement>('.file-anchored');
+  const sticky = (split.querySelector<HTMLElement>('.pf-head')?.offsetHeight ?? 0) + (split.querySelector<HTMLElement>('.pf-section')?.offsetHeight ?? 0);
+  const panelStyle = getComputedStyle(box.parentElement!);
+  // Leave room for sticky table heads, the anchored row above the box, and one row's scroll margin below (as filepanel.ts settleFileBox does).
+  const end = Math.max(8, parseFloat(getComputedStyle(split).paddingBottom)) + (parseFloat(panelStyle.paddingBottom) || 0) + (parseFloat(panelStyle.scrollMarginBottom) || 0);
+  const from = row ? row.getBoundingClientRect().top : sides.top + sticky;
+  const room = Math.floor(sides.height - sticky - (top - from) - end), under = Math.floor(sides.bottom - top - end);
+  const pre = [...box.querySelectorAll<HTMLElement>('pre.content')].at(-1), text = pre && getComputedStyle(pre);
+  const least = !pre || !text ? 0 : box.offsetHeight - pre.offsetHeight + 8 * parseFloat(text.lineHeight) + parseFloat(text.paddingTop) + parseFloat(text.paddingBottom);
+  const floor = Math.min(least, Math.max(0, room));
+  box.style.maxHeight = `${Math.ceil(Math.max(floor, under >= floor ? Math.min(under, room) : room))}px`;
+}
+afterLayout(settleNarrowFileBox);

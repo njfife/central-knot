@@ -9,10 +9,14 @@ import type { HarnessId, HomeView, InstalledPlugin, PluginsView } from '../src/t
 import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
-installDom({}, { byId: id => findById(rendered, id) ?? null });
+const openedFiles: string[] = [];
+const { dispatch } = installDom({
+  skillVersionFile: async (key: string) => { openedFiles.push(`own:${key}`); return null; },
+  skillPluginFile: async (ref: { plugin: string; part: string }) => { openedFiles.push(`plugin:${ref.plugin}/${ref.part}`); return null; },
+}, { byId: id => findById(rendered, id) ?? null });
 
 const { state: app } = await import('../src/app.ts');
-const { profilesPage } = await import('../src/profilespage.ts');
+const { profilesPage, rowKey } = await import('../src/profilespage.ts');
 const { putPageData } = await import('../src/pagedata.ts');
 const { market, resetMarket } = await import('../src/pluginstate.ts');
 
@@ -107,50 +111,74 @@ test('With no profile in use, the page opens the one last switched to, titled as
   assert.deepEqual([app.page, profileState.open], ['profiles', 'last'], 'it lands on Profiles, with Last open');
 });
 
-test('Rows Central Knot holds and plugin skills get a file mark after the name; plugin agents and servers get none; pressing opens the panel under that row and drops it on profile switch or empty Find', async () => {
+test('Marks cover own items, folded plugin skills, and Pi-linked copies, never whole-only plugin agents or servers; rowKey keeps server case; Escape and empty draws keep state true', async t => {
   const { newItem } = await import('../src/library.ts');
   const { profileState, setRenderer } = await import('../src/app.ts');
+  const { pageRows } = await import('../src/pluginrows.ts');
+  const { pluginLive } = await import('../src/profileplan.ts');
   const draw = () => (rendered = profilesPage() as unknown as FakeNode);
   setRenderer(() => { draw(); });
   const tools: HarnessId[] = ['claude-cli', 'pi-cli'];
   const held = (key: string, source?: string) => ({ ...newItem(key, key), on: true, hash: `h-${key}`, ...(source ? { source } : {}) });
-  const fact = (key: string) => ({ key, name: key, on: true, copies: {}, except: [] });
-  app.home = {
+  const fact = (key: string, extra = {}) => ({ key, name: key, on: true, copies: {}, except: [], ...extra });
+  // Own triage has Claude Code through plugin alpha so pageRows folds alpha@team/triage onto it; both Profiles rows still get marks and open their own text.
+  const home = app.home = {
     home: '/tmp/profiles-files-home', readId: 1, snapshots: [],
     sync: { access: { allowed: true }, gate: { state: 'ready' }, caughtUp: [], managed: tools },
-    skills: { tools, items: [fact('notes'), fact('placed')], library: { notes: held('notes'), placed: held('placed', 'p1') }, gate: { state: 'ready' } },
+    skills: { tools, items: [fact('triage', { plugin: { 'claude-cli': { plugin: 'alpha', marketplace: 'team' } } }), fact('placed')],
+      library: { triage: held('triage'), placed: held('placed', 'p1') }, gate: { state: 'ready' } },
     mcp: { tools, items: [fact('docs')], library: { docs: held('docs') }, gate: { state: 'ready' } },
     agents: { tools, items: [fact('reviewer')], library: { reviewer: held('reviewer') }, gate: { state: 'ready' } },
     pluginItems: [{ tool: 'claude-cli', plugin: 'alpha', marketName: 'team', source: '/market', listed: true,
-      items: [{ kind: 'skill', name: 'triage', description: '', path: 'skills/triage' }, { kind: 'mcp', name: 'issues', description: '' }, { kind: 'agent', name: 'helper', description: '' }] }],
-    profiles: { profiles: [{ id: 'work', name: 'Work', items: ['skill:notes'], switchesPluginItems: true }, { id: 'other', name: 'Other', items: ['skill:notes'], switchesPluginItems: true }],
+      items: [{ kind: 'skill', name: 'Triage', description: '', path: 'skills/triage' }, { kind: 'mcp', name: 'Issues', description: '' }, { kind: 'agent', name: 'Helper', description: '' }] }],
+    profiles: { profiles: [{ id: 'work', name: 'Work', items: ['skill:triage'], switchesPluginItems: true }, { id: 'other', name: 'Other', items: ['skill:triage'], switchesPluginItems: true }],
       plugins: [{ id: 'p1', source: '/market', marketName: 'team', plugin: 'alpha', on: true }] },
   } as unknown as HomeView;
   app.page = 'profiles';
   profileState.open = 'work';
   const rowOfItem = (id: string) => findNode(rendered, el => el.dataset?.item === id);
   const has = (id: string, part: string) => !!findNode(rowOfItem(id), el => el.classList.contains(part));
+  const markOf = (id: string) => findNode(rowOfItem(id), el => el.classList.contains('row-file-btn'));
   draw();
-  assert.deepEqual(['skill:notes', 'mcp:docs', 'agent:reviewer', 'plugin:skill:alpha@team/triage', 'plugin:skill:alpha@team/placed', 'plugin:mcp:alpha@team/issues', 'plugin:agent:alpha@team/helper'].map(id => has(id, 'row-file-btn')),
-    [true, true, true, true, true, false, false]);
-  findNode(rowOfItem('skill:notes'), el => el.classList.contains('row-file-btn'))!.click();
-  assert.deepEqual([has('skill:notes', 'details-file-only'), rowOfItem('skill:notes')?.classList.contains('file-anchored'), has('plugin:skill:alpha@team/triage', 'details-file-only')], [true, true, false]);
-  findNode(rowOfItem('plugin:skill:alpha@team/triage'), el => el.classList.contains('row-file-btn'))!.click();
-  assert.deepEqual([has('skill:notes', 'details-file-only'), has('plugin:skill:alpha@team/triage', 'details-file-only'), rowOfItem('plugin:skill:alpha@team/triage')?.classList.contains('file-anchored')], [false, true, true]);
-  // Rename's Escape claims the event so an open file stays open.
-  profileState.renaming = 'work';
-  draw();
-  const renameEsc = { key: 'Escape', target: { value: 'Work' }, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
-  (findById(rendered, 'profile-name') as FakeNode & { onkeydown?: (e: unknown) => void }).onkeydown?.(renameEsc);
-  assert.deepEqual([renameEsc.defaultPrevented, has('plugin:skill:alpha@team/triage', 'details-file-only')], [true, true]);
-  // Switching profiles closes the previous profile's open panel.
-  findById(rendered, 'profile-row-other')!.click();
-  assert.equal(findNode(rendered, el => el.classList.contains('details-file-only')), undefined);
-  // Filtering Find to 0 rows calls placePanel so clearing Find does not reopen the closed panel.
-  findNode(rowOfItem('skill:notes'), el => el.classList.contains('row-file-btn'))!.click();
-  assert.equal(has('skill:notes', 'details-file-only'), true);
-  const input = findById(rendered, 'profile-find') as FakeNode & { oninput?: (e: unknown) => void };
-  input.oninput?.({ target: { value: 'zzz-none' } });
-  findById(rendered, 'profile-find-clear')!.click();
-  assert.equal(findNode(rendered, el => el.classList.contains('details-file-only')), undefined);
+  await t.test('rowKey shares the Library’s key rule (keeps MCP server case)', () => {
+    const plugged = pluginLive(home);
+    assert.deepEqual([rowKey(plugged.find(item => item.kind === 'mcp')!), rowKey(plugged.find(item => item.name === 'Triage')!)],
+      [pageRows(home, 'mcp').rows[0]!.key, 'alpha@team/triage']);
+  });
+  await t.test('marks cover folded plugin skills and each same-named row opens its own text', () => {
+    assert.equal(pageRows(home, 'skills').rows.length, 0);
+    assert.deepEqual(['skill:triage', 'mcp:docs', 'agent:reviewer', 'plugin:skill:alpha@team/triage', 'plugin:skill:alpha@team/placed', 'plugin:mcp:alpha@team/Issues', 'plugin:agent:alpha@team/helper'].map(id => has(id, 'row-file-btn')),
+      [true, true, true, true, true, false, false]);
+    openedFiles.length = 0;
+    markOf('skill:triage')!.click();
+    markOf('plugin:skill:alpha@team/triage')!.click();
+    assert.deepEqual(openedFiles, ['own:triage', 'plugin:alpha/skills/triage']);
+  });
+  await t.test('Rename and Delete confirmation claim Escape while the file stays open, and switching/empty draws clear the place', () => {
+    markOf('skill:triage')!.click();
+    const esc = (extra = {}) => ({ key: 'Escape', defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...extra });
+    profileState.renaming = 'work';
+    draw();
+    const renameEsc = esc({ target: { value: 'Work' } });
+    (findById(rendered, 'profile-name') as FakeNode & { onkeydown?: (e: unknown) => void }).onkeydown?.(renameEsc);
+    dispatch('keydown', renameEsc);
+    assert.deepEqual([profileState.renaming, has('skill:triage', 'details-file-only')], [undefined, true]);
+    profileState.confirmDelete = 'work';
+    draw();
+    dispatch('keydown', esc());
+    assert.deepEqual([profileState.confirmDelete, has('skill:triage', 'details-file-only'), findById(rendered, 'profile-delete')?.focused], [undefined, true, 1]);
+    findById(rendered, 'profile-row-other')!.click();
+    assert.equal(findNode(rendered, el => el.classList.contains('details-file-only')), undefined);
+    markOf('skill:triage')!.click();
+    (findById(rendered, 'profile-find') as FakeNode & { oninput?: (e: unknown) => void }).oninput?.({ target: { value: 'zzz-none' } });
+    findById(rendered, 'profile-find-clear')!.click();
+    assert.equal(findNode(rendered, el => el.classList.contains('details-file-only')), undefined);
+    markOf('skill:triage')!.click();
+    const savedProfiles = home.profiles.profiles;
+    home.profiles.profiles = [];
+    draw();
+    home.profiles.profiles = savedProfiles;
+    draw();
+    assert.equal(findNode(rendered, el => el.classList.contains('details-file-only')), undefined);
+  });
 });

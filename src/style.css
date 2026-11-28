@@ -2192,9 +2192,15 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .pf-head { position: sticky; top: 0; z-index: 2; background: var(--surface); min-height: 40px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
 .pf-head .pf-name { padding-left: 16px; gap: 4px; }
 .pf-name { position: relative; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; }
-.pf-name-text { flex: 0 1 auto; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
-/* A long name wraps instead of being cut: rows grow, keeping their minimum height */
-.pf-row:not(.pf-head) .pf-name { padding-block: 6px; }
+/* A long name wraps at word breaks instead of being squeezed mid-word; its mark stays on the last line and any plugin tag wraps cleanly below it. */
+.pf-row:not(.pf-head) .pf-name { align-items: flex-start; padding-block: 6px; }
+.pf-name > .kind-mark { height: 24px; }
+.pf-main { flex: 1 1 0; min-width: 0; min-height: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.pf-title { flex: 0 1 auto; min-width: 0; max-width: 100%; line-height: 22px; overflow-wrap: break-word; }
+.pf-name-text { font-weight: 500; }
+.pf-title > .row-file-btn { margin-left: 6px; vertical-align: middle; }
+.pf-main > .row-tag { flex: 0 1 auto; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: break-word; align-items: flex-start; }
+.pf-main > .row-tag > svg { flex: none; margin-top: 2px; }
 /* A skill that comes on in Claude Code with the ticked row above it, its plugin being whole there (profilespage.ts withBrought). */
 .pf-row.pf-beneath .pf-name { padding-left: 40px; }
 /* How Claude Code takes a plugin whole, and what a switch turns there, under Find (profilespage.ts claudeBand) */

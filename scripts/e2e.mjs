@@ -3021,14 +3021,13 @@ async function practiceFlow() {
     await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Focus')).click()`); await a.settle();
     await a.click('#profile-changes');
   } else check('Changes N button exists while previewing', false);
-  const pfShot = async (name, look, blur = false) => {
-    if (!shots) return;
-    if (blur) await a.run(`document.activeElement?.blur?.()`);
-    await a.run(`window.centralKnot.setAppearance(${JSON.stringify(look)})`);
-    await wait(80);
-    await a.shot(name);
-    await a.run(`window.centralKnot.setAppearance('system')`);
-    await wait(80);
+  const pfMark = id => `.pf-row[data-item="${id}"] .pf-name-text + .row-file-btn`;
+  const pfFile = () => a.run(`(() => { const box = document.querySelector('.file-open-box'), row = box?.closest('.pf-row'); return { item: row?.dataset.item ?? null, anchored: !!row?.classList.contains('file-anchored'), text: box?.querySelector('pre.content')?.textContent ?? '', boxes: document.querySelectorAll('.file-open-box').length }; })()`);
+  const openPf = async (id, line) => {
+    await a.click(pfMark(id));
+    for (let i = 0; i < 40 && !(await pfFile()).text.includes(line); i++) await wait(50);
+    await a.settle();
+    return pfFile();
   };
   await withSidebarOpen(a, ...SMALLEST, async () => {
     const picker = await a.run(`(() => {
@@ -3052,20 +3051,10 @@ async function practiceFlow() {
       same('picking Incident at 860×528 opens it and clears Changes', [await a.text('.profile-header h2'), await a.exists('#profile-changes')], ['Incident', false]);
     }
     same('nothing cut off on Profiles at 860×528 with sidebar open', [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
-    // File mark after each item's name: one press opens its text under its row, a second moves it, menu and Find claim Escape, next Escape closes it.
-    const pfMark = id => `.pf-row[data-item="${id}"] .pf-name-text + .row-file-btn`;
-    const pfFile = () => a.run(`(() => { const box = document.querySelector('.file-open-box'), row = box?.closest('.pf-row'); return { item: row?.dataset.item ?? null, anchored: !!row?.classList.contains('file-anchored'), text: box?.querySelector('pre.content')?.textContent ?? '', boxes: document.querySelectorAll('.file-open-box').length }; })()`);
-    const openPf = async (id, line) => {
-      await a.click(pfMark(id));
-      for (let i = 0; i < 40 && !(await pfFile()).text.includes(line); i++) await wait(50);
-      await a.settle();
-      return pfFile();
-    };
-    await pfShot('profiles-file-marks-860-light', 'light', true);
+    // File mark after each item's name: one press opens its text under its row, a second moves it, menu/Find/Delete confirm claim Escape, next Escape closes it.
     same('at 860, every listed item has a file mark right after its name', await a.all('.pf-row[data-item]', `!!e.querySelector('.pf-name-text + .row-file-btn')`), [true, true, true, true]);
     const notesFile = await openPf('skill:notes', 'Keep the facts and the writer’s intent.');
     same('at 860, pressing notes’s mark opens its text under its row, nothing cut off', [notesFile.item, notesFile.anchored, notesFile.text.includes('Keep the facts and the writer’s intent.'), notesFile.boxes, ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], ['skill:notes', true, true, 1]);
-    await pfShot('profiles-file-open-860-light', 'light');
     const standupFile = await openPf('skill:standup', 'Read the commits.');
     same('at 860, pressing standup’s mark moves the panel there, nothing cut off', [standupFile.item, standupFile.anchored, standupFile.text.includes('Read the commits.'), standupFile.boxes, ...await a.run(CUT_OFF)], ['skill:standup', true, true, 1]);
     await a.click('#status-profile');
@@ -3075,17 +3064,28 @@ async function practiceFlow() {
     await a.settle();
     await a.press('Escape');
     const findEsc = [await a.run(`document.querySelector('#profile-find')?.value`), (await pfFile()).boxes];
+    await a.click('#profile-delete');
     await a.press('Escape');
-    same('status bar menu and Find claim their own Escape while the file stays open; next Escape closes it and refocuses its mark',
-      [menuEsc, findEsc, (await pfFile()).boxes, await a.run(`document.activeElement === document.querySelector(${JSON.stringify(pfMark('skill:standup'))})`)],
-      [[false, 1], ['', 1], 0, true]);
+    const delEsc = [await a.exists('#profile-delete-confirm'), (await pfFile()).boxes, await a.run(`document.activeElement?.id`)];
+    await a.press('Escape');
+    same('status bar menu, Find and Delete confirmation claim Escape while the file stays open; next Escape closes it and refocuses its mark',
+      [menuEsc, findEsc, delEsc, (await pfFile()).boxes, await a.run(`document.activeElement === document.querySelector(${JSON.stringify(pfMark('skill:standup'))})`)],
+      [[false, 1], ['', 1], [false, 1, 'profile-delete'], 0, true]);
   });
   await withSidebarOpen(a, 1316, 819, async () => {
-    same('at 1316×819 the list column shows, the picker hides, and nothing is cut off',
+    await openPf('skill:notes', 'Keep the facts and the writer’s intent.');
+    same('at 1316×819 the list column shows, the picker hides, and nothing is cut off with a file open',
       [await a.run(`(() => { const p = document.querySelector('.pf-picker'); return p ? getComputedStyle(p).display : null; })()`), await a.run(`getComputedStyle(document.querySelector('.profiles-list .list-scroll')).display !== 'none'`),
         ...await a.run(CUT_OFF)],
       ['none', true]);
-    await pfShot('profiles-file-marks-1316-dark', 'dark', true);
+    if (shots) {
+      await a.run(`window.centralKnot.setAppearance('dark')`);
+      await wait(80);
+      await a.shot('profiles-file-open-1316-dark');
+      await a.run(`window.centralKnot.setAppearance('system')`);
+      await wait(80);
+    }
+    await a.press('Escape');
   });
   await fullSize(a);
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Focus')).click()`); await a.settle();
@@ -4951,23 +4951,66 @@ async function practiceFlow() {
   await a.click('#plugins-undo');
   same('Undo turns it back on: config.toml is as it was', [readFileSync(codexConfig, 'utf8') === configBefore, await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`)], [true, 'true']);
   same('nothing on the plugin pages waited for a later click: no Apply, no Discard, no chosen switch', await a.run('window.ckWaiting'), []);
-  // Profiles with a plugin's skill (marked) and server (unmarked) beside his own items.
-  if (shots) {
-    writeClaudeInstall(practice, 'ck-test-market', 'issue-tracker', '9.9.9', {
-      'skills/triage/SKILL.md': readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8'),
+  // Shared Profiles check & pictures at 860: same-named own & plugin skills (folded and different-text), long name + long `from` label, and 60-line file open under 880 px.
+  {
+    const longPlug = 'enterprise-platform-engineering-developer-tools';
+    const longSlug = 'quarterly-release-readiness-checklist-and-handoff';
+    const longBody = ['---', 'name: Quarterly release readiness checklist and post-deploy verification handoff', 'description: Long skill.', '---', '', ...Array.from({ length: 60 }, (_, i) => `Step ${i + 1} of the release checklist.`)].join('\n');
+    const standupHash = JSON.parse(readFileSync(join(practice, '.central-knot/skills.json'), 'utf8')).items.standup.hash;
+    const standupText = readFileSync(join(practice, `.central-knot/items/skills/standup/versions/${standupHash}/SKILL.md`), 'utf8');
+    const sameNotesId = `plugin:skill:${longPlug}@ck-test-market/notes`;
+    const foldedStandupId = `plugin:skill:${longPlug}@ck-test-market/standup`;
+    const longRowId = `plugin:skill:${longPlug}@ck-test-market/${longSlug}`;
+    writeClaudeInstall(practice, 'ck-test-market', longPlug, '1.0.0', {
+      'skills/notes/SKILL.md': '---\nname: notes\ndescription: Plugin notes.\n---\n\nPlugin notes body.\n',
+      'skills/standup/SKILL.md': standupText,
+      'skills/standup/extra.md': 'Plugin extra file.\n',
+      [`skills/${longSlug}/SKILL.md`]: longBody,
       '.mcp.json': JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp'] } } }),
     });
-    await a.click('#nav-profiles');
-    await a.click('#header-refresh');
-    for (let i = 0; i < 40 && !(await a.exists('.pf-row[data-item="plugin:mcp:issue-tracker@ck-test-market/issues"]')); i++) await wait(100);
-    await shotOpen('profiles-plugin-and-own-860-light', SMALLEST, 'light', async () => {
-      await a.run(`document.querySelector('.pf-row[data-item="plugin:skill:issue-tracker@ck-test-market/triage"]')?.scrollIntoView({ block: 'center' })`);
-      await a.settle();
-    });
-    await fullSize(a);
-    if (installsBefore === undefined) rmSync(installRecord); else writeFileSync(installRecord, installsBefore);
-    rmSync(join(practice, '.claude/plugins/cache/ck-test-market/issue-tracker/9.9.9'), { recursive: true, force: true });
-    await a.click('#nav-plugins');
+    try {
+      await a.click('#nav-profiles');
+      await a.click('#header-refresh');
+      for (let i = 0; i < 40 && !(await a.exists(`.pf-row[data-item="${longRowId}"]`)); i++) await wait(100);
+      await withSidebarOpen(a, ...SMALLEST, async () => {
+        if (shots) { await a.run(`window.centralKnot.setAppearance('light')`); await wait(80); }
+        try {
+          const ownNotes = await openPf('skill:notes', 'Keep the facts and the writer’s intent.');
+          const plugNotes = await openPf(sameNotesId, 'Plugin notes body.');
+          await a.press('Escape');
+          const folded = await a.exists(pfMark(foldedStandupId)) ? await openPf(foldedStandupId, 'Read the commits.') : { item: null };
+          const foldedTabs = folded.item ? await a.all('.file-tab', 'e.textContent') : [];
+          if (folded.item) await a.press('Escape');
+          same('same-named own and plugin skills each open their own text, and a folded plugin skill opens its plugin copy',
+            [ownNotes.text.includes('Keep the facts and the writer’s intent.'), plugNotes.text.includes('Plugin notes body.'), folded.item, foldedTabs.includes('extra.md')],
+            [true, true, foldedStandupId, true]);
+          if (shots) {
+            await a.run(`document.activeElement?.blur?.()`);
+            await a.run(`document.querySelector('.pf-row[data-item="skill:standup"]')?.scrollIntoView({ block: 'center' })`);
+            await wait(80);
+            await a.shot('profiles-same-name-860-light');
+          }
+          await a.run(`document.querySelector('.pf-row[data-item="${longRowId}"]')?.scrollIntoView({ block: 'center' })`);
+          await a.settle();
+          const longFit = await a.run(`(() => { const r = document.querySelector('.pf-row[data-item="${longRowId}"]'), n = r.querySelector('.pf-name-text'), m = r.querySelector('.row-file-btn'), s = r.querySelector('.pf-state'), nr = n.getBoundingClientRect(), mr = m.getBoundingClientRect(), sr = s.getBoundingClientRect(), rects = [...n.getClientRects()], last = rects.at(-1); return { width: Math.round(nr.width), lines: rects.length, markOnLast: Math.abs((mr.top + mr.bottom) / 2 - (last.top + last.bottom) / 2) <= 6, stateWidth: Math.round(sr.width), noOverlap: r.querySelector('.pf-name').getBoundingClientRect().right <= sr.left + 1 }; })()`);
+          same('at 860, a long name beside a long from label wraps cleanly, keeps its mark on the last line, and leaves Switching uncrowded',
+            [longFit.width >= 150, longFit.lines >= 2, longFit.markOnLast, longFit.stateWidth >= 200, longFit.noOverlap, ...await a.run(CUT_OFF)],
+            [true, true, true, true, true]);
+          if (shots) { await a.run(`document.activeElement?.blur?.()`); await a.shot('profiles-long-name-860-light'); }
+          await openPf(longRowId, 'Step 1 of the release checklist.');
+          await wait(80);
+          const longBox = await a.run(`(() => { const split = document.getElementById('profiles-split').getBoundingClientRect(), box = document.querySelector('.file-open-box').getBoundingClientRect(), row = document.querySelector('.pf-row.file-anchored'), head = document.querySelector('.pf-section')?.getBoundingClientRect(), next = row?.nextElementSibling?.getBoundingClientRect(); return { boxH: Math.round(box.height), splitH: Math.round(split.height), capped: box.height < split.height - 60, rowInSight: !!row && row.getBoundingClientRect().top >= (head?.bottom ?? split.top) - 2, nextInSight: !!next && next.top < split.bottom - 8 }; })()`);
+          same('at 860, a 60-line file box is capped inside .profiles-split and leaves its row and the next row in sight', [longBox.capped, longBox.rowInSight, longBox.nextInSight, ...await a.run(CUT_OFF)], [true, true, true]);
+          if (shots) await a.shot('profiles-long-file-860-light');
+          await a.press('Escape');
+        } finally { if (shots) { await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); } }
+      });
+      await fullSize(a);
+    } finally {
+      if (installsBefore === undefined) rmSync(installRecord); else writeFileSync(installRecord, installsBefore);
+      rmSync(join(practice, `.claude/plugins/cache/ck-test-market/${longPlug}/1.0.0`), { recursive: true, force: true });
+      await a.click('#nav-plugins');
+    }
   }
   writeFileSync(codexConfig, configBefore.slice(0, configBefore.indexOf('\n[marketplaces.ck-test-market]')));
   // document-tools' parts from an earlier version, moved at one look too: pdf-reader, edited in Pi since (Pi's skills folder known
