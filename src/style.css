@@ -646,10 +646,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-name-fit { flex-wrap: wrap; align-content: flex-start; height: 40px; padding-left: 36px; position: relative; }
 .ov-name-fit .row-open { position: absolute; left: 10px; margin: 0; top: 11px; }
 .ov-name-main { flex: 0 1 auto; min-width: 0; height: 40px; display: flex; align-items: center; gap: 8px; }
-/* While descriptions show, a name longer than half its name cell (and 280px, so a 30-letter name stays whole beside a dock)
-   is cut there, so one very long name doesn't take every description away (matrix.ts settleDescriptions, which takes the cut
-   off again once every description is left out). */
+/* While descriptions show, a name longer than half its name cell (and 280px with a tag, or 380px without one so a row that
+   dropped its routine tag uses that room) is cut there, so one very long name doesn't take every description away
+   (matrix.ts settleDescriptions, which takes the cut off again once every description is left out). */
 .ov-name-fit.name-cut > .ov-name-main { max-width: max(50%, 280px); }
+.ov-name-fit.name-cut:not(:has(.row-tag)) > .ov-name-main { max-width: max(50%, 380px); }
 .ov-name-fit > .row-tag, .ov-name-fit > .ov-name-about { line-height: 40px; }
 /* An opened row lets its name cell wrap so a plugin origin tag is never clipped out of view at 860. */
 .ov-row.open:not(.ov-file-anchored) { height: auto; min-height: 40px; }
