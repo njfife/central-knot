@@ -1,6 +1,7 @@
 // Profiles: named sets of items, switched in one click (here, from the status bar, or from the menu bar or tray icon). The list
-// shows each profile, `· N tools` where it applies to fewer than every managed tool, and which are in use (folding to a one-line
-// picker under 880 px); the open profile shows a short header line with its full preview behind `(?)` when the card adds a
+// shows each profile, `· N tools` where it applies to fewer than every managed tool, and which are in use, or while none is the
+// one last switched to, `Changed` (profileplan.ts profileNow: it is titled, picked and named in the status bar `Everyday ·
+// changed`, and opened by default) (folding to a one-line picker under 880 px); the open profile shows a short header line with its full preview behind `(?)` when the card adds a
 // clause, its `Applies in` strip of tools (toolsStrip, its `(?)` saying a tick saves at once and tools change on Switch), Find with `Changes N` (a pinned view
 // grouped `Turns on`, `Turns off`, then `Changes tools`), a short `leftOutBand` with its `(?)`, the save note behind `(?)` beside `In profile`, and every item it can tick
 // under its kind (descriptions on name hover): the library's items, and when `switchesPluginItems` is true each plugin's item
@@ -18,10 +19,10 @@ import { brandMark, kindGlyph, lineFacts, openPlugin, outcomeBand, pluginTag, pr
 import { lineControl } from './pluginline.ts';
 import { lineBusy, market, turnFromLine, viewCurrent, type LineAim } from './pluginstate.ts';
 import { button, checkbox, emptyState, findInput, h, icon, infoMark } from './dom.ts';
-import { allTurns, changeWords, claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, inUseName, itemRowState, keptOn, leftOut, listedChanges, listedPlugins, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, takenWhole, toolsOf, wholeCounts, withTool, wholeTurns, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn } from './profileplan.ts';
+import { allTurns, changeWords, claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, itemRowState, nameNow, nowLead, profileNow, keptOn, leftOut, listedChanges, listedPlugins, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, takenWhole, toolsOf, wholeCounts, withTool, wholeTurns, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn } from './profileplan.ts';
 import { DIRECTORY, noSingleSwitch, pageOfPart } from './pluginstatus.ts';
 import { counted } from './pluginswitch.ts';
-import { andList, toolList, toolNames } from './words.ts';
+import { andList, CHANGED, changedCard, toolList, toolNames } from './words.ts';
 import type { ItemKind } from './library.ts';
 import { plural } from './model.ts';
 import type { InstalledPlugin, PluginItem, Profile } from './types.ts';
@@ -40,10 +41,13 @@ const canEditProfiles = () => !acting() && !whyReadOnly(state.home!) && !profile
 const withClass = (element: HTMLElement, name: string) => { element.classList.add(name); return element; };
 const danger = (control: HTMLElement) => withClass(control, 'text-danger');
 
-/** The profile shown: the one opened, else the first in use, else the first. */
+/** The profiles now (profileplan.ts profileNow): those in use, else the one last switched to, changed, and the name every place says. */
+const now = () => profileNow(profiles(), items(), plugins());
+
+/** The profile shown: the one opened, else the first in use, else the one last switched to while none is, else the first. */
 function openProfile(): Profile | undefined {
-  const all = profiles().profiles;
-  return all.find(profile => profile.id === profileState.open) ?? inUse(all, items(), plugins())[0] ?? all[0];
+  const all = profiles().profiles, { inUse: inUseNow, changed } = now();
+  return all.find(profile => profile.id === profileState.open) ?? inUseNow[0] ?? changed ?? all[0];
 }
 
 /** A name nobody uses yet: "New profile", then "New profile 2"… */
@@ -68,14 +72,19 @@ function openProfileById(id: string) {
 /** The managed tools here, as the Tools strip and the list count them. */
 const managed = () => state.home!.sync.managed;
 
-/** One row of the list: a profile, how many items it has and, where it applies to fewer than every managed tool, how many tools; whether it is in use, and whether it is open. */
-function listRow(profile: Profile, { count, isInUse, selected }: { count: number; isInUse: boolean; selected: boolean }) {
+/**
+ * One row of the list: a profile, how many items it has and, where it applies to fewer than every managed tool, how many tools;
+ * whether it is in use, or the one last switched to named `<Profile> · changed` as everywhere (`changed`: its hover, words.ts
+ * changedCard), and whether it is open.
+ */
+function listRow(profile: Profile, { count, isInUse, changed, selected }: { count: number; isInUse: boolean; changed?: string; selected: boolean }) {
   const tools = toolsOf(profile, managed());
   return h(`button.list-row.profile-row${selected ? '.selected' : ''}`, { type: 'button', id: `profile-row-${profile.id}`, 'aria-current': selected ? 'true' : undefined,
     onclick: () => openProfileById(profile.id) },
     icon('sliders-horizontal', 14, 'tone-muted'),
-    // The name keeps its line (cut with … where it must, whole on hover); the counts go under it.
-    h('span.profile-row-text', {}, h('span.list-name.profile-row-name', { title: profile.name }, profile.name),
+    // The name keeps its line (cut with … where it must, whole on hover, ` · changed` never cut); the counts go under it.
+    h('span.profile-row-text', {}, h('span.profile-row-head', {}, h('span.list-name.profile-row-name', { title: profile.name }, profile.name),
+      changed ? h('span.profile-changed-word', { title: changed }, CHANGED) : null),
       h('span.list-fraction', {}, plural(count, 'item'), tools.length < managed().length ? ` · ${plural(tools.length, 'tool')}` : '')),
     isInUse ? h('span.profile-in-use', { title: profile.switchesPluginItems
       ? `${profile.name} is in use: what it has is on, and every other item is off wherever it can be switched`
@@ -84,19 +93,19 @@ function listRow(profile: Profile, { count, isInUse, selected }: { count: number
 
 /** The list column (and under 880 px, the one-line picker bar): New profile, then each profile, with `open` shown as selected. */
 function listColumn(open: Profile | undefined) {
-  const all = items(), plugged = plugins(), inUseNow = inUse(profiles().profiles, all, plugged);
+  const all = items(), plugged = plugins(), named = now(), inUseNow = named.inUse;
   const picker = h('span.pf-picker', {}, h('label', { for: 'profile-picker' }, 'Profile'),
     h('span.select.select-bar', {},
       h('select', { id: 'profile-picker', 'aria-label': 'Profile',
         onchange: (event: Event) => openProfileById((event.target as HTMLSelectElement).value) },
         profiles().profiles.map(profile => h('option', { value: profile.id, selected: profile === open },
-          `${profile.name}${inUseNow.includes(profile) ? ' · in use' : ''}`))),
+          `${nameNow(named, profile)}${inUseNow.includes(profile) ? ' · in use' : ''}`))),
       icon('chevrons-up-down', 14)));
   return h('div.list-column.profiles-list', {},
     h('div.toolbar.list-toolbar', {}, h('span.toolbar-title', {}, 'Profiles'), picker,
       h('div.toolbar-end', {}, button({ variant: 'outline', size: 'small', icon: 'plus', label: 'New profile', id: 'profile-new', disabled: !canEditProfiles(), onclick: newProfile }))),
     h('div.scroll.list-scroll', { id: 'profiles-list-scroll' },
-      profiles().profiles.map(profile => listRow(profile, { count: namedCount(profile, all, plugged), isInUse: inUseNow.includes(profile), selected: profile === open }))));
+      profiles().profiles.map(profile => listRow(profile, { count: namedCount(profile, all, plugged), isInUse: inUseNow.includes(profile), changed: profile === named.changed ? changedCard(profile.name, !!named.canSwitchBack) : undefined, selected: profile === open }))));
 }
 
 // ---------- The open profile ----------
@@ -428,6 +437,14 @@ function headerActions(profile: Profile, primary: HTMLElement | null): (Node | n
     danger(button({ variant: 'ghost', size: 'small', label: 'Delete', id: 'profile-delete', disabled: !canEditProfiles(), onclick: () => { profileState.confirmDelete = profile.id; rerender(); document.getElementById('profile-delete-confirm')?.focus(); } }))];
 }
 
+/** After the title of the one last switched to while none is in use: ` · changed` and its (?) saying what that means (words.ts changedCard). */
+function changedWord(profile: Profile, canSwitchBack: boolean) {
+  const mark = infoMark('profile-changed-title-info', `${profile.name} · changed`, changedCard(profile.name, canSwitchBack));
+  // The title's own hover names the profile; over the (?) its card says the rest.
+  mark.setAttribute('title', '');
+  return [h('span.profile-changed-word', {}, CHANGED), mark];
+}
+
 const SAVE_NOTE_CARD = 'Ticks save to the profile at once. Nothing in your tools changes until Switch.';
 
 /** The open profile: its header (short line with `(?)` when the card adds a clause, Rename, Delete), setup step when empty, Find with `Changes N`, and the items. */
@@ -440,7 +457,9 @@ function profileDetail(profile: Profile) {
   const pinnedIds = pinned ? new Set([...pinned.on, ...pinned.off, ...pinned.retooled]) : undefined;
   const inView = (list: { id: string }[]) => (pinnedIds ? list.filter(item => pinnedIds.has(item.id)).length : list.length);
   const shownCount = inView(shown) + inView(pluggedShown), totalCount = inView(all) + inView(visiblePlugins);
-  const title = profileState.renaming === profile.id ? renameField(profile) : h('h2', { title: profile.name }, profile.name);
+  // The one last switched to, while none is in use, is titled as every place names it: `Everyday · changed`.
+  const named = now(), changed = profile.id === named.changed?.id;
+  const title = profileState.renaming === profile.id ? renameField(profile) : h('h2', { title: profile.name }, profile.name, changed ? changedWord(profile, !!named.canSwitchBack) : null);
   const preview = switchPreview(profile, all, plugged), tip = way?.title ?? preview.tip;
   const toggleChanges = () => {
     const ids = (list: { id: string }[]) => list.map(change => change.id);
@@ -448,7 +467,8 @@ function profileDetail(profile: Profile) {
     rerender();
   };
   return h('div.detail-column', {},
-    h('div.pane-header.profile-header', {}, icon('sliders-horizontal', 16, 'tone-muted'),
+    // The title's (?) card opens below the whole header, clear of Switch, which it speaks of.
+    h('div.pane-header.profile-header', { 'data-info-block': true }, icon('sliders-horizontal', 16, 'tone-muted'),
       h('div.pane-title', {}, title,
         h('div.profile-subtitle', { 'data-info-block': true }, h('p', { id: 'profile-preview' }, way?.why ? `Can’t switch · ${way.why}` : preview.line),
           tip ? infoMark('profile-preview-info', 'Switch preview', tip) : null)),
@@ -506,7 +526,7 @@ function menuKeys(event: KeyboardEvent, close: () => void) {
  * One profile in the status bar's menu: choosing it switches, unless it is in use already. One not offered (profileplan.ts
  * switchable: nothing in it) is shown disabled, as on the page.
  */
-function menuChoice(profile: Profile, isInUse: boolean, all: LiveItem[], plugged: PluginLive[]) {
+function menuChoice(profile: Profile, isInUse: boolean, name: string, all: LiveItem[], plugged: PluginLive[]) {
   const empty = !switchable(profile, all, plugged), preview = empty ? '' : switchPreview(profile, all, plugged).card;
   return h('button.pf-menu-item', { type: 'button', role: 'menuitemcheckbox', 'aria-checked': String(isInUse), id: `status-profile-${profile.id}`, disabled: !canEditProfiles() || empty,
     title: empty ? `${profile.name} has nothing in it yet. Tick what it should have on, on the Profiles page.` : `${profile.name} · ${preview}`,
@@ -517,24 +537,28 @@ function menuChoice(profile: Profile, isInUse: boolean, all: LiveItem[], plugged
       if (!isInUse) void switchToProfile(profile.id); else rerender();
     } },
     h('span.pf-menu-tick', {}, isInUse ? icon('check', 14) : null),
-    h('span.pf-menu-body', {}, h('span.pf-menu-name', {}, empty ? `${profile.name} (empty)` : profile.name),
+    h('span.pf-menu-body', {}, h('span.pf-menu-name', {}, empty ? `${name} (empty)` : name),
       preview ? h('span.pf-menu-preview', {}, preview) : null));
 }
 
-/** The status bar's profile item: the profile in use (worked out: profileplan.ts inUse), and a menu to switch in one click. */
+/**
+ * The status bar's profile item: the profile in use (worked out), or the one last switched to while none is, `Everyday · changed`
+ * with only the name cut (profileplan.ts profileNow), and a menu to switch in one click.
+ */
 export function profileStatus(): HTMLElement | null {
   const home = state.home;
   if (!home?.profiles.profiles.length) return null;
-  const all = items(), plugged = plugins(), list = home.profiles.profiles, inUseNow = inUse(list, all, plugged), name = inUseName(list, all, plugged);
+  const all = items(), plugged = plugins(), list = home.profiles.profiles, named = now(), inUseNow = named.inUse;
   const close = () => { menuOpen = false; rerender(); document.getElementById('status-profile')?.focus(); };
   const menu = menuOpen ? h('div.pf-menu', { role: 'menu', 'aria-label': 'Switch profile', onkeydown: (event: KeyboardEvent) => menuKeys(event, close) },
-    list.map(profile => menuChoice(profile, inUseNow.includes(profile), all, plugged)), h('div.pf-menu-sep', { role: 'separator' }),
-    h('button.pf-menu-item', { type: 'button', role: 'menuitem', id: 'status-profile-edit', onclick: () => { menuOpen = false; profileState.open = inUseNow[0]?.id; showPage('profiles'); } }, h('span.pf-menu-tick'), h('span.pf-menu-name', {}, 'Edit profiles…'))) : null;
+    list.map(profile => menuChoice(profile, inUseNow.includes(profile), nameNow(named, profile), all, plugged)), h('div.pf-menu-sep', { role: 'separator' }),
+    h('button.pf-menu-item', { type: 'button', role: 'menuitem', id: 'status-profile-edit', onclick: () => { menuOpen = false; profileState.open = (inUseNow[0] ?? named.changed)?.id; showPage('profiles'); } }, h('span.pf-menu-tick'), h('span.pf-menu-name', {}, 'Edit profiles…'))) : null;
   return h('span.status-profile-wrap', {},
     h('button.status-item.status-profile', { type: 'button', id: 'status-profile', 'aria-haspopup': 'menu', 'aria-expanded': String(menuOpen), disabled: !!acting(),
-      title: `Profile in use: ${name}. Click to switch profiles.`,
+      title: `${nowLead(named)}: ${named.name}.${named.changed ? ` ${changedCard(named.changed.name, !!named.canSwitchBack)}` : ''} Click to switch profiles.`,
       onclick: (event: Event) => { event.stopPropagation(); menuOpen = !menuOpen; rerender(); if (menuOpen) (document.querySelector('.pf-menu-item[aria-checked="true"], .pf-menu-item:not(:disabled)') as HTMLElement | null)?.focus(); } },
-      icon('sliders-horizontal', 14), h('span.status-clip', {}, name), icon('chevron-up', 12, 'status-profile-chevron')),
+      icon('sliders-horizontal', 14), h('span.status-clip', {}, named.changed?.name ?? named.name), named.changed ? h('span.status-changed', {}, CHANGED) : null,
+      icon('chevron-up', 12, 'status-profile-chevron')),
     menu);
 }
 // A click anywhere else closes the profile menu.

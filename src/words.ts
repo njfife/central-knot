@@ -1,7 +1,7 @@
 // Words shared by the pages and by what the engines say: each tool's display name (toolNames) and short column name (toolShortNames), each kind's (kindNouns; the
 // rows of one result, of one kind or several: rowNouns, rowNames), the names of the pages called otherwise on screen
 // (pageNames), "Turn it on" (turnIt), where a copy was deleted (deletedIn), "a, b and c" lists, and a few sentences more than
-// one module says (a tool left out or not managed, through a plugin, a profile leaving use). A page's own words are its module's; a library row's are
+// one module says (a tool left out or not managed, through a plugin, a profile leaving use or `Everyday · changed`). A page's own words are its module's; a library row's are
 // libraryrow.ts libraryWords, a History entry's historyactions.ts and historypage.ts.
 import type { HomeKind } from './presence.ts';
 import type { NamedRow } from './itemrow.ts';
@@ -172,20 +172,48 @@ export const throughPlugin = (tool: HarnessId, given: { plugin: string; version?
 /** Shown in View source when a hook's declaring file or script cannot be read (hooksource.ts, hooksourceview.ts, main.ts). */
 export const HOOK_SOURCE_UNREADABLE = 'This file couldn’t be read.';
 
+/** What follows the name of the profile last switched to while no profile is in use, wherever it is named (profileplan.ts profileNow). */
+export const CHANGED = ' · changed';
+/** The profile last switched to, while no profile is in use, as every place names it: "Everyday · changed". */
+export const changedName = (name: string) => `${name}${CHANGED}`;
 /**
- * Before an act that would end the profiles in use (matrix.ts endsOf; after it, in the same verb: profileLeftUse): "Everyday stays
- * saved but stops being the profile in use", `may`: "… but may stop …"; `short`: "would leave Everyday" ("might …"). profileBack: what puts it back.
+ * What `Everyday · changed` means, said once from here (the result's (?): matrix.ts profileSpan; the Profiles title's (?), the
+ * list row's ` · changed` and the status bar's hover: profilespage.ts); the switch is promised only where the profile can be
+ * switched to now (`canSwitchBack`: profileplan.ts ProfileNow).
  */
-export function profileStops(names: readonly string[], may: boolean, short = false): string {
+export const changedCard = (name: string, canSwitchBack: boolean) =>
+  `What is on differs from ${name}, the profile you last switched to. ${name} itself is as you saved it${canSwitchBack ? '; switching to it again sets what Central Knot manages as it says' : ''}.`;
+
+/**
+ * What an act would end of the profiles in use (matrix.ts endsOf): their names, `may` while other clicks still wait, and
+ * `changed`, the profile every place would then name `<Profile> · changed` (profileplan.ts endedByChanges), where one would.
+ */
+export interface Ending { names: readonly string[]; may: boolean; changed?: string }
+/**
+ * Before an act that would end the profiles in use, in the words every page's forecast and the Sources band read (matrix.ts
+ * endsMark): where one would then be named `· changed`, what the status bar will then say; else that they stop being in use.
+ * `short`: beside a control.
+ */
+export function profileStops({ names, may, changed }: Ending, short = false): string {
+  if (changed) return short ? `${may ? 'might' : 'would'} show ${changedName(changed)}` : `the status bar ${may ? 'may' : 'will'} say ${changedName(changed)}`;
   const many = names.length > 1, who = andList([...names]);
   if (short) return `${may ? 'might' : 'would'} leave ${who}`;
   return `${who} ${many ? 'stay' : 'stays'} saved but ${may ? 'may stop' : many ? 'stop' : 'stops'} being the ${many ? 'profiles' : 'profile'} in use`;
 }
-export const profileBack = (names: readonly string[]) => `Undo, or switching to ${names.length > 1 ? 'one of them' : 'it'} again, puts it back in use.`;
+/**
+ * What puts back in use the profiles an act would end (profileStops' hover). Undo puts back those it ends (`names`): where
+ * the one then named `· changed` is among them, it is said to stay saved; where it is not (they came into use without a
+ * switch), the hover names those Undo puts back.
+ */
+export function profileBack({ names, changed }: Ending): string {
+  if (changed && !names.includes(changed)) return `Undo puts ${andList([...names])} back in use.`;
+  return `${changed ? `${changed} stays saved: ` : ''}Undo, or switching to ${!changed && names.length > 1 ? 'one of them' : 'it'} again, puts it back in use.`;
+}
 
 /**
- * Says that profiles stopped being in use (after an act: app.ts profileEndedLine):
- * "Everyday stopped being the profile in use.", or for several "Everyday and Focus stopped being the profiles in use.".
+ * Says that profiles stopped being in use, after an act that ended them, where no profile is then named `<Profile> · changed`
+ * (none was last switched to, or another came into use: app.ts profileEndedLine; where one is, changedName): "Everyday stopped
+ * being the profile in use.", or for several "Everyday and Focus stopped being the profiles in use.".
  */
 export function profileLeftUse(names: readonly string[]): string {
   if (!names.length) return '';

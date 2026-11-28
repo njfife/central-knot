@@ -2141,9 +2141,9 @@ test('On another plugin’s page (or after Refresh), the header omits "Last chan
 
 /** Builds a History-page restore fixture with `notes` and `standup`, mocked restore/refresh replies, and profiles. */
 function historyRestoreWorld(t: TestContext, events: Record<string, unknown>[],
-  { beforeOn, afterOn, beforeDeleted = [], profiles, reply }: {
+  { beforeOn, afterOn, beforeDeleted = [], profiles, last, reply }: {
     beforeOn: Record<string, boolean>; afterOn: Record<string, boolean>; beforeDeleted?: string[];
-    profiles: { id: string; name: string; items: string[] }[]; reply: Record<string, unknown>;
+    profiles: { id: string; name: string; items: string[] }[]; last?: string; reply: Record<string, unknown>;
   }) {
   start();
   const slot = homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'standup' }], { on: false });
@@ -2154,7 +2154,7 @@ function historyRestoreWorld(t: TestContext, events: Record<string, unknown>[],
     const view = structuredClone(base);
     for (const [key, isOn] of Object.entries(on)) view.skills.library[key]!.on = isOn;
     for (const key of deleted) view.skills.library[key]!.deleted = { at: '2026-11-25T09:00:00.000Z' };
-    view.profiles = { profiles: profiles.map(profile => ({ ...profile, switchesPluginItems: true })), plugins: [] };
+    view.profiles = { profiles: profiles.map(profile => ({ ...profile, switchesPluginItems: true })), plugins: [], ...(last ? { last } : {}) };
     return view;
   };
   app.home = viewWith(beforeOn, beforeDeleted);
@@ -2168,6 +2168,22 @@ const HISTORY_STANDUP_OFF = [
   { id: 'on-1', kind: 'on', item: 'standup', key: 'standup', of: 'skill', at: '2026-11-25T10:03:00.000Z', losers: [{ tool: 'claude-cli', hash: 'h1' }], orderProved: true },
 ];
 const STANDUP_WRITTEN = { results: [{ item: 'standup', harness: 'claude-cli', outcome: 'written', message: 'Written.' }], harnessWrites: 1, made: ['on-1'], reloads: [] };
+
+test('History Undo that ends Everyday, the profile last switched to, says Everyday · changed in its sentence’s place; two ended together, the same', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] }, backup = { id: 'p-2', name: 'Backup', items: ['skill:notes'] };
+  historyRestoreWorld(t, HISTORY_STANDUP_OFF, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday, backup], last: 'p-1', reply: STANDUP_WRITTEN });
+  await restoreEvent('off-1');
+  assert.match(app.outcome?.text ?? '', /\. Everyday · changed$/);
+  assert.equal(app.outcome?.profileLine, 'Everyday · changed');
+});
+
+test('History Undo that ends Everyday, the one last switched to, while Focus comes into use says it stopped being in use, as before', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const focus = { id: 'p-2', name: 'Focus', items: ['skill:notes', 'skill:standup'] };
+  historyRestoreWorld(t, HISTORY_STANDUP_OFF, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday, focus], last: 'p-1', reply: STANDUP_WRITTEN });
+  await restoreEvent('off-1');
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
+});
 
 test('History Undo that stops Everyday matching says so even when another profile (Focus) now matches', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };

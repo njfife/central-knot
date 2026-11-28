@@ -273,6 +273,9 @@ ul { list-style: none; }
 .band-profile { flex: 0 1 auto; min-width: 0; max-width: 100%; display: inline-flex; align-items: baseline; padding-left: 20px; font-size: 12px; line-height: 16px; color: var(--ink); }
 .band-profile-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .band-profile-rest { flex: none; white-space: pre; }
+/* After `Everyday · changed`, its (?): what the next switch does (matrix.ts profileSpan), on the line's own height. */
+.band-profile > .info-wrap { flex: none; align-self: center; margin-left: 2px; }
+.band-profile .info-mark { width: 18px; height: 16px; }
 .header-result:not(.result-whole) .result-row2:has(.band-profile) > .band-lines { flex: 4 1 0; min-width: 48px; }
 .header-result:not(.result-whole) .result-row2:has(.band-profile) > .result-reloads { flex: 1 0 92px; min-width: 0; }
 .reload-list { display: flex; flex-direction: column; gap: 8px; padding: 2px 0 4px 20px; font-size: 12px; line-height: 18px; }
@@ -2118,6 +2121,9 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .toolbar-title { font-size: 12px; line-height: 16px; font-weight: 600; }
 .profile-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .profile-row-name { min-width: 0; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.profile-row-head { display: flex; min-width: 0; }
+.profile-row-head .profile-row-name { flex: 0 1 auto; }
+.profile-row-head .profile-changed-word { flex: none; line-height: 16px; white-space: pre; }
 .profile-row-text .list-fraction { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .profile-row { height: auto; min-height: 37px; padding-block: 8px; }
 .profile-in-use { flex: none; height: 20px; display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 14px; font-weight: 500; white-space: nowrap; background: var(--picked); color: var(--accent-ink); }
@@ -2127,6 +2133,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .profile-subtitle { display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: wrap; }
 .profile-subtitle > .info-wrap { flex: none; }
 .profile-header .pane-title h2, .profile-header .pane-title p { overflow-wrap: anywhere; }
+.profile-changed-word { font-weight: 400; color: var(--ink-soft); }
 /* What a switch will do is said whole: it wraps rather than being cut */
 .profile-header .pane-title p { white-space: normal; }
 .profile-header { flex-wrap: wrap; row-gap: 8px; }
@@ -2210,7 +2217,10 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* It gives way first in a crowded bar: a long name ends in an ellipsis (its tooltip and the menu have it whole). The sync switch
    beside it keeps its width, since its words can't shorten and would run under the version. */
 /* "No profile" stays whole at the narrowest window; only a longer name shortens. */
-.status-profile-wrap { position: relative; display: flex; flex: 0 3 auto; min-width: 112px; max-width: 200px; }
+.status-profile-wrap { position: relative; display: flex; flex: 0 3 auto; min-width: 112px; max-width: 260px; }
+/* `Everyday · changed`: only the name gives way, ` · changed` stays whole beside it (profilespage.ts profileStatus). */
+.status-profile .status-changed { flex: none; margin-left: -6px; white-space: pre; }
+.status-profile-wrap:has(.status-changed) { min-width: 150px; }
 #status-facts .status-item:has(> .fact-short) { flex: none; }
 #status-facts:has(> .status-profile-wrap) > .sync-switch { flex: none; }
 .status-profile { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 6px; min-width: 0; height: 22px; padding: 0 6px; margin: 0 -6px; border-radius: 6px; color: var(--ink); font-weight: 500; }
@@ -2241,6 +2251,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .other-app-says { color: var(--ink-soft); max-width: 90ch; }
 .harness-scroll > * { flex: none; }
 .harness-scroll > .tools-note { margin: 0; max-width: 80ch; }
+.tools-note-profile { white-space: nowrap; }
 .harness-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; }
 .harness-card { container-type: inline-size; display: flex; flex-direction: column; color: var(--ink); }
 .harness-card-main { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 12px 14px; }
