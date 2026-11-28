@@ -4417,4 +4417,33 @@ test('a click on a tool’s Plugins tab keeps Plugin marketplaces’ result, Und
   assert.ok(pluginsResult().some(node => textOf(node).includes('Marketplace folder not found.')));
 });
 
+test('Undo of an Add on Plugin marketplaces focuses padd even when the stale DOM before busy’s redraw still holds pswitch', async t => {
+  start();
+  onPage('plugins');
+  const addedView = { ...view, marketplaces: [{ ...entry, states: { alpha: { 'claude-cli': { state: 'installed' } } },
+    switches: { alpha: { entry: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] }, tools: { 'claude-cli': { wanted: true, has: 'whole', takes: true } } } } }] } as unknown as PluginsView;
+  const foundAgainView = { ...view, marketplaces: [{ ...entry, states: { alpha: { 'claude-cli': { state: 'installed' } } },
+    switches: { alpha: { tools: { 'claude-cli': { wanted: false, has: 'whole', takes: true } } } } }] } as unknown as PluginsView;
+  let nextView = addedView;
+  let redrawnAfterUndo = false;
+  t.mock.method(api, 'plugins', async () => nextView);
+  t.mock.method(api, 'refresh', async () => ({ ...app.home!, readId: 2 } as HomeView));
+  turnPlugin(entry, 'alpha', 'add');
+  await settled();
+  await main.answer({ done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'install', report: report('installed', 'Installed.') }], before: null, back: [] });
+  nextView = foundAgainView;
+  setRenderer(() => { if (market.view === foundAgainView && !app.busy) redrawnAfterUndo = true; });
+  t.after(() => setRenderer(() => {}));
+  let focusedId = '';
+  // Before busy's final redraw, the DOM still holds pswitch; once busy redraws with foundAgainView, only padd is present.
+  t.mock.method(document, 'getElementById', (id: string) => {
+    if (id === 'announcement') return announcement;
+    const expected = redrawnAfterUndo ? 'padd-0-alpha' : 'pswitch-0-alpha';
+    return id === expected ? { ...element(), id, focus() { focusedId = id; } } : null;
+  });
+  undoLast();
+  await settled();
+  assert.equal(focusedId, 'padd-0-alpha');
+});
+
 

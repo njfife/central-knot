@@ -29,7 +29,7 @@ import { pin, placeIn } from './itemrow.ts';
 import { failPageData, pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
 import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
-import { FIND_FROM, boxOf, categoriesOf, copiesToCompare, installedFrom, marketTitle, matches, pluginPlace, samePart, toolMark } from './pluginstatus.ts';
+import { FIND_FROM, boxOf, categoriesOf, copiesToCompare, foundIn, installedFrom, marketTitle, matches, pluginPlace, samePart, toolMark } from './pluginstatus.ts';
 import { counted, wholeAlso } from './pluginswitch.ts';
 import { yoursStay } from './pluginline.ts';
 import type { PluginEntry } from './pluginrecord.ts';
@@ -652,8 +652,9 @@ const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act
   const at = entry ? market.view!.marketplaces.indexOf(entry) : -1;
   const tool = back[0]?.tool ?? (place.startsWith('instructions:') ? place.slice(13) as HarnessId : undefined);
   const id = isInstructions(place) && tool ? sessionOffId(tool, last.turn.source, last.turn.plugin)
-    : place !== 'plugins' && entry ? `harness-plugin-switch-${entry.name}-${last.turn.plugin}` : `pswitch-${market.nav.plugin ? 'page-' : ''}${at}-${last.turn.plugin}`;
-  if (showsPluginsResult(place)) focusWhenDone(document.getElementById(id) ? id : id.replace(/^pswitch/, 'padd'));
+    : place !== 'plugins' && entry ? `harness-plugin-switch-${entry.name}-${last.turn.plugin}`
+    : `${entry && foundIn(market.view!, entry, last.turn.plugin).length ? 'padd' : 'pswitch'}-${market.nav.plugin ? 'page-' : ''}${at}-${last.turn.plugin}`;
+  if (showsPluginsResult(place)) focusWhenDone(id);
   return problems.get(place) ?? (resultSentence(resultLines(done, true), true) || 'Nothing changed.');
 });
 
