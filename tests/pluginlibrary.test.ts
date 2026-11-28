@@ -561,6 +561,24 @@ test('An edit in Pi lets notes go, kept where it is: nothing of it reaches Claud
 
 // ---------- Found by the confirming read ----------
 
+// What a box does today, recorded: a tick lets every item into its tool again, as nothing stored says which were switched off one by one.
+test('Two items kept out of Pi one by one, as a plugin page’s item switch does: Update keeps them out; Pi’s box unticked and ticked again lets Pi into every item, so they come back on there, with Claude Code holding the plugin and without', async () => {
+  for (const tools of [['claude-cli', 'pi-cli'], ['pi-cli']] as HarnessId[][]) {
+    const box = await kitHome({ tools });
+    try {
+      await box.turn(tools.length > 1 ? 'on' : 'let-in', tools.length > 1 ? undefined : 'pi-cli');
+      await applySkills(box.share, box.tools, ['notes', 'review'].map(key => ({ key, on: true, except: ['pi-cli' as HarnessId] })));
+      const kept = async () => Object.values((await box.library()).skill).filter(item => item.except.includes('pi-cli')).map(item => item.key);
+      assert.deepEqual([await kept(), itemsOnWords(await box.view(), 'kit', 'pi-cli'), itemsAllIn(await box.view(), 'kit', 'pi-cli')], [['notes', 'review'], '3 of its 5 items are on', false], tools.join());
+      await box.update();
+      assert.deepEqual([await kept(), await exists(box.pi('skills/notes'))], [['notes', 'review'], false], `Update leaves them out: ${tools.join()}`);
+      await box.turn('keep-out', 'pi-cli');
+      await box.turn('let-in', 'pi-cli');
+      assert.deepEqual([await kept(), await exists(box.pi('skills/notes/SKILL.md')), itemsOnWords(await box.view(), 'kit', 'pi-cli')], [[], true, '5 of its 5 items are on'], `the tick lets Pi into each: ${tools.join()}`);
+    } finally { await box.cleanup(); }
+  }
+});
+
 test('Ticking Pi’s box turns its items On there as the plugin’s On does, so a name he deleted comes back; the automatic check never brings it back', async () => {
   const box = await kitHome();
   try {

@@ -1657,6 +1657,18 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .plugin-skills .plugin-parts li.with-end:hover { background: var(--hover); }
 .plugin-parts li.with-end { grid-template-columns: minmax(120px, max-content) minmax(0, 1fr) auto; min-height: 28px; align-items: start; }
 .skill-switches { display: inline-flex; align-self: start; }
+/* Its items with switches: each line's places at its end, under the marks above the list (its border and padding: 13px); a long
+   name shrinks, cut by .plugin-name's ellipsis (its button's title has it whole), before it pushes a switch out. */
+.plugin-items-list .plugin-outcome-row.with-end { grid-template-columns: minmax(96px, max-content) minmax(96px, 1fr) auto; }
+.plugin-items-list .plugin-outcome-row.with-end:hover { background: color-mix(in oklab, var(--ink) 6%, transparent); }
+/* A box's count line wraps without leaving its last word alone ("Pi."). */
+.plugin-tool-state { text-wrap: pretty; }
+.plugin-items-section .skill-switch-cols { padding-right: 13px; }
+.plugin-items-name { display: flex; gap: 4px; align-items: baseline; min-width: 0; }
+.plugin-items-name > .plugin-part-link, .plugin-items-name > code { min-width: 0; }
+/* A switch's click target 24px tall, its drawing as it is. */
+.plugin-items-list .switch::after { content: ''; position: absolute; inset: -3px -2px; }
+.item-cell-why { font-size: 11.5px; line-height: 1.25; color: var(--ink-soft); text-align: center; cursor: default; }
 .skill-switch, .skill-switch-head { width: 96px; display: inline-flex; justify-content: center; align-items: center; }
 .skill-switch-head { flex-direction: column; font-size: 11.5px; color: var(--ink); white-space: nowrap; }
 .skill-switch-tool { display: inline-flex; align-items: center; gap: 5px; }
