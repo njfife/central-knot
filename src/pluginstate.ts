@@ -672,7 +672,7 @@ export const pluginLabeler = (extra: { source: string; plugin: string; marketNam
 
 /**
  * Undo's label: "Undo the rest" after an Undo that didn't finish; with the click it reverses ("Undo gamma", "Undo gamma in Codex"
- * for a box on Plugin marketplaces; on a tool's own Plugins tab the tool is not repeated) when the sentence beside it names more
+ * for a box on the Plugins page; on a tool's own Plugins tab the tool is not repeated) when the sentence beside it names more
  * than that one click; else "Undo".
  */
 export function undoLabel(place: RunPlace = placeNow()): string {
