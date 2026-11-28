@@ -1,15 +1,16 @@
 // One plugin's page: what it is, its one switch and each tool's line (its box, ticked while the plugin is in that tool, and
-// what that tool has: pluginrecord.ts), its parts (each skill, command, agent, instruction file and MCP server entry as
-// written, the hooks that can add text to sessions and its other hooks, each with what it runs, and its language servers
-// and programs), and its In each tool and Readme folds (both shut at open). The switch and each tool's box wait their turn
-// in the page's list (pluginstate.ts turnPlugin), and the panel says how its click stands while waiting or running
-// (pluginparts.ts clickNote), with the ended result once in the header; Update and the skill switches under Skills act at
-// once (pluginstate.ts applyPluginOps). An item's switch under Its items, and Use the plugin's over his own copy, are the
+// what that tool has: pluginrecord.ts), its parts (each skill, command, agent and instruction file as written, each MCP
+// server's parsed JSON entry, the hooks that can add text to sessions and its other hooks, each with what it runs, and its
+// language servers and programs), and its In each tool and Readme folds (both shut at open). The switch and each tool's box
+// wait their turn in the page's list (pluginstate.ts turnPlugin), and the panel says how its click stands while waiting or
+// running (pluginparts.ts clickNote); once it ends, a result with something to act on is said once in the header and one with
+// nothing to act on goes to the status bar (pluginspage.ts runLine, app.ts saidInStatusBar); Update and the skill switches
+// under Skills act at once (pluginstate.ts applyPluginOps). An item's switch under Its items, and Use the plugin's over his own copy, are the
 // Library row's own act (matrix.ts flipInHarness → libraryrow.ts rowClicks.inHarness), checked again by stillLinked; where
 // a switch stands is the Library's rule (itemCells → libraryrow.ts toolSwitch).
 // Fold state lives here while that plugin's page is drawn (shownFolds, drawnPlugin; cleared by afterPluginPageDrawn).
 import { acting, rerender, state as app, whyKindReadOnly, type Click } from './app.ts';
-import { afterLayout, button, fileBlocks, h, icon, infoMark, toggle as switchToggle } from './dom.ts';
+import { afterLayout, button, fileBlocks, h, icon, infoMark, toggle as switchToggle, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { libraryEntry, librarySentence } from './historyactions.ts';
 import { kindSource } from './itemrow.ts';
@@ -39,12 +40,17 @@ const tone: Record<Outcome['result'], string> = { works: 'tone-muted', limited: 
 const glyph: Record<Outcome['result'], Parameters<typeof icon>[0]> = { works: 'check', limited: 'circle-minus', ignored: 'circle-off', fails: 'circle-x', unknown: 'circle-question-mark' };
 
 /**
- * What installing does in each tool. Tools that behave the same share one line, so a real difference stands out. When
- * every part works everywhere (only names differ), it is a few plain lines; a limit anywhere makes it a table.
+ * What installing does in each tool. Tools with limits come first, in the tools' order; tools where everything works follow.
+ * Tools that behave the same share one line, so a real difference stands out. When every part works everywhere (only names
+ * differ), it is a few plain lines; a limit anywhere makes it a table.
  */
 function outcomesBlock(view: PluginsView, entry: MarketplaceView, plugin: PluginView, components: Components) {
   // Pi, OpenCode and Antigravity, which take its items instead, are described by Its items.
-  const tools = nativeTools(view, entry, plugin.name);
+  const native = nativeTools(view, entry, plugin.name);
+  const tools = [
+    ...native.filter(tool => limitsIn(tool, components).length),
+    ...native.filter(tool => !limitsIn(tool, components).length),
+  ];
   const byTool = Object.fromEntries(tools.map(tool => [tool, outcomes(tool, components)])) as Record<HarnessId, Outcome[]>;
   const groups = groupBy(tools, tool => JSON.stringify(byTool[tool]));
   // A tool that prefixes names shows the real name a person types, e.g. document-tools:pdf-reader.
@@ -53,9 +59,19 @@ function outcomesBlock(view: PluginsView, entry: MarketplaceView, plugin: Plugin
   const line = (outcome: Outcome) => h('span.plugin-outcome-item', {}, outcome.result === 'works' ? null : icon(glyph[outcome.result], 12, tone[outcome.result]),
     h('span.plugin-outcome-kind', {}, outcome.component), ' ', ...inlineMarkdown(outcome.text, openLink), outcome.names ? [' ', h('code.plugin-name', {}, example(outcome.names))] : null);
   const allWork = tools.every(tool => byTool[tool].every(outcome => outcome.result === 'works'));
-  return h(`ul.plugin-outcome-list${allWork ? '.plugin-outcome-plain' : ''}`, {}, [...groups.values()].map(tools => h('li.plugin-outcome-row', {},
-    h('span.plugin-outcome-tools', {}, tools.map(tool => brandMark(tool, 14)), h('strong', {}, tools.map(tool => names[tool]).join(', '))),
-    h('span.plugin-outcome-what', {}, byTool[tools[0]!].map(line)))));
+  return h(`ul.plugin-outcome-list${allWork ? '.plugin-outcome-plain' : ''}`, {}, [...groups.values()].map(group => h('li.plugin-outcome-row', { 'data-tools': group.join(' '), tabindex: '-1' },
+    h('span.plugin-outcome-tools', {}, group.map(tool => brandMark(tool, 14)), h('strong', {}, group.map(tool => names[tool]).join(', '))),
+    h('span.plugin-outcome-what', {}, byTool[group[0]!].map(line)))));
+}
+
+/** Opens the "In each tool" fold and brings `tool`'s row into sight (moving focus there when activated from the keyboard). */
+function openOutcomesFor(pageKey: string, tool: HarnessId, fromKeyboard = false): void {
+  if (shownFolds?.key === pageKey) shownFolds.folds.outcomes = true;
+  const details = document.getElementById('plugin-outcomes') as HTMLDetailsElement | null;
+  if (details && !details.open) details.open = true;
+  const row = document.querySelector<HTMLElement>(`.plugin-outcome-row[data-tools~="${tool}"]`);
+  row?.scrollIntoView({ block: 'center' });
+  if (fromKeyboard) row?.focus({ preventScroll: true });
 }
 
 /** "Installed · 1.2.0", then `more` ("differs from the marketplace’s copy", "1 skill off"). When the tool has another version than the marketplace offers, a second line says which. */
@@ -72,7 +88,7 @@ function installedLine(version: string | undefined, offered: string | undefined,
  * offered (pluginparts.ts uninstallControl), its question across the rows. `compareTo`: the
  * version an installed copy is compared with (see versionToCompare).
  */
-function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, compareTo: string | undefined, components?: Components) {
+function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, compareTo: string | undefined, pageKey: string, components?: Components) {
   const status = (tool: HarnessId, mark: ToolMark) => {
     const stale = copyStale(entry, plugin.name, tool, compareTo, shownDetail(pluginKey(entry.source, plugin.name)));
     const state = stateOf(entry, plugin.name, tool);
@@ -83,7 +99,16 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     if (mark === 'waits' && !updatesRun()) return 'Waits for automatic updates';
     // A dash (some of its items in) says what its click does: it takes every one out, one switched in by itself too.
     if (itemsThere(mark, tool)) return `${itemsOnWords(entry, plugin.name, tool, ` in ${names[tool]}`)}.${itemsAllIn(entry, plugin.name, tool) ? '' : ` A click takes all ${entry.items?.[plugin.name]?.of[tool] ?? 0} out.`}`;
-    return [MARK_WORDS[mark], mark === 'absent' || mark === 'missing' ? limitNote(components ? limitsIn(tool, components) : []) : ''].filter(Boolean).join(' · ');
+    const limit = mark === 'absent' || mark === 'missing' ? limitNote(components ? limitsIn(tool, components) : []) : '';
+    if (limit) {
+      const link = h('button.inline-link.plugin-limit-link', {
+        type: 'button', id: `plimit-${marketIndex}-${plugin.name}-${tool}`,
+        title: `Open In each tool at ${names[tool]}’s limits`,
+        onclick: (event: MouseEvent) => openOutcomesFor(pageKey, tool, event.detail === 0),
+      }, limit);
+      return MARK_WORDS[mark] ? h('span', {}, MARK_WORDS[mark], ' · ', link) : link;
+    }
+    return MARK_WORDS[mark];
   };
   const updates = view.canWrite ? updateOps(view, entry, plugin) : [];
   const notIncluded = whyNotCarried(entry, plugin.name);
@@ -107,7 +132,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     // box would install files no tool reads.
     shownDetail(pluginKey(entry.source, plugin.name))?.onlyInstructions
       ? h('p.plugin-panel-hint', { id: 'plugin-only-instructions' }, 'No tool reads these files by itself: copy the text into your own instructions.') : null,
-    h('div.plugin-tool-rows', {}, view.tools.flatMap(tool => {
+    withToolCount(h('div.plugin-tool-rows', {}, view.tools.flatMap(tool => {
       const { mark, words } = markOf(view, entry, plugin, tool, compareTo);
       const box = boxOf(view, entry, plugin.name, tool, { mark, words });
       // Under the box: what it has, or what the box says more (why it is off); in Pi, OpenCode and Antigravity, where none
@@ -119,7 +144,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
       const clashes = (items?.clashes ?? []).filter(clash => clash.tool === tool && clash.clash === 'shared');
       const yours = items?.yours?.[tool] ?? [];
       const state = why.length ? why.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason))
-        : box.held && (yours.length || clashes.length) ? null : h('span.plugin-tool-state', { title: words }, box.line ?? status(tool, mark));
+        : box.held && (yours.length || clashes.length) ? null : h('span.plugin-tool-state', { title: box.off ?? words }, box.line ?? status(tool, mark));
       // Uninstall… under the box; its question, open, on a line of its own after this tool's.
       const [uninstall, question] = uninstallControl(entry, plugin, tool, `puninstall-${marketIndex}-${plugin.name}-${tool}`, box);
       return [h('div.plugin-tool', { 'data-tool': tool }, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
@@ -128,7 +153,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
           // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
           view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null,
           uninstall)), question];
-    })));
+    })), Math.max(1, view.tools.length)));
 }
 
 /** A plugin's item as the Library has it, its row and item, while it is still linked to this plugin and On; else none. */
@@ -343,8 +368,8 @@ const fileKinds: Record<FileKind, { title: string; file: string; suffix?: string
   instructions: { title: 'Instruction files', file: 'Instruction file', suffix: ', read by no tool', info: 'The model sees one only when something tells it to read the file, such as one of the plugin’s skills.' },
   mcp: { title: 'MCP servers', file: 'Entry', mono: true },
 };
-/** Pretty-prints an MCP server's JSON entry verbatim (fallback to raw text if unparseable). */
-const prettyJson = (raw: string) => { try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; } };
+/** Formats a parsed MCP server JSON entry (`catalogdetail.ts` JSON string) with 2-space indent: keys, order and values kept; spacing and number forms normalised. */
+const prettyJson = (raw: string) => JSON.stringify(JSON.parse(raw), null, 2);
 /** A hook of the marketplace's copy that can add text in one of the tools that take plugins (pluginoutcomes.ts addsText). */
 const addsTextSomewhere = (hook: DeclaredHook) => pluginTools.some(tool => addsText(tool, hook));
 
@@ -387,7 +412,7 @@ function sessionHookStrip(view: PluginsView, entry: MarketplaceView, plugin: Plu
   const unknown = view.tools.some(tool => stateOf(entry, plugin.name, tool).state === 'not-known' || (installed(entry, plugin.name, tool) && !installs.some(item => item.tool === tool)));
   const inAnyTool = installs.length > 0 || view.tools.some(tool => itemsIn(entry, plugin.name, tool));
   if (!eligible.length) return hookGroup(`${owner}\u0000session`, 'hook-source-session', entry.name, plugin.name, 'Hooks that can add text to sessions',
-    marketText, (unknown ? undefined : hookCantRunReason({ inAnyTool, installs, fingerprints: marketText.map(hookFingerprint) })) ?? sessionHooksAbout(componentsOf(entry, plugin) ?? componentsFrom(detail), nativeTools(view, entry, plugin.name)));
+    marketText, (unknown ? undefined : hookCantRunReason({ inAnyTool, installs, fingerprints: marketText.map(hookFingerprint) })) ?? sessionHooksAbout(componentsOf(entry, plugin) ?? componentsFrom(detail), nativeTools(view, entry, plugin.name), marketText));
   const selected = eligible.find(each => each.install.tool === market.nav.hookTool) ?? eligible[0]!;
   const tool = selected.install.tool;
   const picker = eligible.length > 1 ? h('span.select.select-bar.plugin-hook-as', {},
@@ -479,7 +504,7 @@ function partIds(prefix: string) {
 
 /**
  * One group of skills, commands, agents, instruction files or MCP servers, with its heading suffix and info card where it has them (fileKinds, or extras.info for skills). A row
- * opens its file or entry as written, in the view the Library's Files view gives a standalone SKILL.md, each text named by who holds it, and
+ * opens its file as written (or its parsed MCP entry formatted as JSON), in the view the Library's Files view gives a standalone SKILL.md, each text named by who holds it, and
  * a text that differs from the marketplace's in the warning tone. A closed row says which tools' copies differ. A description stays at two lines, since the file holds it whole.
  * `owner` (the plugin's key) keeps what is opened its own; `idFor` gives each part its element id; `offeredRead` says the
  * marketplace's own copy was read (see differsNote); `extras` adds the skills' switches (see skillColumns).
@@ -596,7 +621,7 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
       plugin.description ? h('p.plugin-about', {}, plugin.description) : null,
       facts.length ? h('p.plugin-meta', {}, dotted(facts)) : null,
       library ? h('p.plugin-meta', {}, library) : null),
-    installPanel(view, entry, plugin, marketIndex, versionToCompare(plugin, detail), components),
+    installPanel(view, entry, plugin, marketIndex, versionToCompare(plugin, detail), pageKey, components),
     itemsSection(view, entry, plugin, marketIndex),
     // Parts and In each tool, beside the README fold on a wide page (style.css), one above the other otherwise.
     h('div.plugin-columns', {},

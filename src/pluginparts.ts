@@ -127,7 +127,7 @@ export function uninstallControl(entry: MarketplaceView, plugin: PluginView, too
     if (open) readAgainNow(entry.source, plugin.name);
     market.asking = open ? asks : undefined; rerender(); document.getElementById(open ? `${id}-cancel` : id)?.focus();
   };
-  if (market.asking !== asks) return [button({ variant: 'ghost', size: 'small', label: 'Uninstall…', id, disabled: busy, onclick: () => ask(true) }), null];
+  if (market.asking !== asks) return [button({ variant: 'link', size: 'small', label: 'Uninstall…', id, disabled: busy, onclick: () => ask(true) }), null];
   // A new view drops a read in flight (pluginstate.ts markDetailsStale): the open question asks again, and acts on its answer alone.
   if (!market.details.has(key)) readAgainNow(entry.source, plugin.name);
   const read = market.details.get(key), detail = read && !read.reading ? read.value : undefined, facts = uninstallFacts(entry, plugin, tool, detail);
@@ -177,7 +177,8 @@ export function pluginSwitch(view: PluginsView, entry: MarketplaceView, plugin: 
 /**
  * What a plugin's click in the page's list says: its aim while it waits ("Waiting to turn on") and while main runs it
  * ("Turning on…"), then what fits a list row's one line ("Turned on in 3 tools", "Turned on in 2 tools, not in Codex");
- * the header holds the whole result and each tool's reason. It stays until the list's news ends (pluginstate.ts endListNews).
+ * once it ends, the header holds a result with something to act on (and each tool's reason), while a result with nothing
+ * to act on goes to the status bar (pluginspage.ts runLine, app.ts saidInStatusBar). It stays until the list's news ends (pluginstate.ts endListNews).
  */
 export function clickWords(click: PluginClick): { text: string; failed: boolean } {
   if (!click.ran) return { text: click.state === 'waiting' ? click.said.waiting : click.said.running, failed: false };
@@ -195,7 +196,7 @@ function rowWords(what: PluginTurn, { done, stopped }: NonNullable<PluginClick['
   return `${verb} ${to} ${tools(went)}${missed.length ? `, not ${to} ${tools(missed)}` : ''}`;
 }
 
-/** A plugin's latest click in the page's list: on its row (`onRow`), through its ended line; on its page, only while it waits or runs (the header holds the ended result). */
+/** A plugin's latest click in the page's list: on its row (`onRow`), through its ended line; on its page, only while it waits or runs (the ended result is in the header, or in the status bar when there is nothing to act on). */
 export function clickNote(entry: MarketplaceView, plugin: string, onRow = false): HTMLElement | null {
   const click = clickOn(entry.source, plugin);
   if (!click || (!onRow && (click.ran || click.state === 'ended'))) return null;

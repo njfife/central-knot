@@ -313,7 +313,7 @@ export function fitBars(): void {
 }
 
 /**
- * Tells an element laid out in tool columns (a table) how many tools it has: --tool-count for its
+ * Tells an element laid out in tool columns (a table, a plugin's "Your tools") how many tools it has: --tool-count for its
  * grid, set through the style object (the page's security policy refuses inline style attributes), and data-tools for
  * the CSS steps that depend on it. Returns the element.
  */

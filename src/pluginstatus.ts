@@ -313,15 +313,14 @@ export const skillOff = (entry: MarketplaceView, plugin: string, tool: HarnessId
 export const marketTitle = (entry: MarketplaceView) => entry.bundled?.displayName || entry.name || entry.sourceLabel;
 
 /**
- * The parts that won't fully work in a tool, short, in the words "In each tool" uses up to its colon: "MCP servers may
- * not start", "Agents are ignored +1". A limit with no colon says only "limited". Empty when all work.
+ * A tool's limits (already filtered by `pluginoutcomes.ts limitsIn`), short, in the words "In each tool" uses up to its
+ * colon: "MCP servers may not start", "Agents are ignored +1". A limit with no colon says only "limited". Empty when none.
  */
 export function limitNote(limits: Outcome[]): string {
-  const notWorking = limits.filter(outcome => outcome.result !== 'works');
-  const first = notWorking[0];
+  const first = limits[0];
   if (!first) return '';
   const effect = first.text.includes(':') ? first.text.slice(0, first.text.indexOf(':')) : 'limited';
-  return `${first.component} ${effect}${notWorking.length > 1 ? ` +${notWorking.length - 1}` : ''}`;
+  return `${first.component} ${effect}${limits.length > 1 ? ` +${limits.length - 1}` : ''}`;
 }
 
 /** "3 skills · 1 MCP server", from a plugin's counts. */

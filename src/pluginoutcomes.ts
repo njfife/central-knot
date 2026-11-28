@@ -70,14 +70,14 @@ export function sessionTextNote(tool: HarnessId): string | undefined {
 
 /**
  * The line under a plugin page's "Hooks that can add text to sessions" (pluginpage.ts), for `tools`, the tools its "In each tool"
- * describes: when such hooks run (naming prompt hooks only where one is listed), Codex's wait for trust only where Codex takes
- * text from one of them, then each tool that takes text from none, as its "In each tool" row has no Session text.
+ * describes, and `hooks`, the listed text-adding hooks: when those listed hooks run (naming prompt hooks only where one is listed),
+ * Codex's wait for trust only where Codex takes text from one of them, then each tool that takes text from none, as its "In each tool" row has no Session text.
  */
-export function sessionHooksAbout(components: Pick<Components, 'sessionTextHooks' | 'startHooksIn' | 'promptHooksIn'>, tools: HarnessId[]): string {
+export function sessionHooksAbout(components: Pick<Components, 'sessionTextHooks'>, tools: HarnessId[], hooks: DeclaredHook[]): string {
   const none = tools.filter(tool => !components.sessionTextHooks.includes(tool));
   const trust = tools.includes('codex-cli') && !none.includes('codex-cli') ? ' (in Codex, once you trust them)' : '';
-  const start = components.startHooksIn.length > 0;
-  const prompt = components.promptHooksIn.some(tool => tool !== 'copilot-cli' && components.sessionTextHooks.includes(tool));
+  const runsAs = (when: string) => hooks.some(hook => pluginTools.some(tool => addsText(tool, hook) && TEXT_EVENTS[tool]?.[hook.event] === when));
+  const start = runsAs(START), prompt = runsAs(PROMPT);
   const when = start && prompt ? 'when a session starts or you send a prompt' : prompt ? 'when you send a prompt' : 'when a session starts';
   return `These run ${when}${trust}; what they add is known only when they run.${none.length ? ` In ${toolList(none)}, none of them adds text.` : ''}`;
 }

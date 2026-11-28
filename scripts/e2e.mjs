@@ -3899,8 +3899,8 @@ async function practiceFlow() {
   for (let tries = 0; tries < 50 && !(await a.exists(sparkSwitch)); tries++) await wait(100);
   const dirReason = 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).';
   same('a plugin whose box is disabled shows its short box line on the row and a disabled switch described and hovered by the box’s reason',
-    await a.run(`(() => { const row = document.querySelector('.harness-plugin:has(${sparkSwitch})'); const sw = row?.querySelector(${JSON.stringify(sparkSwitch)}); return [row?.querySelector('.harness-plugin-state')?.textContent?.trim() ?? '', sw?.disabled ?? null, sw?.getAttribute('aria-checked') ?? null, sw?.getAttribute('aria-label') ?? null, sw?.getAttribute('aria-description') ?? null, sw?.title ?? null]; })()`),
-    ['Can’t be turned off here', true, 'true', 'spark in Claude Code', dirReason, dirReason]);
+    await a.run(`(() => { const row = document.querySelector('.harness-plugin:has(${sparkSwitch})'); const sw = row?.querySelector(${JSON.stringify(sparkSwitch)}); const st = row?.querySelector('.harness-plugin-state'); return [st?.textContent?.trim() ?? '', st?.title ?? null, sw?.disabled ?? null, sw?.getAttribute('aria-checked') ?? null, sw?.getAttribute('aria-label') ?? null, sw?.getAttribute('aria-description') ?? null, sw?.title ?? null]; })()`),
+    ['Can’t be turned off here', dirReason, true, 'true', 'spark in Claude Code', dirReason, dirReason]);
   writeFileSync(dirRecord, dirBefore);
   rmSync(join(practice, '.claude/plugins/cache/anthropic-plugin-directory'), { recursive: true, force: true });
   await a.click('#header-refresh');
@@ -3922,8 +3922,10 @@ async function practiceFlow() {
   writeFileSync(claudeStub, `#!/bin/sh\n[ "$*" = "plugin update issue-tracker@ck-test-market --scope user" ] || exit 9\nmkdir -p '${newCopy}/skills/triage' && cp '${join(market, 'plugins/issue-tracker/skills/triage/SKILL.md')}' '${newCopy}/skills/triage/'\nprintf '{"version":2,"plugins":{"issue-tracker@ck-test-market":[{"scope":"user","installPath":"${newCopy}","version":"2.0.0"}]}}' > "$HOME/.claude/plugins/installed_plugins.json"\necho 'Plugin "issue-tracker" updated from 1.9.0 to 2.0.0 for scope user.'\n`);
   await a.click('#pupdate-0-issue-tracker');
   for (let tries = 0; tries < 30 && !/Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? ''); tries++) await wait(100);
-  check('the click updates it at once, read back from Claude Code’s record, says it can’t be undone, and offers no Undo', /Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? '') && !/Marketplace has/.test(await a.text('.plugin-panel') ?? '')
-    && /updated to 2\.0\.0 in Claude Code, which can’t be undone/i.test(await a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`)) && !(await a.exists('#plugins-undo')) && !(await a.exists('.plugin-panel .plugin-click')), [await a.text('.plugin-panel'), await a.run(`document.querySelector('#announcement')?.dataset.text`), await a.text('.bands')]);
+  const announcementInSight = () => a.run(`(() => { const el = document.querySelector('#announcement'); if (!el) return null; const r = el.getBoundingClientRect(); return { text: el.dataset.text ?? '', visible: !el.classList.contains('visually-hidden') && r.width > 0 && r.height > 0 }; })()`);
+  const updateSaid = await announcementInSight();
+  check('the click updates it at once, read back from Claude Code’s record, says it can’t be undone in sight, and offers no Undo', /Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? '') && !/Marketplace has/.test(await a.text('.plugin-panel') ?? '')
+    && !!updateSaid?.visible && /updated to 2\.0\.0 in Claude Code, which can’t be undone/i.test(updateSaid.text) && !(await a.exists('#plugins-undo')) && !(await a.exists('.plugin-panel .plugin-click')), [await a.text('.plugin-panel'), updateSaid, await a.text('.bands')]);
   // The copy changes at the same version (2.0.0): once read again, the page says so and offers Update. Claude Code's own
   // update keeps its copy ("already at the latest"), so Update uninstalls it (keeping its data: --keep-data) and installs it again, and compares after.
   const triage = join(newCopy, 'skills/triage/SKILL.md'), record = readFileSync(join(practice, '.claude/plugins/installed_plugins.json'), 'utf8');
@@ -3936,8 +3938,9 @@ async function practiceFlow() {
   same('a copy that differs at the same version says so and offers Update', [/Installed · 2\.0\.0 · differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? ''), await a.run(`document.querySelector('#pbox-0-issue-tracker-claude-cli')?.dataset.state`), await a.text('#pupdate-0-issue-tracker')], [true, 'outdated', 'Update in Claude Code']);
   await a.click('#pupdate-0-issue-tracker');
   for (let tries = 0; tries < 30 && /differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? 'differs from the marketplace’s copy'); tries++) await wait(100);
-  check('Update reinstalls it where Claude Code keeps its copy, and the result says so', !/differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? '') && readFileSync(triage, 'utf8') === readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8')
-    && /reinstalled from the marketplace’s copy of 2\.0\.0 in Claude Code/i.test(await a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`)), [await a.text('.plugin-panel'), await a.run(`document.querySelector('#announcement')?.dataset.text`)]);
+  const reinstallSaid = await announcementInSight();
+  check('Update reinstalls it where Claude Code keeps its copy, and the result says so in sight', !/differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? '') && readFileSync(triage, 'utf8') === readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8')
+    && !!reinstallSaid?.visible && /reinstalled from the marketplace’s copy of 2\.0\.0 in Claude Code/i.test(reinstallSaid.text), [await a.text('.plugin-panel'), reinstallSaid]);
   writeFileSync(claudeStub, stubBefore);
   // Claude Code lets it go outside the app; coming back to Plugins reads the install states, and the copies, again.
   writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), '{"version":2,"plugins":{}}');
@@ -17564,10 +17567,10 @@ echo "$*" >> "$HOME/claude-calls.txt"
   for (let tries = 0; tries < 100 && !(await a.exists('#popen-0-superpowers')); tries++) await wait(100);
   await a.click('#popen-0-superpowers');
   for (let tries = 0; tries < 100 && await a.run(`document.querySelector('#pbox-0-superpowers-codex-cli')?.dataset.state`) !== 'installed'; tries++) await wait(100);
-  same('on superpowers’ page, In each tool starts shut naming Copilot CLI’s limits and has no Hooks or Session text line for Codex',
+  same('on superpowers’ page, In each tool starts shut naming Copilot CLI’s limits (Copilot CLI first) and has no Hooks or Session text line for Codex',
     [await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), await a.text('#plugin-outcomes-toggle'), await a.text('.plugin-tool[data-tool="codex-cli"] .plugin-tool-state'),
       await a.run(`[...document.querySelectorAll('.plugin-outcome-row')].map(row => [row.querySelector('.plugin-outcome-tools strong').textContent, [...row.querySelectorAll('.plugin-outcome-kind')].map(kind => kind.textContent)])`)],
-    [false, 'In each tool · limits in Copilot CLI', 'Installed · 7.0.2', [['Claude Code', ['Skills', 'Hooks', 'Session text']], ['Copilot CLI', ['Skills', 'Hooks', 'Session text']], ['Codex', ['Skills']]]]);
+    [false, 'In each tool · limits in Copilot CLI', 'Installed · 7.0.2', [['Copilot CLI', ['Skills', 'Hooks', 'Session text']], ['Claude Code', ['Skills', 'Hooks', 'Session text']], ['Codex', ['Skills']]]]);
   // Its hooks group says the same of its hook: Codex is named as taking no text from it, and nothing is said of trusting it there.
   same('on superpowers’ page, the line under its hooks that can add text names Codex as taking text from none, with no wait for trust', await a.run(`[...document.querySelectorAll('.plugin-group')]
     .find(group => group.querySelector('h4')?.textContent.startsWith('Hooks that can add text to sessions'))?.querySelector('.plugin-group-note')?.textContent`),
@@ -17580,10 +17583,10 @@ echo "$*" >> "$HOME/claude-calls.txt"
   await a.click('#plugin-back');
   await a.click('#popen-0-stop-hooks');
   for (let tries = 0; tries < 100 && !(await a.exists('.plugin-outcome-row')); tries++) await wait(100);
-  same('a plugin with only Stop hooks: In each tool starts shut naming Copilot CLI and Codex and says none is confirmed to run there',
+  same('a plugin with only Stop hooks: In each tool starts shut naming Copilot CLI and Codex (limited tools first) and says none is confirmed to run there',
     [await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), await a.text('#plugin-outcomes-toggle'),
       await a.run(`[...document.querySelectorAll('.plugin-outcome-row')].map(row => [row.querySelector('.plugin-outcome-tools strong').textContent, [...row.querySelectorAll('.plugin-outcome-item')].map(item => item.textContent)])`)],
-    [false, 'In each tool · limits in Copilot CLI and Codex', [['Claude Code', ['Hooks run; a hook that fails does not stop the install']], ['Copilot CLI', ['Hooks may not run: not confirmed in Copilot CLI']], ['Codex', ['Hooks may not run: not confirmed in Codex']]]]);
+    [false, 'In each tool · limits in Copilot CLI and Codex', [['Copilot CLI', ['Hooks may not run: not confirmed in Copilot CLI']], ['Codex', ['Hooks may not run: not confirmed in Codex']], ['Claude Code', ['Hooks run; a hook that fails does not stop the install']]]]);
   if (shots) { await a.click('#plugin-outcomes-toggle'); await pictures('stop-hooks-each-tool', '.plugin-outcome-list', atTwo, true); }
   // The Overview's "—" for Pi's and OpenCode's plugins says what their plugin pages do there: their items go in, not the plugin.
   await a.click('#nav-overview');
@@ -18083,7 +18086,7 @@ async function hookRunFlow() {
   const copilotPluginRow = await rowOf('session-copilot-cli', 'copilot-plugin-hook');
   same('Copilot CLI installed plugin hook keeps View source alone and no Run it', [!!copilotPluginRow?.srcId, copilotPluginRow?.runId], [true, null]);
   same('Copilot CLI strip with runnable own hook and non-runnable plugin hook omits the plugin standing line',
-    await a.text('#session-copilot-cli .session-run-warn'), 'Running a hook runs its command for real and may change your files.');
+    await a.run(`(() => { const w = document.querySelectorAll('#session-copilot-cli .session-run-warn'); return [w.length, !w[0]?.textContent?.includes('Plugin')]; })()`), [1, true]);
   const copRes = await runAndWait('session-copilot-cli', 'copilot-plain.sh');
   check('Copilot CLI plain stdout shows ignored sentence with quiet meta and Show all it printed fold',
     /^Copilot CLI would ignore this: no top-level additionalContext\. run in ~, /.test(copRes) && copRes.includes('Show all it printed'), copRes);
@@ -23554,6 +23557,7 @@ async function pluginPageSaysLessFlow() {
       { name: 'limited-kit', source: './plugins/limited-kit', version: '1.0.0', description: 'A command with a Codex limit.' },
       { name: 'failed-kit', source: './plugins/failed-kit', version: '1.0.0', description: 'An MCP server using CLAUDE_PLUGIN_ROOT.' },
       { name: 'agent-kit', source: './plugins/agent-kit', version: '1.0.0', description: 'An agent Codex ignores.' },
+      { name: 'dir-kit', source: { source: 'git-subdir', url: 'https://127.0.0.1:1/example/dir-kit.git', path: 'plugins/dir-kit' }, version: '1.0.0', description: 'Installed from the Anthropic Directory.' },
       { name: 'only-notes', source: './plugins/only-notes', version: '1.0.0', description: 'Reference notes only.' },
     ],
   }, null, 2));
@@ -23675,10 +23679,19 @@ async function pluginPageSaysLessFlow() {
   await openPluginPage('plain-kit');
   await fullSize(a);
 
-  // 2. Absent kept-out boxes (Pi unticked earlier, OpenCode never installed) show Not installed (no Kept out: tick to put it back).
+  // 2. Absent kept-out boxes (Pi unticked earlier, OpenCode never installed) show Not installed (no Kept out: tick to put it back),
+  // and Uninstall… sits flush with the line above it in the link's own colour.
   same('Pi (unticked earlier) and OpenCode (never installed) read Not installed while Claude Code and Codex show Installed',
     [await stateUnder('claude-cli'), await stateUnder('codex-cli'), await stateUnder('pi-cli'), await stateUnder('opencode-cli')],
     ['Installed · 1.0.0', 'Installed · 1.0.0', 'Not installed', 'Not installed']);
+  same('Uninstall… aligns flush with the state line above it in the link’s own colour',
+    await a.run(`(() => {
+      const box = document.querySelector('.plugin-tool[data-tool="claude-cli"]');
+      const st = box.querySelector('.plugin-tool-state'), btn = box.querySelector('#puninstall-0-plain-kit-claude-cli');
+      const s = st.getBoundingClientRect(), b = btn.getBoundingClientRect();
+      return { link: btn.classList.contains('link'), flush: Math.abs(b.left - s.left) <= 1, notMuted: getComputedStyle(btn).color !== getComputedStyle(st).color };
+    })()`),
+    { link: true, flush: true, notMuted: true });
 
   // 5. Folds on plain-kit (plain outcomes only): Readme closed and In each tool closed at open without limits; keyboard opens/closes both; state survives redraws.
   same('on a plain plugin, both In each tool (plain heading) and Readme start folded closed',
@@ -23755,13 +23768,13 @@ async function pluginPageSaysLessFlow() {
     await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`),
     true);
 
-  // Failed outcome + MCP entry: In each tool starts shut naming Codex; opening then leaving via sidebar resets it to shut; MCP server opens its pretty-printed entry verbatim.
+  // Failed outcome + MCP entry: In each tool starts shut naming Codex; opening then leaving via sidebar resets it to shut; MCP server opens its formatted JSON entry.
   await openPluginPage('failed-kit');
   same('failed-kit starts with In each tool shut naming Codex and Readme closed',
     [await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), await a.text('#plugin-outcomes-toggle'), await a.run(`document.getElementById('plugin-readme')?.open ?? null`)],
     [false, 'In each tool · limits in Codex', false]);
   await a.click('#pfile-0-mcp-rooter');
-  same('clicking an MCP server row opens its pretty-printed entry verbatim under Entry · Marketplace',
+  same('clicking an MCP server row opens its formatted JSON entry under Entry · Marketplace',
     [await a.run(`document.getElementById('pfile-0-mcp-rooter')?.getAttribute('aria-expanded')`),
       await a.text('.plugin-file .content-owner'),
       await a.text('#pfile-0-mcp-rooter-text-0')],
@@ -23782,11 +23795,60 @@ async function pluginPageSaysLessFlow() {
     await a.run(`[document.getElementById('plugin-outcomes')?.open ?? null, document.getElementById('plugin-readme')?.open ?? null]`),
     [false, false]);
 
-  // Ignored-only outcome (agent in Codex): In each tool starts shut and names Codex from the same limitsIn predicate as Codex's box.
+  // Ignored-only outcome (agent in Codex): In each tool starts shut and names Codex from the same limitsIn predicate as Codex's box;
+  // Codex's limit note is a control that opens In each tool (limited tools first) and brings Codex into sight, with the fold's toggle still working.
   await openPluginPage('agent-kit');
   same('agent-kit (ignored in Codex) keeps In each tool shut and names Codex in its summary matching Codex’s box',
     [await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), await a.text('#plugin-outcomes-toggle'), await stateUnder('codex-cli'), await a.run(`document.getElementById('plugin-readme')?.open ?? null`)],
     [false, 'In each tool · limits in Codex', 'Not installed · Agents are ignored', false]);
+  await sizeTo(a, ...SMALLEST);
+  if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+  await a.click('#plimit-0-agent-kit-codex-cli');
+  await a.settle();
+  same('clicking Codex’s limit note opens In each tool with Codex first and scrolled into sight',
+    await a.run(`(() => {
+      const sc = document.getElementById('plugins-scroll').getBoundingClientRect();
+      const row = document.querySelector('.plugin-outcome-row[data-tools~="codex-cli"]');
+      const r = row.getBoundingClientRect();
+      const order = [...document.querySelectorAll('.plugin-outcome-row .plugin-outcome-tools strong')].map(el => el.textContent);
+      return { open: document.getElementById('plugin-outcomes')?.open ?? null, order, inSight: r.top >= sc.top - 1 && r.bottom <= sc.bottom + 1 };
+    })()`),
+    { open: true, order: ['Codex', 'Claude Code'], inSight: true });
+  await a.click('#plugin-outcomes-toggle');
+  same('the fold’s own toggle still closes In each tool after opening from a limit note',
+    await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), false);
+  await a.run(`document.getElementById('plimit-0-agent-kit-codex-cli')?.focus()`);
+  await sendKey('Enter', 'Enter', 13, '\r');
+  same('pressing Enter on Codex’s limit note opens In each tool, brings Codex into sight, and moves focus to its row',
+    await a.run(`(() => {
+      const sc = document.getElementById('plugins-scroll').getBoundingClientRect();
+      const row = document.querySelector('.plugin-outcome-row[data-tools~="codex-cli"]');
+      const r = row.getBoundingClientRect();
+      return { open: document.getElementById('plugin-outcomes')?.open ?? null, inSight: r.top >= sc.top - 1 && r.bottom <= sc.bottom + 1, focused: document.activeElement === row };
+    })()`),
+    { open: true, inSight: true, focused: true });
+  await a.click('#plugin-outcomes-toggle');
+  same('the fold’s own toggle closes In each tool again after keyboard activation',
+    await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), false);
+  await fullSize(a);
+
+  // Can't be turned off here (Anthropic Directory copy): the state line's hover carries the same reason as the disabled box.
+  const dirCache = join(home, '.claude/plugins/cache/anthropic-plugin-directory/dir-kit/1.0.0');
+  put(join(dirCache, 'skills/dir-skill/SKILL.md'), skillMd('dir-skill', 'From directory.'));
+  const installedFile = join(home, '.claude/plugins/installed_plugins.json');
+  const installedData = JSON.parse(readFileSync(installedFile, 'utf8'));
+  installedData.plugins['dir-kit@anthropic-plugin-directory'] = [{ scope: 'user', installPath: dirCache, version: '1.0.0', directoryRepositoryKey: '127.0.0.1/example/dir-kit#plugins/dir-kit' }];
+  writeFileSync(installedFile, JSON.stringify(installedData, null, 2));
+  await a.click('#header-refresh');
+  await done();
+  await openPluginPage('dir-kit');
+  await until(() => a.run(`document.querySelector('.plugin-tool[data-tool="claude-cli"] .plugin-tool-state')?.textContent === 'Can’t be turned off here'`));
+  same('Can’t be turned off here puts the box’s reason on the line’s hover',
+    await a.run(`(() => {
+      const st = document.querySelector('.plugin-tool[data-tool="claude-cli"] .plugin-tool-state');
+      return [st?.textContent ?? null, st?.title ?? null];
+    })()`),
+    ['Can’t be turned off here', 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).']);
 
   // Instructions-only plugin: concise advice with no jump to Instructions; file opens right here.
   await openPluginPage('only-notes');
@@ -23797,6 +23859,45 @@ async function pluginPageSaysLessFlow() {
     ['No tool reads these files by itself: copy the text into your own instructions.', false, false]);
   await a.click('#pfile-0-CLAUDE-md');
   check('its instruction file opens right here on the plugin page', (await a.text('.plugin-file') ?? '').includes('Copy these conventions into your own instructions.'), await a.text('.plugin-page'));
+
+  // One and two tools: boxes spread across the panel width without empty tracks at both 860 and 1316.
+  await openPluginPage('agent-kit');
+  rmSync(join(home, '.local/bin/pi'), { force: true });
+  rmSync(join(home, '.pi'), { recursive: true, force: true });
+  rmSync(join(home, '.local/bin/opencode'), { force: true });
+  rmSync(join(home, '.config/opencode'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  await until(() => a.run(`document.querySelectorAll('.plugin-tool').length === 2`));
+  for (const [width, height] of [[...SMALLEST], [1316, 819]]) {
+    await sizeTo(a, width, height);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    same(`with 2 tools at ${width}×${height}, Your tools uses 2 full-share tracks with no empty track`,
+      await a.run(`(() => {
+        const rows = document.querySelector('.plugin-tool-rows');
+        const cols = getComputedStyle(rows).gridTemplateColumns.split(' ').map(parseFloat);
+        const w = rows.getBoundingClientRect().width;
+        const expected = (w - 24) / 2;
+        return { dataTools: rows.dataset.tools, count: cols.length, fills: cols.every(c => Math.abs(c - expected) <= 2) };
+      })()`),
+      { dataTools: '2', count: 2, fills: true });
+  }
+  rmSync(join(home, '.local/bin/codex'), { force: true });
+  rmSync(join(home, '.codex'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  await until(() => a.run(`document.querySelectorAll('.plugin-tool').length === 1`));
+  for (const [width, height] of [[...SMALLEST], [1316, 819]]) {
+    await sizeTo(a, width, height);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    same(`with 1 tool at ${width}×${height}, Your tools uses 1 full-width track`,
+      await a.run(`(() => {
+        const rows = document.querySelector('.plugin-tool-rows');
+        const cols = getComputedStyle(rows).gridTemplateColumns.split(' ').map(parseFloat);
+        const w = rows.getBoundingClientRect().width;
+        return { dataTools: rows.dataset.tools, count: cols.length, fills: Math.abs(cols[0] - w) <= 2 };
+      })()`),
+      { dataTools: '1', count: 1, fills: true });
+  }
+  await fullSize(a);
 
   same('no page errors, plugin page says less', a.pageErrors, []);
   await a.quit();

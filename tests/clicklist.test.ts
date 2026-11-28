@@ -60,8 +60,20 @@ const api = {
 };
 // The page's modules, loaded under node with no window: the little of the DOM they touch as they load and redraw. An element keeps
 // what is appended to it, so a test can read the words a part draws (textOf).
-const element = (): any => ({ attrs: {} as Record<string, string>, dataset: {}, style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, children: [], content: {}, setAttribute(k: string, v: string) { this.attrs[k] = v; }, addEventListener() {}, replaceChildren(...kids: unknown[]) { this.children = kids; },
-  append(...kids: unknown[]) { this.children.push(...kids); }, appendChild() {}, focus() {}, querySelector: () => element(), after() {} });
+const element = (): any => {
+  const classes = new Set<string>();
+  return {
+    attrs: {} as Record<string, string>, dataset: {}, style: { setProperty() {} },
+    classList: {
+      toggle(name: string, on?: boolean) { if (on === undefined ? !classes.has(name) : on) classes.add(name); else classes.delete(name); },
+      add(...names: string[]) { for (const name of names) classes.add(name); },
+      remove(...names: string[]) { for (const name of names) classes.delete(name); },
+      contains(name: string) { return classes.has(name); },
+    },
+    children: [], content: {}, setAttribute(k: string, v: string) { this.attrs[k] = v; }, addEventListener() {}, replaceChildren(...kids: unknown[]) { this.children = kids; },
+    append(...kids: unknown[]) { this.children.push(...kids); }, appendChild() {}, focus() {}, querySelector: () => element(), after() {},
+  };
+};
 const findById = (node: any, id: string): any => {
   if (!node || typeof node === 'string') return undefined;
   if (node.id === id || node.attrs?.id === id) return node;
@@ -183,7 +195,7 @@ test('A row says its click’s aim while it waits and runs, then its short row l
   assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => !!clickNote(entry, name, true)), [true, true, true]);
 });
 
-test('A click that ends with nothing to do leaves the panel note and header empty and says it once in the status bar', async () => {
+test('A click that ends with nothing to do leaves the panel note and header empty and says it once in sight in the status bar', async () => {
   start();
   market.nav = { ...market.nav, source: '/market', plugin: 'alpha' };
   turnPlugin(entry, 'alpha', 'on');
@@ -191,7 +203,49 @@ test('A click that ends with nothing to do leaves the panel note and header empt
   assert.ok(clickNote(entry, 'alpha'), 'panel note shows while running');
   await main.answer({ done: [], before: null, back: [] });
   await settled();
-  assert.deepEqual([clickNote(entry, 'alpha'), pluginsResult(), app.said.text], [null, [], 'Nothing changed for alpha.']);
+  assert.deepEqual([clickNote(entry, 'alpha'), pluginsResult(), app.said.text, app.said.quiet, announcement.classList.contains('visually-hidden')],
+    [null, [], 'Nothing changed for alpha.', false, false]);
+});
+
+test('Two clicks in turn where one succeeds and the other changes nothing still name the unchanged click in sight in the status bar', async () => {
+  const undoable = (name: string): PluginTurnResult => ({
+    ...installed(name),
+    back: [{ source: '/market', marketName: 'team', plugin: name, tool: 'claude-cli', action: 'plugin-off' }],
+  });
+  // Two tool-box clicks on the same plugin's page: first installs in Claude Code, second changes nothing in Codex.
+  start();
+  market.nav = { ...market.nav, source: '/market', plugin: 'alpha' };
+  turnPlugin(entry, 'alpha', 'let-in', 'claude-cli');
+  turnPlugin(entry, 'alpha', 'let-in', 'codex-cli');
+  await settled();
+  await main.answer(undoable('alpha'));
+  await main.answer({ done: [], before: null, back: [] });
+  await settled();
+  assert.deepEqual([app.said.text, app.said.quiet, announcement.classList.contains('visually-hidden')],
+    ['alpha: installed in Claude Code. Nothing changed for alpha in Codex.', false, false]);
+
+  // Two plugin clicks: first succeeds, second changes nothing.
+  start();
+  turnPlugin(entry, 'alpha', 'on');
+  turnPlugin(entry, 'beta', 'on');
+  await settled();
+  await main.answer(undoable('alpha'));
+  await main.answer({ done: [], before: null, back: [] });
+  await settled();
+  assert.deepEqual([app.said.text, app.said.quiet, announcement.classList.contains('visually-hidden')],
+    ['alpha: installed in Claude Code. Nothing changed for beta.', false, false]);
+
+  // Reverse order: first changes nothing, second succeeds with Undo in the header -> status bar still visibly names the unchanged click.
+  start();
+  turnPlugin(entry, 'alpha', 'on');
+  turnPlugin(entry, 'beta', 'on');
+  await settled();
+  await main.answer({ done: [], before: null, back: [] });
+  await main.answer(undoable('beta'));
+  await settled();
+  assert.equal(pluginsResult().length > 0, true, 'header holds the undoable result');
+  assert.deepEqual([app.said.text, app.said.quiet, announcement.classList.contains('visually-hidden')],
+    ['beta: installed in Claude Code. Nothing changed for alpha.', false, false]);
 });
 
 test('A click that fails in the middle says why on its row, the clicks after it still run, and the list’s end is said as a whole', async () => {

@@ -40,7 +40,7 @@ test('A tool the plugin is kept out of is said as not installed there, kept out;
   assert.deepEqual(mark('codex-cli'), { mark: 'cannot', words: 'Codex: other' }, 'Codex holds another marketplace of this name: its box is off, saying why');
 });
 
-test('A tool’s box: ticked where the plugin is; off before the click where its copy can’t be taken out here, saying why on its line; kept out of an absent tool while On has no line of its own', () => {
+test('A tool’s box: ticked where the plugin is; off before the click where its copy can’t be turned off here, saying why on its line; kept out of an absent tool while On has no line of its own', () => {
   const on = (except: HarnessId[] = []): MarketplaceView => ({ ...entry, switches: { p: { entry: { on: true, except }, tools: {} } } });
   const box = (at: MarketplaceView, tool: HarnessId, shown = view) => boxOf(shown, at, 'p', tool, toolMark(shown, at, 'p', tool, owedTo({ on: true, except: at.switches!.p!.entry!.except }, tool, toolNow(shown, at, 'p', tool, undefined, false), shown.tools)));
   assert.deepEqual(box(on(), 'claude-cli'), { ticked: true });
@@ -173,7 +173,7 @@ test('A copy at the marketplace’s version whose text differs is offered Update
 });
 
 test('A tool’s limits are named in a few words', () => {
-  assert.equal(limitNote([{ component: 'Skills', result: 'works', text: '' }]), '');
+  assert.equal(limitNote([]), '');
   assert.equal(limitNote([{ component: 'Agents', result: 'ignored', text: 'are ignored: copied, never offered' }, { component: 'MCP servers', result: 'fails', text: '' }]), 'Agents are ignored +1');
   assert.equal(limitNote([{ component: 'Commands', result: 'limited', text: 'are turned into skills when installed' }]), 'Commands limited');
 });

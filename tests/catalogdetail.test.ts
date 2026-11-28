@@ -297,9 +297,9 @@ test('“In each tool” says which of a plugin’s hooks Copilot CLI and Codex 
     /** Each tool's Hooks and Session text lines, and the line over the hooks that add text where the page has that group. */
     const said = async (kind: keyof typeof kinds) => {
       await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: kinds[kind] }));
-      const components = componentsFrom(await pluginContents(root, {}, root)), tools: HarnessId[] = ['copilot-cli', 'codex-cli'];
+      const contents = await pluginContents(root, {}, root), components = componentsFrom(contents), tools: HarnessId[] = ['copilot-cli', 'codex-cli'];
       return { ...Object.fromEntries(tools.map(tool => [tool, outcomes(tool, components).filter(outcome => ['Hooks', 'Session text'].includes(outcome.component)).map(outcome => `${outcome.component} ${outcome.text}`)])),
-        about: components.sessionTextHooks.length ? sessionHooksAbout(components, tools) : null };
+        about: components.sessionTextHooks.length ? sessionHooksAbout(components, tools, contents.hooks) : null };
     };
     const copilotText = `Session text is limited: ${sessionTextNote('copilot-cli')}`, codexText = `Session text waits for trust: ${sessionTextNote('codex-cli')}`;
     const about = (when: string, none: string) => `These run ${when} (in Codex, once you trust them); what they add is known only when they run.${none}`;
@@ -322,7 +322,10 @@ test('The line under a plugin page’s hooks that can add text names each tool t
     await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'superpowers', version: '7.0.2' }));
     const codexManifest = (hooks?: unknown) => put(join(root, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'superpowers', version: '7.0.2', skills: './skills/', hooks }));
     // `tools`: the tools its "In each tool" describes, all three unless said.
-    const line = async (tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli']) => sessionHooksAbout(componentsFrom(await pluginContents(root, {}, root)), tools);
+    const line = async (tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli']) => {
+      const contents = await pluginContents(root, {}, root);
+      return sessionHooksAbout(componentsFrom(contents), tools, contents.hooks);
+    };
     const starts = 'These run when a session starts', prompts = 'These run when you send a prompt', known = 'what they add is known only when they run.';
     // Its Codex manifest's `"hooks": {}`: Codex takes text from none of them, so nothing is said of trusting them there.
     await hooks({ SessionStart: [{ hooks: [command] }] });
@@ -342,6 +345,9 @@ test('The line under a plugin page’s hooks that can add text names each tool t
     // A prompt hook alone: Claude Code and Codex take its text, Codex once trusted; Copilot CLI ignores what a prompt hook prints.
     await hooks({ UserPromptSubmit: [{ hooks: [command] }] });
     assert.equal(await line(), `${prompts} (in Codex, once you trust them); ${known} In Copilot CLI, none of them adds text.`);
+    // A start command beside a prompt hook of another type (no command/launch): only the start command is listed as a text hook, so start-only wording stays.
+    await hooks({ SessionStart: [{ hooks: [command] }], UserPromptSubmit: [{ hooks: [{ type: 'prompt', prompt: 'Check the rules.' }] }] });
+    assert.equal(await line(), `${starts} (in Codex, once you trust them); ${known}`);
   } finally { await cleanup(); }
 });
 
