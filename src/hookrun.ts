@@ -23,6 +23,7 @@ import { findHook, type HookSourceContext } from './hooksource.ts';
 import { CLOSE_GRACE_MS } from './launch.ts';
 import { addsText, pickStartSource } from './pluginoutcomes.ts';
 import { run, type RunResult } from './plugins.ts';
+import { HOOK_RUN_ACTUAL_ONLY, HOOK_RUN_COPILOT_PLUGIN } from './sessionhooks.ts';
 import { readJsonc } from './textedit.ts';
 import type { DeclaredHook, HarnessId, HookRunResult, HookSourceRef } from './types.ts';
 import { record } from './values.ts';
@@ -299,9 +300,9 @@ export const hookRunRefused = (problem: string, emptyPrompt = false): HookRunRes
 export async function runHook(ctx: HookRunContext, ref: HookSourceRef): Promise<HookRunResult> {
   if (quitting) return hookRunRefused('Central Knot is quitting.');
   if ((ctx.platform ?? process.platform) === 'win32') return hookRunRefused('Not run on Windows yet.');
-  if (ctx.mode !== 'actual') return hookRunRefused('Runs only on this computer’s home.');
+  if (ctx.mode !== 'actual') return hookRunRefused(HOOK_RUN_ACTUAL_ONLY);
   if (ref.from === 'marketplace') return hookRunRefused('Marketplace hooks aren’t run.');
-  if (ref.from === 'installed' && ref.tool === 'copilot-cli') return hookRunRefused('Copilot CLI plugin hooks aren’t supported here.');
+  if (ref.from === 'installed' && ref.tool === 'copilot-cli') return hookRunRefused(HOOK_RUN_COPILOT_PLUGIN);
   const key = hookRunKey(ctx.home, ref);
   if (active.has(key)) return hookRunRefused('This hook is already running.');
   const stop = new AbortController();
