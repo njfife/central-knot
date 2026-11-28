@@ -1,4 +1,4 @@
-// Words shared by the pages and by what the engines say: each tool's display name (toolNames), each kind's (kindNouns; the
+// Words shared by the pages and by what the engines say: each tool's display name (toolNames) and short column name (toolShortNames), each kind's (kindNouns; the
 // rows of one result, of one kind or several: rowNouns, rowNames), the names of the pages called otherwise on screen
 // (pageNames), "Turn it on" (turnIt), where a copy was deleted (deletedIn), "a, b and c" lists, and a few sentences more than
 // one module says (a tool left out or not managed, through a plugin, a profile leaving use). A page's own words are its module's; a library row's are
@@ -8,6 +8,8 @@ import type { NamedRow } from './itemrow.ts';
 import type { HarnessId, SwitchProblem } from './types.ts';
 
 export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi', 'opencode-cli': 'OpenCode', 'antigravity-cli': 'Antigravity' };
+/** Short column names for compact tool headers (Plugins table): drops "Code"/"CLI" where unambiguous, keeps single-word names whole. */
+export const toolShortNames: Record<HarnessId, string> = { 'claude-cli': 'Claude', 'copilot-cli': 'Copilot', 'codex-cli': 'Codex', 'pi-cli': 'Pi', 'opencode-cli': 'OpenCode', 'antigravity-cli': 'Antigravity' };
 
 /** What is said about Cowork where Claude desktop is here (presence.ts, hasCowork): on Claude Code's card, and on a plugin's page. */
 export const coworkWords = {
