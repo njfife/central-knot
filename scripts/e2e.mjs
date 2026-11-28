@@ -1108,7 +1108,12 @@ async function harnessFlow() {
   mkdirSync(hData, { recursive: true });
   toolClis(hHome);
   const hClaude = join(hHome, '.claude/skills'), hCopilot = join(hHome, '.copilot/skills'), hCodex = join(hHome, '.codex/skills');
-  for (const name of ['on-skill', 'off-a', 'off-b', 'off-c', 'found-only']) skill(hClaude, name);
+  for (const name of ['on-skill', 'off-a', 'off-b', 'off-c', 'off-switched', 'found-only', 'bad-found']) skill(hClaude, name);
+  symlinkSync('SKILL.md', join(hClaude, 'bad-found', 'alias'));
+  skill(join(hHome, 'outside-skills'), 'off-switched');
+  mkdirSync(hCodex, { recursive: true });
+  symlinkSync(join(hHome, 'outside-skills', 'off-switched'), join(hCodex, 'off-switched'));
+  writeFileSync(join(hHome, '.codex/config.toml'), '[[skills.config]]\nname = "off-switched"\nenabled = false\n');
   skill(hClaude, 'clash', text('clash', 'Version A.'));
   skill(hCodex, 'clash', text('clash', 'Version B.'));
   skill(hCopilot, 'other-only', text('other-only', 'Only in Copilot.'));
@@ -1125,6 +1130,7 @@ async function harnessFlow() {
     'agents/plug-agent.md': agentMd('plug-agent'),
     '.mcp.json': JSON.stringify({ mcpServers: { 'plug-mcp': { command: 'node', args: ['-e', '4'] } } }),
   });
+  writeClaudeInstall(hHome, 'hn-market', 'issue-tracker', '1.0.0', {});
   writeFileSync(join(hData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: hHome } }));
   const h = await launch(hData, [], hReal);
   try {
@@ -1148,30 +1154,105 @@ async function harnessFlow() {
     };
     const heightOf = sel => h.run(`Math.round(document.querySelector(${JSON.stringify(sel)})?.getBoundingClientRect().height ?? 0)`);
     await openKind(h, 'all');
-    for (const [kind, key] of [['skills', 'on-skill'], ['skills', 'off-a'], ['skills', 'off-b'], ['skills', 'off-c'], ['mcp', 'on-mcp'], ['mcp', 'off-mcp'], ['agents', 'on-agent'], ['agents', 'off-agent']]) {
+    for (const [kind, key] of [['skills', 'on-skill'], ['skills', 'off-a'], ['skills', 'off-b'], ['skills', 'off-c'], ['skills', 'off-switched'], ['mcp', 'on-mcp'], ['mcp', 'off-mcp'], ['agents', 'on-agent'], ['agents', 'off-agent']]) {
       await h.click(`#${rowPart('add', kind, key)}`);
     }
-    for (const [kind, key] of [['skills', 'off-a'], ['skills', 'off-b'], ['mcp', 'off-mcp'], ['agents', 'off-agent']]) {
+    for (const [kind, key] of [['skills', 'off-a'], ['skills', 'off-b'], ['skills', 'off-switched'], ['mcp', 'off-mcp'], ['agents', 'off-agent']]) {
       await h.click(`#${rowPart('switch', kind, key)}`);
     }
+    await openKind(h, 'skills');
+
+    const FOUND_OFF_CARD = 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools.';
+    const FOUND_ON_CARD = 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools. Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
+    const PLUGIN_CARD = 'Installed with their plugin, not copied. Open a row for the controls each tool has.';
+    const OFF_CARD = 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so.';
+    const rowTags = (kind, key) => h.all(`.ov-row[data-key="${rowPart('', kind, key)}"] .row-tag`);
+
+    // Routine tags hidden under Found and Off; non-routine tags kept (shortened under Off, warning tone on can't be taken in, dot before description); Find restores full tags under Results; Off heading omits generic elsewhere note.
+    same('Found and Off drop routine tags while keeping can’t be taken in, copies differ, and shortened switched off in a tool; Off heading has no generic elsewhere note',
+      [await rowTags('skills', 'found-only'), await rowTags('skills', 'bad-found'), await rowTags('skills', 'clash'),
+        await rowTags('skills', 'off-a'), await rowTags('skills', 'off-switched'), await headingSays(h, 'off')],
+      [[], ['can’t be taken in'], ['copies differ'], [], ['switched off in Codex'], 'Off3']);
+    const tagVisuals = await h.run(`(() => {
+      const dot = key => { const el = document.querySelector('.ov-row[data-key="' + key + '"] .ov-name-about'); return el ? getComputedStyle(el, '::before').content : null; };
+      const bad = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'bad-found')}"] .row-tag');
+      const differs = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'clash')}"] .row-tag-differs');
+      const offRow = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'off-switched')}"]');
+      const offTag = offRow?.querySelector('.row-tag'), offName = offRow?.querySelector('.ov-name-text'), offAbout = offRow?.querySelector('.ov-name-about');
+      const offColor = offTag ? getComputedStyle(offTag).color : null;
+      return {
+        clashDot: dot('${rowPart('', 'skills', 'clash')}'),
+        offDot: dot('${rowPart('', 'skills', 'off-switched')}'),
+        plainDot: dot('${rowPart('', 'skills', 'found-only')}'),
+        badWarn: !!bad?.classList.contains('row-tag-warn') && !!differs && getComputedStyle(bad).color === getComputedStyle(differs).color,
+        offStrong: !!offColor && offColor === getComputedStyle(offName).color && offColor !== getComputedStyle(offAbout).color && offColor !== getComputedStyle(differs).color,
+      };
+    })()`);
+    same('kept tags (copies differ too) separate from descriptions with ·, plain rows have no ·, neutral tags take stronger text tone, and can’t be taken in shares copies differ’s warning tone',
+      tagVisuals, { clashDot: '"·"', offDot: '"·"', plainDot: 'none', badWarn: true, offStrong: true });
+    const waitForEl = async sel => { for (let tries = 0; tries < 40 && !(await h.exists(sel)); tries++) await wait(100); };
+    const findText = async typed => { await h.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`); await h.settle(); };
+    for (const [query, key, wantTag] of [['found-only', 'found-only', 'not in Central Knot'], ['off-a', 'off-a', 'in Central Knot only'], ['off-switched', 'off-switched', 'in Central Knot · switched off in Codex']]) {
+      await findText(query);
+      await waitForEl('.ov-section[data-section="results"]');
+      same(`with Find typed (${query}), row carries its full tag under Results`, await rowTags('skills', key), [wantTag]);
+    }
+    await findText('');
+    await waitForEl('.ov-section[data-section="found"]');
+    await sizeTo(h, ...SMALLEST);
+    if (await h.run(`document.body.classList.contains('rail')`)) await h.click('#sidebar-toggle');
+    await h.settle();
+    const readUnread = () => h.run(`(() => {
+      const mark = document.getElementById('unread-plugins-info');
+      const band = mark?.closest('.band'), text = band?.querySelector('.band-text');
+      const tb = text?.getBoundingClientRect(), mb = mark?.getBoundingClientRect();
+      const lh = text ? parseFloat(getComputedStyle(text).lineHeight) : 0;
+      const wsUnread = getComputedStyle(document.getElementById('unread-plugins-info-card')).whiteSpace;
+      const wsFound = getComputedStyle(document.getElementById('section-found-info-card')).whiteSpace;
+      return { text: text?.textContent ?? null, oneLine: !!tb && tb.height <= lh + 2, markSized: !!mb && mb.width >= 18 && mb.height >= 18, wsUnread, wsFound };
+    })()`);
+    same('at 860 with sidebar open, 1 unread plugin warning says it is a plugin, fits on one line, scopes pre-line to its card, and holds the reason behind (?)',
+      [await readUnread(), await keyboardCard('unread-plugins-info')],
+      [{ text: 'What the plugin issue-tracker brings in Claude Code isn’t listed', oneLine: true, markSized: true, wsUnread: 'pre-line', wsFound: 'normal' },
+        { focused: 'unread-plugins-info', opened: true, cardText: 'Claude Code lists issue-tracker, but its files are not where Claude Code records them.', closed: true, keptFocus: 'unread-plugins-info' }]);
+    const savedPluginsJson = readFileSync(join(hHome, '.claude/plugins/installed_plugins.json'), 'utf8');
+    for (const [add, wantText] of [
+      [['release-helper'], 'What 2 plugins bring isn’t listed: issue-tracker and release-helper'],
+      [['document-tools'], 'What 3 plugins bring isn’t listed: issue-tracker and 2 more'],
+      [['lint-helper', 'docs-sync'], 'What 5 plugins bring isn’t listed: issue-tracker and 4 more'],
+    ]) {
+      for (const name of add) writeClaudeInstall(hHome, 'hn-market', name, '1.0.0', {});
+      await h.click('#header-refresh');
+      same(`at 860 with sidebar open, unread plugin warning (${wantText}) stays one line`,
+        await readUnread(), { text: wantText, oneLine: true, markSized: true, wsUnread: 'pre-line', wsFound: 'normal' });
+    }
+    writeFileSync(join(hHome, '.claude/plugins/installed_plugins.json'), savedPluginsJson);
+    await h.click('#header-refresh');
+    await fullSize(h);
+    await h.click('#nav-harnesses');
+    await h.click('button#harness-claude-cli.harness-card-head');
+    await h.click('#harness-tab-skills');
+    same('Claude Code’s Skills tab drops routine Found/Off tags and keeps not in Central Knot under Not in Claude Code',
+      [await rowTags('skills', 'found-only'), await rowTags('skills', 'off-a'), await rowTags('skills', 'other-only')],
+      [[], [], ['not in Central Knot']]);
+
+    await openKind(h, 'skills');
     chmodSync(hCodex, 0o555);
     await h.click(`#${rowPart('switch', 'skills', 'off-c')}`);
     await h.click('#header-refresh');
     await openKind(h, 'skills');
+    same('with Codex read-only, pending removal keeps its tag and found-only keeps its tag for where it would be added',
+      [await rowTags('skills', 'off-c'), await rowTags('skills', 'found-only')],
+      [['still in Codex until sync runs'], ['not in Central Knot']]);
 
-    const FOUND_OFF_CARD = 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.';
-    const FOUND_ON_CARD = 'Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
-    const PLUGIN_CARD = 'Installed with their plugin, not copied. Open a row for the controls each tool has.';
-    const OFF_CARD = 'Kept in Central Knot, switched off. Where a tool still has it, its row says so.';
-
-    // Library Skills: 3 Off rows with 1 pending Codex removal, card closed; keyboard-focusable marks on Found, Only through a plugin and Off; stable heading heights.
-    same('Library Skills: no heading says Synchronize everything in Settings, On has no mark, and Off 3 shows 1 still in Codex until sync runs with card closed',
+    // Library Skills: 4 Off rows with 1 pending Codex removal, card closed; keyboard-focusable marks on Found, Only through a plugin and Off; stable heading heights.
+    same('Library Skills: no heading says Synchronize everything in Settings, On has no mark, and Off 4 shows 1 still in Codex until sync runs with card closed',
       [(await h.all('.ov-section', 'e.textContent')).some(text => /Synchronize everything, in Settings/.test(text)),
         await h.exists('.ov-section[data-section="on"] .info-mark'),
         await h.run(`!document.getElementById('section-off-info-card')?.matches(':popover-open')`),
         await headingSays(h, 'found'),
         await headingSays(h, 'off')],
-      [false, false, true, 'Found3', 'Off3·1 still in Codex until sync runs']);
+      [false, false, true, 'Found4', 'Off4·1 still in Codex until sync runs']);
     const onH = await heightOf('.ov-section[data-section="on"]');
     const foundNoLiveH = await heightOf('.ov-section[data-section="found"]');
     const pluginH = await heightOf('.ov-section-plugins');
@@ -1182,16 +1263,16 @@ async function harnessFlow() {
       same(`Library: ${id} opens its card by keyboard and closes on Escape`, await keyboardCard(id),
         { focused: id, opened: true, cardText: wantText, closed: true, keptFocus: id });
     }
-    // Pin a changed Off row: count drops to 2, misleading live note hides while height stays unchanged.
+    // Pin a changed Off row: count drops to 3, misleading live note hides while height stays unchanged.
     await h.click(`#${rowPart('switch', 'skills', 'off-a')}`);
-    same('Library: pinning a row turned On under Off drops the count to 2, hides the live line, and keeps heading height',
+    same('Library: pinning a row turned On under Off drops the count to 3, hides the live line, and keeps heading height',
       [await headingSays(h, 'off'), await heightOf('.ov-section[data-section="off"]'), await h.text('#section-off-info-card')],
-      ['Off2', offWithLiveH, OFF_CARD]);
+      ['Off3', offWithLiveH, OFF_CARD]);
     await h.click(`#${rowPart('switch', 'skills', 'off-a')}`);
     await h.click('#header-refresh');
 
     // Tool tabs (Skills, MCP servers, Agents) while Synchronize everything is Off: keyboard marks on all three headings,
-    // Not in <tool> has no note or mark, Off 3 live line on Skills, and pinned Found 0 on Agents.
+    // Not in <tool> has no note or mark, Off 4 live line on Skills, and pinned Found 0 on Agents.
     await h.click('#nav-harnesses');
     await h.click('button#harness-claude-cli.harness-card-head');
     for (const tab of ['skills', 'mcp', 'agents']) {
@@ -1205,9 +1286,9 @@ async function harnessFlow() {
           { focused: id, opened: true, cardText: wantText, closed: true, keptFocus: id });
       }
       if (tab === 'skills') {
-        same('Claude Code’s Skills tab: Off 3 shows 1 still in Codex until sync runs with card closed',
+        same('Claude Code’s Skills tab: Off 4 shows 1 still in Codex until sync runs with card closed',
           [await headingSays(h, 'off'), await h.run(`!document.getElementById('section-off-info-card')?.matches(':popover-open')`)],
-          ['Off3·1 still in Codex until sync runs', true]);
+          ['Off4·1 still in Codex until sync runs', true]);
       }
       if (tab === 'agents') {
         const beforeH = await heightOf('.ov-section[data-section="found"]');
@@ -1226,7 +1307,7 @@ async function harnessFlow() {
     await openKind(h, 'skills');
     same('Library with Synchronize everything on: Found shows 1 waits for your choice of copy at the same height and updates its card',
       [await headingSays(h, 'found'), await heightOf('.ov-section[data-section="found"]'), await keyboardCard('section-found-info')],
-      ['Found1·1 waits for your choice of copy', foundNoLiveH, { focused: 'section-found-info', opened: true, cardText: FOUND_ON_CARD, closed: true, keptFocus: 'section-found-info' }]);
+      ['Found2·1 waits for your choice of copy', foundNoLiveH, { focused: 'section-found-info', opened: true, cardText: FOUND_ON_CARD, closed: true, keptFocus: 'section-found-info' }]);
     await h.click('#nav-harnesses');
     await h.click('button#harness-claude-cli.harness-card-head');
     await h.click('#harness-tab-skills');
@@ -1695,12 +1776,16 @@ async function manageFlow() {
   same('Cancel closes the question, writes nothing, and puts focus back on Manage Codex', [
     await a.exists('.manage-question'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
   ], [false, edited, rowsBefore, rejoinId]);
+  // A file open on History meanwhile: the question takes that Escape, and the file stays open.
+  await a.click('.history-row .row-file-btn');
+  await waitHistory(a, () => a.exists('.file-open-box'));
   await a.click(`#${rejoinId}`);
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
   await a.press('Escape');
-  same('Escape cancels too, writes nothing, and puts focus back on Manage Codex', [
-    await a.exists('.manage-question'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
-  ], [false, edited, rowsBefore, rejoinId]);
+  same('Escape cancels too, writes nothing, and puts focus back on Manage Codex, a file open on History staying open', [
+    await a.exists('.manage-question'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`), await a.exists('.file-open-box'),
+  ], [false, edited, rowsBefore, rejoinId, true]);
+  await a.click('.history-row .row-file-btn[aria-pressed="true"]');
   await a.press(' ', 'Space');
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
   await a.run(`document.querySelector('[id^="history-manage-confirm-"]').focus()`);
@@ -3290,7 +3375,7 @@ async function practiceFlow() {
   // On History, the switch's Undo turns back only what is still as the switch left it: standup, turned on since, stays.
   await a.click('#nav-history');
   await a.run(`document.querySelector('.history-row[data-kind="profile"] .history-actions button').click()`); await a.settle();
-  check('its Undo from History says what it did with reload advice and Copy', /^Undone: 2 items turned on\..*In Copilot CLI, type \/skills reload\..*Codex picks it up/.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-copy-copilot-cli'), await a.text('.bands'));
+  check('its Undo from History says what it did with single-mention reload advice and Copy', /^Undone: 2 items turned on\..*Copilot CLI: \/skills reload.*Codex picks it up/.test(await a.text('.band-done') ?? '') && !/In Copilot CLI, type \/skills reload\./.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-copy-copilot-cli'), await a.text('.bands'));
   same('…and every skill is on again', skillsOn.map(key => folders(key).every(Boolean)), [true, true, true, true]);
   // Tools: Copilot CLI unticked in Incident (last, since from then on Incident holds its own keep-outs). The header's clause and
   // a Changes tools row say notes goes out of Copilot CLI; the switch takes notes out of Copilot CLI alone, Claude Code's and Codex's
@@ -3410,7 +3495,7 @@ async function practiceFlow() {
   const deletedSays = await openNotices(a);
   check('with a notice that Central Knot keeps it, its card offering Turn it on', deletedSays.includes('release-notes was deleted in Copilot CLI, so it is off and was taken out of Claude Code and Codex. Central Knot keeps it') && await a.exists('#notices-card [id^="notice-restore-"]'), deletedSays);
   await closeNotices(a);
-  check('and the table keeps it under Off, in Central Knot only', ((await sectionsNow(a, 'skills')).find(([role]) => role === 'off')?.[1] ?? []).includes('release-notes') && /in Central Knot only/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? '') && !(await switchOn(a, 'skills', 'release-notes')), await sectionsNow(a, 'skills'));
+  check('and the table keeps it under Off, with no routine tag', ((await sectionsNow(a, 'skills')).find(([role]) => role === 'off')?.[1] ?? []).includes('release-notes') && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"] .row-tag`)) && !(await switchOn(a, 'skills', 'release-notes')), await sectionsNow(a, 'skills'));
   await a.click('#nav-history');
   check('History lists it', (await a.text('#history-scroll') ?? '').includes('release-notes'), await a.text('#history-scroll'));
   await a.shot('practice-history');
@@ -3419,7 +3504,7 @@ async function practiceFlow() {
   same('turning it on puts every folder back as it was', [folders('release-notes'), await switchOn(a, 'skills', 'release-notes')], [releaseNotesOn, true]);
   check('with Undo', await a.exists('#outcome-undo'), await a.text('.bands'));
   await a.click('#outcome-undo');
-  same('whose Undo takes it out of every tool again: off, in Central Knot only', [releaseNotesIn(), /in Central Knot only/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? ''), await switchOn(a, 'skills', 'release-notes')], [[false, false, false], true, false]);
+  same('whose Undo takes it out of every tool again: off under Off, with no routine tag', [releaseNotesIn(), await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"] .row-tag`), await switchOn(a, 'skills', 'release-notes')], [[false, false, false], false, false]);
   await a.click(`#${rowPart('switch', 'skills', 'release-notes')}`);
   same('and on again puts it back once more', releaseNotesIn(), [true, true, true]);
 
@@ -3823,9 +3908,9 @@ async function practiceFlow() {
   same('agents from every tool', (await rowKeys(a, 'agents')).sort(), ['code-reviewer', 'release-notes']);
   const switchState = key => a.run(`document.querySelector('#${rowPart('switch', 'agents', key)}').getAttribute('aria-checked')`);
   const agentRow = key => a.text(`.ov-row[data-key="${rowPart('', 'agents', key)}"]`);
-  same('an agent only a harness has is found: under Found, with Add, said not to be in Central Knot, and the Found card says what Add does',
-    [await a.text(`#${rowPart('add', 'agents', 'code-reviewer')}`), await headingSays(a, 'found'), /not in Central Knot/.test(await agentRow('code-reviewer') ?? ''),
-      await a.text('#section-found-info-card')], ['Add', 'Found2', true, 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.']);
+  same('an agent only a harness has is found: under Found, with Add, no routine tag, and the Found card says what Add does',
+    [await a.text(`#${rowPart('add', 'agents', 'code-reviewer')}`), await headingSays(a, 'found'), await a.exists(`.ov-row[data-key="${rowPart('', 'agents', 'code-reviewer')}"] .row-tag`),
+      await a.text('#section-found-info-card')], ['Add', 'Found2', false, 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools.']);
   await a.click(`#${rowPart('add', 'agents', 'code-reviewer')}`);
   // release-notes is added from the keyboard: the rows are shared with Skills and MCP servers, so it stays where it was too.
   await a.run(`document.querySelector('#${rowPart('add', 'agents', 'release-notes')}').focus()`);
@@ -8400,7 +8485,7 @@ async function sharedCopiesFlow() {
   await opened();
   const elsewhere = `Pi ${reads} Copilot CLI ${reads}`;
   check('the Off heading names the copies still read', (await headingSays(a, 'off')).includes(elsewhere), await headingSays(a, 'off'));
-  same('the Off row names the tools that still have it', await a.text(`${row} .row-tag`), 'in Central Knot, Pi and Copilot CLI');
+  same('the Off row names the tools that still have it', await a.text(`${row} .row-tag`), 'another copy in Pi and Copilot CLI');
   check('the Off status says where the tools read it', (await a.text('.details-status') ?? '').includes(elsewhere), await a.text('.details-status'));
   if (shots) { await sizeTo(a, 1280, 800); await a.shot('pi-skills-off'); await fullSize(a); }
   await openKind(a, 'skills');
@@ -8579,9 +8664,9 @@ async function syncEverythingFlow() {
     check(`no Add all on ${page}: switching Synchronize everything on is the one way to add everything`, !(await a.exists('#apply, #manage-all')) && !(await a.all('button', 'e.textContent.trim()')).some(label => /^Add all/i.test(label)));
   };
   await openKind(a, 'skills');
-  same('off where it was never chosen: Found has no live line, its card says Add turns an item on in managed tools, and no Settings redirect shows',
+  same('off where it was never chosen: Found has no live line, its card says Add keeps an item in Central Knot and turns it on in managed tools, and no Settings redirect shows',
     [await foundNote(), await a.text('#section-found-info-card'), /Synchronize everything, in Settings/.test(await a.text('.ov-section[data-section="found"]') ?? '')],
-    [null, 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.', false]);
+    [null, 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools.', false]);
   await a.click('#nav-settings');
   for (let tries = 0; tries < 30 && !(await a.exists('#setting-sync-everything')); tries++) await wait(100);
   same('Settings › This home: Synchronize everything is off, shows the switch difference under its title with live aria-describedby, and says what it would add now and what waits',
@@ -8617,15 +8702,14 @@ async function syncEverythingFlow() {
   same('the Overview’s foot is one sentence, where every change is kept: Automatic sync is the status bar’s to say', (await a.text('#overview-kept'))?.trim(), 'Every change Central Knot makes in your tools is kept in History, with Undo where it can be undone.');
   await openKind(a, 'skills');
   same('on the Library’s skills notes and fresh are On and review stays found', await sectionsNow(a, 'skills'), [['on', ['fresh', 'notes']], ['found', ['review']]]);
-  same('the Found heading’s card says what Synchronize everything skips, and its live line counts what waits for a choice',
-    [await a.text('#section-found-info-card'), (await foundNote())?.replace(/^·\s*/, '')],
-    ['Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.', '1 waits for your choice of copy']);
+  same('the Found heading’s live line counts what waits for a choice',
+    (await foundNote())?.replace(/^·\s*/, ''), '1 waits for your choice of copy');
   const notice = '.sync-notice[data-kind="taken-in"] .notice-text';
   await openNotices(a);
   same('one notice per pass says how many it took in, where they were found, and their names, in the notices’ card', await a.all(`#notices-card ${notice}`, 'e.textContent.replace(/ · .*$/, "")'),
     ['Synchronize everything took in 1 skill, found in Claude Code: fresh. History can undo it.', 'Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.']);
   await closeNotices(a);
-  same('review’s row says why the rule leaves it: its copies differ, and opening it asks which', [await a.text(`#${rowPart('decide', 'skills', 'review')}`), await (async () => { await a.click(`#${rowPart('open', 'skills', 'review')}`); return a.exists('.details-differs'); })()], ['Copies differ', true]);
+  same('review’s row says why the rule leaves it: its copies differ, and opening it asks which', [await a.text(`#${rowPart('decide', 'skills', 'review')}`), await (async () => { await a.click(`#${rowPart('open', 'skills', 'review')}`); return a.exists('.details-differs'); })()], ['copies differ', true]);
   await fitsAtMinimum(a, 'Skills with Synchronize everything on');
   await a.shot('everything-skills');
   await openKind(a, 'mcp');
@@ -10102,20 +10186,20 @@ esac
   await done();
   same('Undo installs it in Claude Code again, the record as before, the focus on the row’s switch, and says what was not brought back', [calls().at(-1), installed(), entry()?.on, entry()?.except, await a.run(`document.activeElement?.id`), await a.text('#plugins-result .toolbar-result-text')],
     ['plugin install issue-tracker@ck-test-market --scope user', true, true, ['pi-cli'], tabSwitch, 'Undone: issue-tracker reinstalled in Claude Code, without its saved options.']);
-  // At 860×600 (sidebar open, light and dark): the consequential Undo sentence wraps whole in the 48px header with no Row 2 reload chips,
-  // its disclosure reads Reload step, opens below the header without covering tabs/counts, and the status bar stays quiet.
+  // At 860×600 (sidebar open, light and dark): the consequential Undo keeps #366's Row 2 reload chip and Show all in the 48px header,
+  // stays quiet in the status bar, and opening Show all reveals the whole sentence and reload row without covering the tool switcher or tabs.
   await sizeTo(a, ...SMALLEST);
   if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
   for (const look of ['light', 'dark']) {
     await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
     await themeSettled();
-    const fit = await a.run(`(() => { const t = document.querySelector('#plugins-result .toolbar-result-text'), h = document.querySelector('#header'), more = document.querySelector('#problems-show-all'), bar = document.querySelector('#announcement'); return [!!t && t.scrollHeight <= t.clientHeight + 1 && t.scrollWidth <= t.clientWidth + 1, h?.offsetHeight ?? 0, !!document.querySelector('#header .result-reloads'), !more?.hidden ? more?.textContent?.trim() ?? '' : '', !!bar?.classList.contains('visually-hidden')]; })()`);
-    same(`consequential Undo wraps whole at 860 (${look}) with Reload step disclosure and quiet status bar`, fit, [true, 48, false, 'Reload step', true]);
+    const fit = await a.run(`(() => { const h = document.querySelector('#header'), more = document.querySelector('#problems-show-all'), bar = document.querySelector('#announcement'); return [h?.offsetHeight ?? 0, document.querySelector('#header .result-reloads #outcome-copy-claude-cli')?.dataset.copy ?? '', !more?.hidden ? more?.textContent?.trim() ?? '' : '', !!bar?.classList.contains('visually-hidden')]; })()`);
+    same(`consequential Undo keeps 48px header with reload chip, Show all, and quiet status bar at 860 (${look})`, fit, [48, '/reload-plugins', 'Show all', true]);
   }
   await a.click('#problems-show-all');
-  same('Reload step opens under the header above the tabs and counts with Claude Code’s reload command and Copy button',
-    await a.run(`(() => { const h = document.querySelector('#header')?.getBoundingClientRect(), d = document.querySelector('#result-whole.result-drawer')?.getBoundingClientRect(), b = document.querySelector('.harness-bar')?.getBoundingClientRect(); return [!!d && !!h && !!b && d.top >= h.bottom - 1 && d.bottom <= b.top + 1, document.querySelector('#problems-show-all')?.textContent?.trim() ?? '', document.querySelector('#outcome-copy-claude-cli')?.dataset.copy ?? '']; })()`),
-    [true, 'Hide step', '/reload-plugins']);
+  same('Show all opens the whole sentence and Claude Code’s reload row without covering the tool switcher or tabs',
+    await a.run(`(() => { const w = document.querySelector('#header #result-whole.result-whole')?.getBoundingClientRect(), b = document.querySelector('.harness-bar')?.getBoundingClientRect(), t = document.querySelector('#result-whole .toolbar-result-text'); return [!!w && !!b && w.bottom <= b.top + 1, !!t && t.scrollHeight <= t.clientHeight + 1 && t.scrollWidth <= t.clientWidth + 1, document.querySelector('#problems-show-all')?.textContent?.trim() ?? '', document.querySelector('#result-whole #outcome-copy-claude-cli')?.dataset.copy ?? '']; })()`),
+    [true, true, 'Show less', '/reload-plugins']);
   await a.click('#problems-show-all');
   await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
   await fullSize(a);
@@ -13985,7 +14069,7 @@ async function usageFlow() {
   await fullSize(a);
   same('Turn these off: one click removes Central Knot’s copies, leaves spare’s shared copy, says Codex still reads spare another way and Everyday stopped being in use, with one Undo; the chip, now at 0, is gone',
     [await headerResultWords(a), (await a.text('#status-profile'))?.trim(), Object.entries(filesOf(['standup', 'spare'])).filter(([, body]) => body), (await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'spare')}"] .row-tag`))?.trim(), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
-    ['Turned off 2 skills with no use seen in the last 30 days: spare and standup. Codex still reads spare another way. Central Knot keeps them, and turning one on puts it back as it was. Everyday stopped being the profile in use.', 'No profile', [[join(shared, 'spare'), before[join(shared, 'spare')]]], 'in Central Knot and Codex', false]);
+    ['Turned off 2 skills with no use seen in the last 30 days: spare and standup. Codex still reads spare another way. Central Knot keeps them, and turning one on puts it back as it was. Everyday stopped being the profile in use.', 'No profile', [[join(shared, 'spare'), before[join(shared, 'spare')]]], 'another copy in Codex', false]);
   await a.click('#outcome-undo');
   for (let tries = 0; tries < 50 && JSON.stringify(filesOf(['standup', 'spare'])) !== JSON.stringify(before); tries++) await wait(100);
   same('its one Undo puts both back On, every file byte for byte, and the chip offers them again',
@@ -14283,9 +14367,9 @@ async function usageFlow() {
     [apart[1316].marks, apart[1316].gapsBelow.every(gap => gap >= 4), apart[1316].nameToMark, apart[860].gapsBelow.every(gap => gap >= 4), apart[860].nameToMark],
     [3, true, [4, 4, 4], true, [4, 4, 4]]);
   same('at 1316 and 860 Most used → ends the “Used in the last 30 days” line, at its right end, on no name’s line', [apart[1316].sorted, apart[860].sorted], [[true, true, true], [true, true, true]]);
-  same('a most used name’s hover says it opens its row in the Library; its mark’s, its file',
+  same('a most used name’s hover says it opens its row in the Library; its mark’s, its current version',
     [await a.all('#overview-skills-usage .kind-card-top-name', 'e.title'), await a.all('#overview-skills-usage .row-file-btn', 'e.title')],
-    [['alpha', 'echo', 'charlie'].map(name => `${name}: open its row in the Library`), ['Open file', 'Open file', 'Open file']]);
+    [['alpha', 'echo', 'charlie'].map(name => `${name}: open its row in the Library`), ['Open the current version', 'Open the current version', 'Open the current version']]);
   await a.click('#overview-unused');
   const allRows = await a.all('.ov-row[data-key]', 'e.dataset.key');
   const expectedUnused = [...['delta', ...extraUnusedSkills].map(key => rowPart('', 'skills', key)), ...extraUnusedAgents.map(key => rowPart('', 'agents', key))].sort();
@@ -17026,7 +17110,9 @@ async function libraryFlow() {
   const visibleChips = () => r.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].filter(e => !e.hidden).map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`);
   const allChips = () => r.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`);
   const moreChip = () => r.run(`(m => m && !m.hidden ? m.textContent?.trim() : null)(document.querySelector('#outcome-reload-more'))`);
-  const wholeLines = () => r.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => ({ text: row.querySelector('.reload-row-text')?.textContent?.trim(), buttons: [...row.querySelectorAll('button[data-copy]')].map(b => [b.textContent?.trim(), b.dataset.copy]) }))`);
+  const moreLabel = n => (n > 0 ? `+${n} more ${n === 1 ? 'step' : 'steps'}` : null);
+  const visibleTools = () => r.run(`new Set([...document.querySelectorAll('#header .result-reloads .result-copies > *')].filter(e => !e.hidden).map(e => e.dataset.reloadTool)).size`);
+  const wholeLines = () => r.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => [...row.querySelectorAll('button, .reload-row-text, .reload-row-note')].map(el => el.tagName === 'BUTTON' ? [el.textContent?.trim(), el.dataset.copy] : el.textContent?.trim()))`);
   const headerHeight = () => r.run(`document.querySelector('#header').offsetHeight`);
   const row1Text = () => r.text('#header [data-outcome] .band-text');
   const rShots = async (name, size, railMode) => {
@@ -17067,7 +17153,7 @@ async function libraryFlow() {
   ], [48, [], true]);
   await r.click('#problems-show-all');
   same('Codex skill under Show all shows conditional sentence with no button', await wholeLines(), [
-    { text: 'Codex picks it up at the next turn; if not, start a new chat.', buttons: [] },
+    ['Codex picks it up at the next turn; if not, start a new chat.'],
   ]);
   await r.click('#problems-show-all');
   // Item 1: skill turned On then Off in one run (clickInRun keeps the run open), then combined Undo -> no reload advice or chips.
@@ -17139,13 +17225,13 @@ async function libraryFlow() {
   for (const [label, size, railMode] of [['reload-two-chip-860', SMALLEST, undefined], ['reload-two-chip-1316-open', [1316, 819], false], ['reload-two-chip-1316-rail', [1316, 819], true]]) {
     await sizeTo(r, ...size);
     if (railMode !== undefined && await r.run(`document.body.classList.contains('rail')`) !== railMode) await r.click('#sidebar-toggle');
-    same(`two-chip folded fits at ${label} with 48px header`, [await r.run(CUT_OFF), await headerHeight()], [[], 48]);
+    same(`two-chip folded fits at ${label} with 48px header and +1 more step for chipless Codex`, [await r.run(CUT_OFF), await headerHeight(), await visibleTools(), await moreChip()], [[], 48, 2, '+1 more step']);
     await rShots(label, size, railMode);
-    await r.click('#problems-show-all');
-    same(`two-chip Show all at ${label} lists Copilot CLI, Codex conditional and Pi in order`, [await r.run(CUT_OFF), await wholeLines()], [[], [
-      { text: 'In Copilot CLI, type /skills reload.', buttons: [['Copilot CLI: /skills reload', '/skills reload']] },
-      { text: 'Codex picks it up at the next turn; if not, start a new chat.', buttons: [] },
-      { text: 'In Pi, type /reload.', buttons: [['Pi: /reload', '/reload']] },
+    await r.click('#outcome-reload-more');
+    same(`two-chip Show all at ${label} lists Copilot CLI, Codex conditional and Pi once each in order`, [await r.run(CUT_OFF), await wholeLines()], [[], [
+      [['Copilot CLI: /skills reload', '/skills reload']],
+      ['Codex picks it up at the next turn; if not, start a new chat.'],
+      [['Pi: /reload', '/reload']],
     ]]);
     await rShots(`${label}-whole`, size, railMode);
     await r.click('#problems-show-all');
@@ -17173,18 +17259,21 @@ async function libraryFlow() {
   for (const [label, size, railMode] of [['reload-five-chip-860', SMALLEST, undefined], ['reload-five-chip-1316-open', [1316, 819], false], ['reload-five-chip-1316-rail', [1316, 819], true]]) {
     await sizeTo(r, ...size);
     if (railMode !== undefined && await r.run(`document.body.classList.contains('rail')`) !== railMode) await r.click('#sidebar-toggle');
-    same(`five-chip folded stays 48px without clipping at ${label}`, [await r.run(CUT_OFF), await headerHeight()], [[], 48]);
-    const more = await moreChip();
-    if (label === 'reload-five-chip-860') check('five-chip at 860×528 folds overflow into +N more', /^\+[1-6] more$/.test(more ?? ''), more);
+    const vis = await visibleTools(), more = await moreChip();
+    same(`five-chip folded stays 48px without clipping at ${label} and counts unshown rows once per tool`, [await r.run(CUT_OFF), await headerHeight(), more], [[], 48, moreLabel(5 - vis)]);
     await rShots(label, size, railMode);
     await r.click(more ? '#outcome-reload-more' : '#problems-show-all');
-    same(`five-chip Show all at ${label} shows all five tool lines and six copy buttons`, [await r.run(CUT_OFF), await wholeLines()], [[], [
-      { text: 'Restart Claude Code (claude --continue keeps the chat).', buttons: [['Claude Code: claude --continue', 'claude --continue']] },
-      { text: 'In Copilot CLI, type /skills reload.', buttons: [['Copilot CLI: /skills reload', '/skills reload']] },
-      { text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat).', buttons: [['Codex: /new', '/new'], ['codex resume --last', 'codex resume --last']] },
-      { text: 'In Pi, type /reload.', buttons: [['Pi: /reload', '/reload']] },
-      { text: 'Restart OpenCode (opencode --continue keeps the chat).', buttons: [['OpenCode: opencode --continue', 'opencode --continue']] },
-    ]]);
+    same(`five-chip Show all at ${label} shows all five tool lines once each with paired Codex commands kept together and Show less on the summary line`, [
+      await r.run(CUT_OFF), await wholeLines(),
+      await r.run(`(() => { const t = document.querySelector('#result-whole .band-text')?.getBoundingClientRect(), s = document.querySelector('#result-whole #problems-show-all')?.getBoundingClientRect(); return !!t && !!s && Math.abs(s.bottom - t.bottom) <= 2 && (t.height > 20 || Math.abs(s.top - t.top) <= 2); })()`),
+      await r.run(`(() => { const p = document.querySelector('#result-whole .reload-cmd-part'); if (!p) return false; const ys = [...p.children].map(c => Math.round(c.getBoundingClientRect().top + c.getBoundingClientRect().height / 2)); return Math.max(...ys) - Math.min(...ys) <= 2; })()`),
+    ], [[], [
+      [['Claude Code: claude --continue', 'claude --continue'], 'Restart; keeps the chat.'],
+      [['Copilot CLI: /skills reload', '/skills reload']],
+      [['Codex: /new', '/new'], 'for a new chat,', 'or', ['codex resume --last', 'codex resume --last'], 'to restart and keep the chat.'],
+      [['Pi: /reload', '/reload']],
+      [['OpenCode: opencode --continue', 'opencode --continue'], 'Restart; keeps the chat.'],
+    ], true, true]);
     await rShots(`${label}-whole`, size, railMode);
     await r.click('#problems-show-all');
   }
@@ -17204,20 +17293,58 @@ async function libraryFlow() {
     for (const [label, size, railMode] of [['reload-five-problem-860', SMALLEST, undefined], ['reload-five-problem-1316-open', [1316, 819], false], ['reload-five-problem-1316-rail', [1316, 819], true]]) {
       await sizeTo(r, ...size);
       if (railMode !== undefined && await r.run(`document.body.classList.contains('rail')`) !== railMode) await r.click('#sidebar-toggle');
-      same(`five-chip + problem line keeps header 48px without clipping at ${label}`, [
-        await r.run(CUT_OFF), await headerHeight(), await r.exists('#header .result-row2'), /^\+[1-6] more$/.test(await moreChip() ?? ''),
-      ], [[], 48, true, true]);
+      const vis = await visibleTools();
+      same(`five-chip + problem line keeps header 48px without clipping and counts unshown rows once per tool at ${label}`, [
+        await r.run(CUT_OFF), await headerHeight(), await r.exists('#header .result-row2'), await moreChip(),
+      ], [[], 48, true, moreLabel(5 - vis)]);
       await rShots(label, size, railMode);
     }
     await sizeTo(r, 1316, 819);
     if (await r.run(`document.body.classList.contains('rail')`)) await r.click('#sidebar-toggle');
     await r.click('#outcome-reload-more');
-    same('five-chip + problem line Show all shows all five lines and the problem line', [
+    same('five-chip + problem line Show all keeps the problem line visible before all five reload lines', [
       await r.run(CUT_OFF), (await wholeLines()).length, await r.exists('#result-whole .problem-line'),
-    ], [[], 5, true]);
+      await r.run(`(() => { const p = document.querySelector('#result-whole .problem-line')?.getBoundingClientRect(), l = document.querySelector('#result-whole .reload-list')?.getBoundingClientRect(); return !!p && !!l && p.bottom <= l.top + 1; })()`),
+    ], [[], 5, true, true]);
     await rShots('reload-five-problem-1316-open-whole', [1316, 819], false);
     await r.click('#problems-show-all');
   } finally { chmodSync(join(R.home, '.claude/skills'), 0o755); }
+  await fullSize(r);
+  // Off-header bands (History and Settings) fold 3+ shown reload steps behind Reload steps (N), keeping Undo before it and saying each command once.
+  const bandRows = () => r.run(`[...document.querySelectorAll('.band-done .reload-row')].map(row => [...row.querySelectorAll('button, .reload-row-text, .reload-row-note')].map(el => el.tagName === 'BUTTON' ? [el.textContent?.trim(), el.dataset.copy] : el.textContent?.trim()))`);
+  const foldState = () => r.run(`(() => { const d = document.querySelector('#outcome-reloads-fold'), s = document.querySelector('#outcome-reloads-toggle'), u = document.querySelector('#outcome-undo'), x = document.querySelector('#outcome-dismiss'), first = d?.querySelector('.reload-row'); const sr = s?.getBoundingClientRect(), ur = u?.getBoundingClientRect(), xr = x?.getBoundingClientRect(), fr = first?.getBoundingClientRect(); const gap = d?.open && sr && fr ? Math.round(fr.top - sr.bottom) : null; return { exists: !!d, open: !!d?.open, label: s?.textContent?.trim() ?? null, tall: !!sr && sr.height >= 24, gapOk: gap === null || (gap >= 4 && gap <= 6), undoBefore: !!ur && !!sr && ur.bottom <= sr.top + 2, dismissBefore: !!xr && !!sr && xr.bottom <= sr.top + 2 }; })()`);
+  await r.click(`#${rowPart('switch', 'mcp', 'docs')}`);
+  await done(r);
+  await r.click('#nav-history');
+  await until(() => r.exists('.history-row[data-kind="off"] .history-actions button'));
+  await r.run(`(() => { const row = [...document.querySelectorAll('.history-row[data-kind="off"]')].find(el => el.querySelector('.history-what strong')?.textContent === 'docs'); row?.querySelector('.history-actions button')?.click(); })()`);
+  await done(r);
+  await sizeTo(r, ...SMALLEST);
+  if (await r.run(`document.body.classList.contains('rail')`)) await r.click('#sidebar-toggle');
+  same('History band with 4 tools folds behind Reload steps (4) (>=24px) with Undo and × before it and no cutoff at 860×528', [await r.run(CUT_OFF), await foldState()], [
+    [], { exists: true, open: false, label: 'Reload steps (4)', tall: true, gapOk: true, undoBefore: true, dismissBefore: true },
+  ]);
+  await r.click('#outcome-reloads-toggle');
+  same('opening History Reload steps (4) shows all 4 single-mention rows with 4–6px gap, keeps toggle >=24px, and copies secondary command', [await r.run(CUT_OFF), (await foldState()).open, (await foldState()).tall, (await foldState()).gapOk, await bandRows()], [[], true, true, true, [
+    [['Claude Code: claude --continue', 'claude --continue'], 'Restart; keeps the chat.'],
+    [['Codex: /new', '/new'], 'for a new chat,', 'or', ['codex resume --last', 'codex resume --last'], 'to restart and keep the chat.'],
+    [['Pi: /reload', '/reload']],
+    [['OpenCode: opencode --continue', 'opencode --continue'], 'Restart; keeps the chat.'],
+  ]]);
+  await r.click('#outcome-copy-codex-cli-1');
+  same('copying secondary command inside opened History disclosure copies codex resume --last', await r.run(`window.__copied.at(-1)`), 'codex resume --last');
+  await r.click('#outcome-reloads-toggle');
+  same('closing History Reload steps (4) collapses it cleanly', (await foldState()).open, false);
+  // Settings band draws the same disclosure behind Undo when Synchronize everything writes 3+ reload tools.
+  const extraSkillDir = skill(join(R.home, '.claude/skills'), 'extra-skill'), hourAgo = new Date(Date.now() - 3_600_000);
+  for (const file of [extraSkillDir, join(extraSkillDir, 'SKILL.md')]) utimesSync(file, hourAgo, hourAgo);
+  await fullSize(r);
+  await r.click('#header-refresh');
+  await r.click('#nav-settings');
+  await until(() => r.exists('#sync-everything-on'));
+  await r.click('#sync-everything-on');
+  await until(() => r.exists('[data-outcome] #outcome-reloads-toggle'));
+  same('Settings band draws Reload steps (3) behind Undo', [(await foldState()).label, (await foldState()).undoBefore], ['Reload steps (3)', true]);
   await fullSize(r);
   same('no page errors, reload words', r.pageErrors, []);
   await r.quit();
@@ -17268,7 +17395,7 @@ async function libraryFlow() {
     };
     const aChips = () => a.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`);
     const aMore = () => a.run(`(m => m && !m.hidden ? m.textContent?.trim() : null)(document.querySelector('#outcome-reload-more'))`);
-    const aWhole = () => a.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => ({ text: row.querySelector('.reload-row-text')?.textContent?.trim(), buttons: [...row.querySelectorAll('button[data-copy]')].map(b => [b.textContent?.trim(), b.dataset.copy]) }))`);
+    const aWhole = () => a.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => ({ text: row.querySelector('.reload-row-text, .reload-row-note')?.textContent?.trim() ?? null, buttons: [...row.querySelectorAll('button[data-copy]')].map(b => [b.textContent?.trim(), b.dataset.copy]) }))`);
     const aHeight = () => a.run(`document.querySelector('#header').offsetHeight`);
     await a.click('#nav-overview');
     await a.click('#setup-no');
@@ -17317,7 +17444,7 @@ async function libraryFlow() {
       await aShots(label, size, railMode);
       await a.click('#problems-show-all');
       same(`Worked example 2 Show all at ${label} names both ways once with one claude --continue button`, [await a.run(CUT_OFF), await aWhole()], [[], [
-        { text: 'Restart Claude Code (claude --continue keeps the chat) or Claude desktop.', buttons: [['Claude Code: claude --continue', 'claude --continue']] },
+        { text: 'Restart (keeps the chat), or restart Claude desktop.', buttons: [['Claude Code: claude --continue', 'claude --continue']] },
       ]]);
       await aShots(`${label}-whole`, size, railMode);
       await a.click('#problems-show-all');
@@ -17346,7 +17473,7 @@ async function libraryFlow() {
     };
     const cChips = () => c.run(`[...document.querySelectorAll('#header .result-reloads .result-copies > *')].map(e => ({ text: e.textContent?.trim(), title: e.title, copy: e.dataset.copy ?? null }))`);
     const cMore = () => c.run(`(m => m && !m.hidden ? m.textContent?.trim() : null)(document.querySelector('#outcome-reload-more'))`);
-    const cWhole = () => c.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => ({ text: row.querySelector('.reload-row-text')?.textContent?.trim(), buttons: [...row.querySelectorAll('button[data-copy]')].map(b => [b.textContent?.trim(), b.dataset.copy]) }))`);
+    const cWhole = () => c.run(`[...document.querySelectorAll('#result-whole .reload-row')].map(row => ({ text: row.querySelector('.reload-row-text, .reload-row-note')?.textContent?.trim() ?? null, buttons: [...row.querySelectorAll('button[data-copy]')].map(b => [b.textContent?.trim(), b.dataset.copy]) }))`);
     const cHeight = () => c.run(`document.querySelector('#header').offsetHeight`);
     await c.click('#nav-overview');
     await c.click('#setup-no');
@@ -17376,7 +17503,7 @@ async function libraryFlow() {
       await cShots(label, size, railMode);
       await c.click('#problems-show-all');
       same(`Copilot both skill+MCP Show all at ${label} shows one Copilot line with both steps and /skills reload button`, [await c.run(CUT_OFF), await cWhole()], [[], [
-        { text: 'In Copilot CLI, type /skills reload, or restart the GitHub Copilot app.', buttons: [['Copilot CLI: /skills reload', '/skills reload']] },
+        { text: 'Or restart the GitHub Copilot app.', buttons: [['Copilot CLI: /skills reload', '/skills reload']] },
       ]]);
       await cShots(`${label}-whole`, size, railMode);
       await c.click('#problems-show-all');
@@ -17434,7 +17561,7 @@ async function libraryFlow() {
     [await headerState(), await r.exists(`#${rowPart('add', 'skills', 'race-add')}`), await r.exists(`#${rowPart('decide', 'skills', 'race-add')}`),
       await r.all(`${row('skills', 'race-add')} .row-tag`), !!readSkillsRecord()['race-add'], readHistory().some(entry => entry.key === 'race-add'), pairFiles('race-add')],
     [{ text: 'race-add has differing copies. Choose which copy every tool uses.', warn: false, undo: false, problems: [] },
-      true, true, ['Copies differ', 'not in Central Knot'], false, false, [equalAdd, changedAdd]]);
+      true, true, ['copies differ'], false, false, [equalAdd, changedAdd]]);
   // Choosing a copy then adds it, writes both tools, records History, and says so.
   await r.click(`#${rowPart('add', 'skills', 'race-add')}`);
   check('Add on the differing row opens its copy question', await r.exists(`#${rowPart('use', 'skills', 'race-add', 'copilot-cli')}`), await r.text('#page'));
@@ -17652,7 +17779,8 @@ async function libraryFlow() {
   const O = homeWith('library-off-one-tool');
   for (const folder of ['.copilot', '.codex', '.pi/agent', '.config/opencode', '.gemini/config']) mkdirSync(join(O.home, folder), { recursive: true });
   skill(O.claude, 'active-skill', text('active-skill', 'Always on.'));
-  skill(O.claude, 'bench-runner', text('bench-runner', 'Runs overnight throughput suites against local fixtures.'));
+  // bench-runner's file is long, so opened on History under a row near the foot it has the window to fill.
+  skill(O.claude, 'bench-runner', text('bench-runner', ['Runs overnight throughput suites against local fixtures.', ...Array.from({ length: 40 }, (_, at) => `Step ${at + 1} of the run.`)].join('\n')));
   skill(O.claude, 'legacy-skill', text('legacy-skill', 'Legacy skill.'));
   skill(O.claude, 'own-test', text('own-test', 'Checks an independent copy kept in another tool.'));
   agent(O.home, 'claude-cli', 'release-scribe', agentText('release-scribe', 'Drafts detailed post-release summaries.'));
@@ -17907,6 +18035,10 @@ async function libraryFlow() {
     { hash: 'y', at: foldAt(1), from: { how: 'edited', tool: 'pi-cli', replacedBy: clashItem.hash } },
     { hash: 'z', at: foldAt(1), from: { how: 'edited', tool: 'opencode-cli', replacedBy: clashItem.hash } },
   );
+  // The long-named entry's skill is one Central Knot holds (Off, legacy-skill's text), so its name on History has its mark.
+  const longKey = 'cross-workspace-release-migration-checklist-v2';
+  sFold.items[longKey] = { ...structuredClone(sFold.items['legacy-skill']), key: longKey, name: longKey, on: false, applied: {} };
+  cpSync(join(O.home, '.central-knot/items/skills/legacy-skill'), join(O.home, `.central-knot/items/skills/${longKey}`), { recursive: true });
   writeFileSync(oSkillRec, `${JSON.stringify(sFold, null, 2)}\n`);
   hFold.events.push(
     { id: 'fold-legacy', at: foldAt(7), key: 'instructions:old', item: 'old', kind: 'edit', winner: { tool: 'claude-cli', hash: 'a' }, losers: ['claude-cli', 'codex-cli', 'old-cli'].map(tool => ({ tool, hash: 'a' })), orderProved: true },
@@ -18005,6 +18137,57 @@ async function libraryFlow() {
   same('opened tool-list fold stays open through Refresh and closes on leaving History and returning',
     [foldAfterRefresh, await o.exists('#history-tools-names-fold-five-0'), await o.run(`document.getElementById('history-tools-fold-five-0')?.open ?? false`)],
     [[true, true], false, false]);
+  // A name History holds an item under has the Library's file mark after it. At 860: one press opens its text under that row, a
+  // second row naming it takes it, the profile menu's and the Keep confirmation's Escape leave it open and the next closes it,
+  // nothing cut off; under a row near the foot, its long file uses the window under that row, the next row in sight. At 1316: opened.
+  const benchRows = await o.run(`[...document.querySelectorAll('.history-row')].filter(row => row.querySelector('.history-what strong')?.textContent === 'bench-runner').map(row => row.id)`);
+  const [benchFirst, benchSecond] = benchRows, benchLast = benchRows.at(-1), benchMark = row => `#${row} .history-what strong + .row-file-btn`;
+  const fileUnder = () => o.run(`(() => { const box = document.querySelector('.file-open-box'), row = box?.closest('.history-row'), view = document.querySelector('#history-scroll').getBoundingClientRect();
+    return { row: row?.id ?? null, text: box?.querySelector('pre.content')?.textContent ?? '', boxes: document.querySelectorAll('.file-open-box').length,
+      rowAtTop: !!row && Math.abs(row.getBoundingClientRect().top - view.top) <= 40, nextInSight: !!row?.nextElementSibling && row.nextElementSibling.getBoundingClientRect().top < view.bottom - 8 }; })()`);
+  const openUnder = async row => { await o.click(benchMark(row)); await until(async () => (said => said.row === row && said.text.includes('name: bench-runner'))(await fileUnder())); await o.settle(); return fileUnder(); };
+  const historyShot = async (name, look) => { if (!shots) return; await theme(o, look); await o.settle(); await o.shot(name); await theme(o, 'light'); };
+  const sidebarOpen = async () => { if (await o.run(`document.getElementById('sidebar-toggle')?.getAttribute('aria-label') === 'Expand the sidebar'`)) await o.click('#sidebar-toggle'); await o.settle(); };
+  await sizeTo(o, ...SMALLEST);
+  await sidebarOpen();
+  await historyShot('history-file-marks-860-light', 'light');
+  const first = await openUnder(benchFirst);
+  same('at 860, bench-runner’s mark on History opens its text under that row', [first.row, first.text.startsWith('---\nname: bench-runner\n'), first.boxes], [benchFirst, true, 1]);
+  await historyShot('history-file-open-860-light', 'light');
+  const second = await openUnder(benchSecond);
+  same('at 860, a second row naming bench-runner takes its file, nothing cut off', [second.row, second.boxes, await o.run(CUT_OFF)], [benchSecond, 1, []]);
+  await historyShot('history-file-second-860-light', 'light');
+  await o.click('#status-profile');
+  await o.press('Escape');
+  const menuShut = [await o.exists('.pf-menu'), (await fileUnder()).boxes];
+  await keepFor(o, 7);
+  await o.run(`document.getElementById('history-shorten-cancel').focus()`);
+  await o.press('Escape');
+  const keptOpen = [await o.exists('#setting-history-question'), (await fileUnder()).boxes];
+  await o.press('Escape');
+  same('Escape closes the profile menu, then the Keep confirmation, the file staying open; the next closes the file, the focus back on its mark',
+    [menuShut, keptOpen, (await fileUnder()).boxes, await o.run(`document.activeElement === document.querySelector('${benchMark(benchSecond)}')`)], [[false, 1], [false, 1], 0, true]);
+  await o.run(`document.getElementById('${benchLast}').scrollIntoView({ block: 'end' })`);
+  const foot = await openUnder(benchLast);
+  same('at 860, opened at a row near the foot, bench-runner’s long file uses the window under that row, the next row in sight', [foot.rowAtTop, foot.nextInSight], [true, true]);
+  await historyShot('history-file-long-foot-860-light', 'light');
+  await o.click(benchMark(benchLast));
+  if (shots) {
+    await o.run(`document.getElementById('history-row-fold-long').scrollIntoView({ block: 'center' })`);
+    await historyShot('history-file-long-name-860-light', 'light');
+    // A skill's row with no mark (draft-rfc is not in Central Knot), its name hovered: its hover says so (a native tooltip, not in the picture).
+    const name = await o.run(`(box => [box.x + box.width / 2, box.y + box.height / 2])(document.querySelector('#history-row-fold-five .history-what strong').getBoundingClientRect())`);
+    await o.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: name[0], y: name[1] });
+    await historyShot('history-file-no-mark-860-light', 'light');
+  }
+  await sizeTo(o, 1316, 819);
+  await sidebarOpen();
+  await historyShot('history-file-marks-1316-dark', 'dark');
+  const wide = await openUnder(benchFirst);
+  same('at 1316, bench-runner’s file opens under its row, nothing cut off', [wide.row, await o.run(CUT_OFF)], [benchFirst, []]);
+  await historyShot('history-file-open-1316-dark', 'dark');
+  await o.click(benchMark(benchFirst));
+  await fullSize(o);
   // With OpenCode not managed: neither the opened Off row nor History after clicking Claude Code mentions OpenCode.
   await o.click('#nav-harnesses');
   await until(() => o.exists('#manage-opencode-cli'));

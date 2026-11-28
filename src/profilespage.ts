@@ -489,9 +489,9 @@ export function profilesPage(): HTMLElement {
     h('div.page.split.profiles-split', { id: 'profiles-split' }, listColumn(open), open ? profileDetail(open) : h('div.detail-column')));
 }
 
-/** Arrow keys, Home and End move between the menu's items; Escape closes it; Tab closes it once focus has moved on. */
+/** Arrow keys, Home and End move between the menu's items; Escape closes it, and only it; Tab closes it once focus has moved on. */
 function menuKeys(event: KeyboardEvent, close: () => void) {
-  if (event.key === 'Escape') { close(); return; }
+  if (event.key === 'Escape') { event.preventDefault(); close(); return; }
   // A click elsewhere already closes it (the document listener below); Tab leaving it does too, after focus has moved.
   if (event.key === 'Tab') { setTimeout(() => { if (menuOpen && !document.activeElement?.closest('.pf-menu')) { menuOpen = false; rerender(); } }); return; }
   const choices = [...document.querySelectorAll<HTMLElement>('.pf-menu-item:not(:disabled)')];

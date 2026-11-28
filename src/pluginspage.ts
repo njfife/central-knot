@@ -11,7 +11,7 @@ import { brandMark } from './brand.ts';
 import { plural, timeOrDay } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
-import { consequentialRun, noUndoNote, pluginKey, resultParts, resultSentence, shortOf, undoTitle, type LastRun, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
+import { noUndoNote, pluginKey, resultParts, resultSentence, shortOf, undoTitle, type LastRun, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
 import { FIND_FROM, NO_LONGER_OFFERED, blocked, categoriesOf, copyStale, installedFrom, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, pluginLabel, pluginLabeler, pluginsResultPlace, runDisplay, runReloads, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
@@ -398,23 +398,21 @@ export function pluginsResult(): HTMLElement[] {
   if (told && overRun(told) && (!told.act || !!told.rows?.length)) return listResult();
   const problem = market.problem;
   const { last, lines, elsewhere, advice, shown } = runDisplay(here);
-  const of = last ?? app.outcome, whole = of !== undefined && app.shownWhole === of, adviceCount = advice.items.length;
+  const of = last ?? app.outcome, whole = of !== undefined && app.shownWhole === of, hasAdvice = advice.items.length > 0;
   const run = runLine(last, here, lines, shown, elsewhere, whole);
-  // Consequential uninstall/Undo sentences wrap across the header's two lines while reload details stay behind their disclosure.
-  const deferReloads = !!run && !whole && !elsewhere && consequentialRun(last);
-  const chips = run && !whole && !deferReloads ? reloadChips(advice, of) : null;
+  const chips = run && !whole ? reloadChips(advice, of) : null;
   const profile = profileSpan(run && !whole ? last?.profileLine : undefined);
-  const problems = problemBand(problem, lines, !run, adviceCount, chips, profile, last);
-  // With no problem line, the disclosure follows the sentence when the header cuts text or holds reload lines.
-  if (run && !problems) run.querySelector('.toolbar-result-text')!.after(wholeToggle(of, 0, adviceCount));
-  const row2 = run && whole && adviceCount ? reloadLines(advice) : problems ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
-  return [run, row2, problems].filter((part): part is HTMLElement => !!part);
+  const problems = problemBand(problem, lines, !run, hasAdvice, chips, profile, last);
+  // With no problem line, Show all follows the sentence, for one the header cuts or whose reload sentences live under Show all.
+  if (run && !problems) run.querySelector('.toolbar-result-text')!.after(wholeToggle(of, 0, hasAdvice));
+  const row2 = run && whole && hasAdvice ? reloadLines(advice, 'whole') : problems ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
+  return [run, problems, row2].filter((part): part is HTMLElement => !!part);
 }
 
 /**
  * The last run on Instructions or a tool's Instructions tab, where no plugin result is in the header (pluginstate.ts
  * pluginsResultPlace): one band, under the strip it was made in or above the cards (instructionspage.ts runStrip). What it did and an
- * ended profile, each plugin it failed for and the stop, its Undo and ×, then its reload steps whole, as a band page's result has them.
+ * ended profile, each plugin it failed for and the stop, its Undo and ×, then its reload steps, as a band page's result has them.
  */
 export function runBand(): HTMLElement | null {
   const last = market.lastRun, problem = market.problem, lines = last ? lastLines() : [];
@@ -425,7 +423,7 @@ export function runBand(): HTMLElement | null {
   if (!said && !reasons.length) return null;
   return h('div.band.band-done.plugin-run', { role: 'status', id: 'plugins-result' }, reasons.length ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'),
     h('span.band-text', {}, said, reasons.map(reason => h('span.band-reason', {}, reason))),
-    h('span.band-actions', {}, undo), dismiss(closeRun, 'report-dismiss'), last ? reloadLines(runReloads()) : null);
+    h('span.band-actions', {}, undo), dismiss(closeRun, 'report-dismiss'), last ? reloadLines(runReloads(), last) : null);
 }
 
 /** What just happened (each plugin named a link to its page, with Undo), or else the last notice ("… added"). */
@@ -465,12 +463,12 @@ function runLine(last: LastRun | undefined, place: RunPlace, lines: ResultLine[]
 }
 
 /** What went wrong in the last run, or why a marketplace couldn't be added, with the result's × when it stands `alone`. */
-function problemBand(problem: string | undefined, lines: ResultLine[], alone: boolean, adviceCount = 0, chips: HTMLElement | null = null, profile: HTMLElement | null = null, last?: LastRun) {
+function problemBand(problem: string | undefined, lines: ResultLine[], alone: boolean, hasAdvice = false, chips: HTMLElement | null = null, profile: HTMLElement | null = null, last?: LastRun) {
   const failures = lines.filter(line => !line.ok);
   if (!problem && !failures.length) return null;
   const label = pluginLabeler([...lines, ...(last?.done ?? [])]);
   return h(`div.band.plugin-problems${chips || profile ? '.result-row2' : ''}`, { role: 'alert' }, profile, icon('triangle-alert', 14, 'tone-warning'),
-    problemLines([...failures.map(line => [h('strong.item-name', {}, label(line)), `: ${line.text}`]), ...(problem ? [problem] : [])], last ?? problem, adviceCount),
+    problemLines([...failures.map(line => [h('strong.item-name', {}, label(line)), `: ${line.text}`]), ...(problem ? [problem] : [])], last ?? problem, hasAdvice),
     chips, alone ? dismiss(closeRun, 'report-dismiss') : null);
 }
 

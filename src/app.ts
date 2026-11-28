@@ -149,8 +149,6 @@ export const state = {
    * result is another object, so it shows folded.
    */
   shownWhole: undefined as Outcome | PassResult | DestinationResult | LastRun | string | { noticesOf: string; upTo: number } | undefined,
-  /** Whether shownWhole holds only reload steps opened as a drawer under the header rather than a floating card. */
-  wholeDrawer: false,
   /** What the tools' session history shows was used (usage.ts), for this home: collected when it opens and on Update usage statistics (collectUsage). */
   usage: pageData<UsageReading>(),
   /** Whether the usage band shows above the Library's list (matrix.ts usageBand): opened by Update usage statistics, closed by its close button and when a home opens. */
@@ -294,7 +292,7 @@ function fadeLater(): void {
   if (!acting() && windowVisible()) fading = setTimeout(fadeNow, FADE_MS);
 }
 /** The pointer or the focus is in the header's result, or it is open as a card: it stays while so, and its time starts again after. */
-const heldInHeader = () => !!document.querySelector('.header-result:hover, .header-result:focus-within, .result-whole, .result-drawer');
+const heldInHeader = () => !!document.querySelector('.header-result:hover, .header-result:focus-within, .result-whole');
 function fadeNow(): void {
   if (acting() || !windowVisible()) return;
   if (heldInHeader()) { fading = setTimeout(() => (heldInHeader() ? fadeNow() : fadeLater()), 250); return; }

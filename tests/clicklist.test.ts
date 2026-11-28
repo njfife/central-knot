@@ -4103,7 +4103,7 @@ test('Consequential uninstall/Undo shows irreversible completion without Undo qu
   assert.equal(app.said.quiet, true, 'status bar does not duplicate irreversible header result');
   assert.match(app.said.text, /Can’t be undone\./);
 
-  // 2. Uninstall's Undo with reload advice omits Row 2 reload chips so the sentence can wrap, labels its disclosure Reload step, puts reload lines under it, and stays quiet.
+  // 2. Uninstall's Undo with reload advice keeps #366's Row 2 reload chips and Show all / Show less card with reload lines, and stays quiet in the status bar.
   market.lastRun = {
     done: [], undo: false, home: '/home', place: 'claude-cli',
     turn: { source: '/market', plugin: 'alpha', before: null, back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'install', deleted: true }] },
@@ -4117,18 +4117,17 @@ test('Consequential uninstall/Undo shows irreversible completion without Undo qu
   undoLast();
   await settled();
   const foldedUndo = pluginsResult();
-  assert.equal(foldedUndo.length, 1, 'consequential Undo defers reload chips off Row 2 so Row 1 can wrap');
+  assert.equal(foldedUndo.length, 2, 'consequential Undo keeps Row 2 reload chips in the folded header');
   assert.match(textOf(findById(foldedUndo[0], 'plugins-result')), /without its saved options/);
-  assert.equal(findById(foldedUndo[0], 'problems-show-all')?.attrs['data-advice-label'], 'Reload step');
+  assert.equal(textOf(findById(foldedUndo[0], 'problems-show-all')), 'Show all');
+  assert.match(textOf(foldedUndo[1]), /\/reload-plugins/);
   assert.equal(app.said.quiet, true, 'status bar does not duplicate consequential Undo shown in header');
   app.shownWhole = market.lastRun;
-  app.wholeDrawer = true;
   const wholeUndo = pluginsResult();
-  assert.equal(wholeUndo.length, 2, 'opening Reload step reveals reload lines');
-  assert.equal(textOf(findById(wholeUndo[0], 'problems-show-all')), 'Hide step');
+  assert.equal(wholeUndo.length, 2, 'opening Show all reveals full reload rows');
+  assert.equal(textOf(findById(wholeUndo[0], 'problems-show-all')), 'Show less');
   assert.match(textOf(wholeUndo[1]), /\/reload-plugins/);
   app.shownWhole = undefined;
-  app.wholeDrawer = false;
 
   // 3. Ordinary install and Update both keep reload chips on Row 2 (Update is unchanged from before T3).
   for (const action of ['install', 'update'] as const) {
