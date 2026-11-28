@@ -13,7 +13,7 @@ import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { hashesOf, libraryWords, sentences } from '../src/libraryrow.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { allTurns, changeWords, copilotKeptOnBy, effectiveOut, filledWords, leftLoadingAfter, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, lastSwitched, leftOut, leftOutWords, listedChanges, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeTurns, withCopilotOff, toolsOf, withTool, type Libraries, type PluginHome, changedAfter, endedByChanges, endedProfiles, nameNow, profileNow, profileNowIn } from '../src/profileplan.ts';
+import { allTurns, changeWords, copilotKeptOnBy, effectiveOut, filledWords, leftLoadingAfter, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, lastSwitched, leftOut, leftOutWords, listedChanges, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeTurns, withCopilotOff, toolsOf, withTool, type Libraries, type PluginHome, endedByChanges, endedProfiles, nameNow, profileNow, profileNowIn } from '../src/profileplan.ts';
 import { NO_PLUGINS, deleteProfile, profilesNaming, profilesWithLast, readLibraries, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { pluginOnIn } from '../src/pluginrows.ts';
@@ -108,7 +108,7 @@ test('Before a Library click, the profiles in use it would end are worked out fr
   const papa = 'plugin:skill:pi-pack@team-tools/papa';
   const everyday = profile('Everyday', ['skill:dev', 'skill:pager', papa]), also = profile('Also', ['skill:dev', 'skill:pager', 'skill:gone', papa]);
   home.profiles!.profiles = [everyday, also, profile('Focus', ['skill:dev', papa])];
-  const ending = (...changes: [string, Partial<Change>][]) => endedByChanges(home, changes.map(([key, change]) => ({ kind: 'skill', change: { key, on: !!library.skill[key]?.on, except: [], ...change } }))).map(each => each.name);
+  const ending = (...changes: [string, Partial<Change>][]) => endedByChanges(home, changes.map(([key, change]) => ({ kind: 'skill', change: { key, on: !!library.skill[key]?.on, except: [], ...change } }))).ended.map(each => each.name);
   assert.deepEqual(profileNowIn(home).inUse.map(each => each.name), ['Everyday', 'Also']);
   assert.deepEqual(ending(['pager', { on: false }]), ['Everyday', 'Also'], 'Off of an item they name ends both: two that match end together');
   assert.deepEqual(ending(['notes', { on: true }]), ['Everyday', 'Also'], 'On of one they leave out, in every tool');
@@ -126,14 +126,18 @@ test('Before a Library click, the profiles in use it would end are worked out fr
   assert.deepEqual(ending(['pager', { on: false }]), [], 'with no profile in use before, none is ended, whichever comes into use');
 });
 
-test('Before a Library click that would end the profile in use, the name it would then have: the one last switched to, changed, unless another comes into use', () => {
+test('Before a Library click that would end the profile in use, from one projection: the profiles it ends and the name it would then have, the one last switched to, changed, unless another comes into use', () => {
   const home = viewOf({ library: libraryOf([['skill', 'dev', true], ['skill', 'pager', true], ['skill', 'notes', false]]), rows: { skill: [], mcp: [], agent: [] } });
-  home.profiles!.profiles = [profile('Everyday', ['skill:dev', 'skill:pager']), profile('Notes', ['skill:dev', 'skill:pager', 'skill:notes'])];
+  const everyday = profile('Everyday', ['skill:dev', 'skill:pager']), notes = profile('Notes', ['skill:dev', 'skill:pager', 'skill:notes']);
+  home.profiles!.profiles = [everyday, notes];
   home.profiles!.last = 'Everyday';
-  const after = (key: string, on: boolean) => [endedByChanges(home, [{ kind: 'skill', change: { key, on, except: [] } }]).map(each => each.name),
-    changedAfter(home, [{ kind: 'skill', change: { key, on, except: [] } }])?.name];
+  const after = (key: string, on: boolean) => { const { ended, changed } = endedByChanges(home, [{ kind: 'skill', change: { key, on, except: [] } }]); return [ended.map(each => each.name), changed?.name]; };
   assert.deepEqual(after('pager', false), [['Everyday'], 'Everyday'], 'Off of an item it names: then Everyday · changed');
   assert.deepEqual(after('notes', true), [['Everyday'], undefined], 'On of notes ends Everyday and brings Notes into use: then Notes, and the sentence as before');
+  // Switched to Notes last, then notes turned off by hand: Everyday came into use without a switch. A click ending Everyday names
+  // Notes after it (the one last switched to), and Undo puts Everyday back: its words say so (words.ts profileBack).
+  home.profiles!.last = 'Notes';
+  assert.deepEqual(after('pager', false), [['Everyday'], 'Notes'], 'it ends Everyday; Notes, the one last switched to, is then named changed');
   delete home.profiles!.last;
   assert.deepEqual(after('pager', false), [['Everyday'], undefined], 'with none last switched to: No profile, and the sentence as before');
 });
@@ -145,7 +149,7 @@ test('Deleting his server ends a profile that names only it, where a plugin’s 
   before.profiles!.profiles = after.profiles!.profiles = [mine];
   assert.deepEqual(profileNowIn(before).inUse, [mine], 'kit’s issues is on by his issues’s name (copilotKeptOnBy own)');
   assert.deepEqual(endedProfiles(profileNowIn(before).inUse, profileNowIn(after).inUse), [mine], 'the result after the Delete: kit’s issues is on for no one Mine names');
-  const ending = (change: Partial<Change>) => endedByChanges(before, [{ kind: 'mcp', change: { key: 'issues', on: true, except: [], ...change } }]);
+  const ending = (change: Partial<Change>) => endedByChanges(before, [{ kind: 'mcp', change: { key: 'issues', on: true, except: [], ...change } }]).ended;
   assert.deepEqual([ending({ deleted: true }), ending({ except: ['copilot-cli'] }), ending({ except: ['claude-cli'] })], [[mine], [mine], []], 'forecast for the Delete, and for keeping it out of Copilot CLI; not of another tool');
 });
 
@@ -189,7 +193,7 @@ test('In use compares keep-outs for a profile that holds them: a keep-out made b
   // Said before a Library click as after it: keeping dev out of Pi ends a profile that holds its keep-outs.
   const home = viewOf({ library: libraryOf([['skill', 'dev', true]]), rows: { skill: [row('dev')], mcp: [], agent: [] } });
   home.profiles.profiles = [{ ...profile('Focused', ['skill:dev']), out: {} }];
-  assert.deepEqual(endedByChanges(home, [{ kind: 'skill', change: { key: 'dev', on: true, except: ['pi-cli'] } }]).map(each => each.name), ['Focused']);
+  assert.deepEqual(endedByChanges(home, [{ kind: 'skill', change: { key: 'dev', on: true, except: ['pi-cli'] } }]).ended.map(each => each.name), ['Focused']);
 });
 
 test('A switch that changes where items are says so from one list: the header’s clause, a row under Changes tools saying where, a row turning on where it won’t be, the menus’ card, and History’s line after', () => {

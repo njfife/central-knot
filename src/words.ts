@@ -174,28 +174,39 @@ export const HOOK_SOURCE_UNREADABLE = 'This file couldn’t be read.';
 export const CHANGED = ' · changed';
 /** The profile last switched to, while no profile is in use, as every place names it: "Everyday · changed". */
 export const changedName = (name: string) => `${name}${CHANGED}`;
-/** The (?) beside `Everyday · changed` in a result (matrix.ts profileSpan), and the Profiles list's Changed mark: what the next switch does. */
-export const nextSwitchSets = (name: string) => `The next switch sets it as ${name} says.`;
+/**
+ * What `Everyday · changed` means, said once from here wherever he meets it (behind the result's (?): matrix.ts profileSpan; the
+ * Profiles title's (?), the list's Changed mark and the status bar's hover: profilespage.ts).
+ */
+export const changedCard = (name: string) =>
+  `What is on differs from ${name}, the profile you last switched to. ${name} itself is as you saved it; switching to it again sets everything as it says.`;
 
 /**
  * What an act would end of the profiles in use (matrix.ts endsOf): their names, `may` while other clicks still wait, and
- * `changed`, the profile every place would then name `<Profile> · changed` (profileplan.ts changedAfter), where one would.
+ * `changed`, the profile every place would then name `<Profile> · changed` (profileplan.ts endedByChanges), where one would.
  */
 export interface Ending { names: readonly string[]; may: boolean; changed?: string }
 /**
  * Before an act that would end the profiles in use (matrix.ts endsOf), in the words said after it (app.ts profileEndedLine): where
- * the one last switched to would then be named `Everyday · changed`, "the profile is then Everyday · changed" (`may`: "may then
- * be"; `short`: "would be Everyday · changed", "might …"); else "Everyday stays saved but stops being the profile in use", `may`:
- * "… but may stop …", `short`: "would leave Everyday" ("might …"). profileBack: what puts it back.
+ * the one last switched to would then be named `Everyday · changed`, "the profile becomes Everyday · changed" (`may`: "may
+ * become"; `short`: "becomes Everyday · changed"); else "Everyday stays saved but stops being the profile in use", `may`: "… but
+ * may stop …", `short`: "would leave Everyday" ("might …").
  */
 export function profileStops({ names, may, changed }: Ending, short = false): string {
-  if (changed) return short ? `${may ? 'might' : 'would'} be ${changedName(changed)}` : `the profile ${may ? 'may then be' : 'is then'} ${changedName(changed)}`;
+  if (changed) return `${short ? '' : 'the profile '}${may ? 'may become' : 'becomes'} ${changedName(changed)}`;
   const many = names.length > 1, who = andList([...names]);
   if (short) return `${may ? 'might' : 'would'} leave ${who}`;
   return `${who} ${many ? 'stay' : 'stays'} saved but ${may ? 'may stop' : many ? 'stop' : 'stops'} being the ${many ? 'profiles' : 'profile'} in use`;
 }
-export const profileBack = ({ names, changed }: Ending) =>
-  `${changed ? `${changed} stays saved: ` : ''}Undo, or switching to ${!changed && names.length > 1 ? 'one of them' : 'it'} again, puts it back in use.`;
+/**
+ * What puts back in use the profiles an act would end (profileStops' hover). Undo puts back those it ends (`names`): where
+ * the one then named `· changed` is among them, it is said to stay saved; where it is not (they came into use without a
+ * switch), the hover names those Undo puts back.
+ */
+export function profileBack({ names, changed }: Ending): string {
+  if (changed && !names.includes(changed)) return `Undo puts ${andList([...names])} back in use.`;
+  return `${changed ? `${changed} stays saved: ` : ''}Undo, or switching to ${!changed && names.length > 1 ? 'one of them' : 'it'} again, puts it back in use.`;
+}
 
 /**
  * Says that profiles stopped being in use, after an act that ended them, where no profile is then named `<Profile> · changed`

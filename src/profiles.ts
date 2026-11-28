@@ -9,7 +9,7 @@
 // the plugin copies and Copilot CLI rules each tool confirmed. Its Undo is each library item's own Turn on or Turn off, each with its own entry, and
 // each plugin copy's own switch back (plus any uncovered Copilot CLI rule), all told in one entry of the Undo's own, which marks the switch's entry undone. Nothing per
 // tool is kept here but those entries and a profile's own `tools` and `out`, and which profile is in use is never stored, nor the
-// one last switched to (each entry names its profile by `toId` too: profilesWithLast finds it from History for the views). A
+// one last switched to (a switch's entry names its profile by `toId` too: profilesWithLast finds it from History for the views). A
 // file from before profiles were sets of items (format 1) is read here for the page and moved once by profilemigrate.ts. A
 // switch to a profile that holds `tools` or `out` also sets each of its items' keep-outs (profileplan.ts effectiveOut), told in
 // its entry (`except`) and put back by its Undo.
@@ -100,8 +100,8 @@ export async function readProfileFile(home: string): Promise<{ view: ProfilesVie
 export const readProfiles = async (home: string): Promise<ProfilesView> =>
   ({ ...(await readProfileFile(home)).view, plugins: (await recordedIds(home)).plugins.map(({ id, plugin, marketName, on }) => ({ id, plugin, marketName, on })) });
 /**
- * The home's profiles as main.ts gives them with every view and after every save (readProfiles), with the one last switched to,
- * worked out from History now (types.ts ProfilesView `last`: profileplan.ts lastSwitched), so a rename or a tick keeps it.
+ * The home's profiles as main.ts reads them for every view, every save's result and the menus (readProfiles), with the one last
+ * switched to, worked out from History now (types.ts ProfilesView `last`: profileplan.ts lastSwitched), so a rename or a tick keeps it.
  */
 export async function profilesWithLast(context: ShareContext): Promise<ProfilesView> {
   const view = await readProfiles(context.home), last = lastSwitched(await readHistory(context), view.profiles);
@@ -467,7 +467,7 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stop(`${gate.refused} Nothing was undone.`);
   const kept = retools(turns.except);
-  const undo = back.length || whole.length || copilotBack.length || copilotClear.length ? profileEvent(context, past.item, { toName: past.profile.toName, ...(past.profile.toId ? { toId: past.profile.toId } : {}), undoOf: past.id, on: named(turns.on), off: named(turns.off), ...(kept.length ? { except: kept } : {}),
+  const undo = back.length || whole.length || copilotBack.length || copilotClear.length ? profileEvent(context, past.item, { toName: past.profile.toName, undoOf: past.id, on: named(turns.on), off: named(turns.off), ...(kept.length ? { except: kept } : {}),
     ...(back.length ? { plugins: back.map(switched) } : {}), ...(whole.length ? { wholeSteps: whole.flatMap(run => run.ops) } : {}), ...(copilotBack.length ? { copilotCleared: copilotBack } : {}) }) : undefined;
   if (undo) await appendHistory(context, [undo]);
   const { results, made, reloads, done, copies, letGo, asAsked, steps } = await turnTogether(context, tools, turns, false, back, read.libraries, plugins, whole);

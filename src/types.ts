@@ -691,7 +691,7 @@ export interface HistoryEvent {
    * back by its Undo while as it left them. An entry from before profiles were sets of items has neither `on` nor `off`: it is past.
    */
   profile?: { toName?: string;
-    /** The profile by its id (profileplan.ts lastSwitched finds the one last switched to by it): on a switch's entry and its Undo's, from this build; an older entry has only `toName`. */
+    /** The profile by its id (profileplan.ts lastSwitched finds the one last switched to by it): on a switch's entry, from this build; an older entry, and an Undo's own, have only `toName`. */
     toId?: string;
     on?: SwitchedItem[]; off?: SwitchedItem[]; except?: ExceptSwitched[]; plugins?: PluginSwitched[]; wholeSteps?: PluginOp[]; copilotCleared?: { id: string; name: string; server: string }[]; migrated?: true; undoOf?: string };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
@@ -1588,9 +1588,10 @@ export interface ProfilesView {
   /** Why profiles can't be read or saved here, if they can't. */
   problem?: string;
   /**
-   * The profile last switched to, by id, worked out from History each time this view is made (profileplan.ts lastSwitched, through
-   * profiles.ts profilesWithLast; never stored): while no profile is in use, every place names it `<Profile> · changed`
-   * (profileplan.ts profileNow). Unset where none was switched to within History's days, or it is gone.
+   * The profile last switched to, by id, worked out from History each time main.ts reads profiles (profileplan.ts lastSwitched,
+   * through profiles.ts profilesWithLast; never stored), so every view of them main.ts gives has looked for it: while no profile
+   * is in use, it is named `<Profile> · changed` (profileplan.ts profileNow). Unset where none was switched to within History's
+   * days, or it is gone.
    */
   last?: string;
 }

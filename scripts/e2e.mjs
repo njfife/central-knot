@@ -1970,8 +1970,9 @@ const profileSentenceWhole = (a, sentence, { allowShortName = false, undoId = '#
   if (!el || words !== sentence) return { ok: false, why: 'sentence not in .band-profile', got: words };
   const nameEl = el.querySelector('.band-profile-name'), restEl = el.querySelector('.band-profile-rest');
   if (!nameEl || !restEl) return { ok: false, why: 'missing name/rest spans' };
-  const mark = el.querySelector('.info-mark')?.getBoundingClientRect();
-  const markFits = !mark || (mark.width > 0 && mark.right <= rRect.right + 1 && mark.right <= window.innerWidth + 1 && mark.bottom <= hRect.bottom + 1);
+  // A " · changed" line carries its (?), inside the window and the header; the older sentence has none.
+  const mark = el.querySelector('.info-mark')?.getBoundingClientRect(), wantsMark = sentence.endsWith(' · changed');
+  const markFits = wantsMark ? !!mark && mark.width > 0 && mark.right <= rRect.right + 1 && mark.right <= window.innerWidth + 1 && mark.bottom <= hRect.bottom + 1 : !mark;
   const eRect = el.getBoundingClientRect(), nRect = nameEl.getBoundingClientRect(), restRect = restEl.getBoundingClientRect();
   const restClipped = restRect.width <= 0 || restRect.bottom > hRect.bottom + 1 || restRect.right > eRect.right + 1
     || restRect.right > rRect.right + 1 || restRect.right > window.innerWidth + 1 || restEl.scrollWidth > restEl.clientWidth + 1;
@@ -2751,9 +2752,9 @@ async function practiceFlow() {
   // Before the click, standup's opened row says what it would end in the words said after it: Incident · changed.
   const standupEnds = `#${rowPart('profile-ends', 'skills', 'standup')}`;
   await openRow('standup', standupEnds);
-  same('before the click, the opened row says the profile is then Incident · changed, Incident staying saved on hover',
+  same('before the click, the opened row says the profile becomes Incident · changed, Incident staying saved on hover',
     [(await a.text(standupEnds))?.trim(), await a.run(`document.querySelector(${JSON.stringify(standupEnds)})?.title`)],
-    ['If on, only this item changes: the profile is then Incident · changed.', 'Incident stays saved: Undo, or switching to it again, puts it back in use.']);
+    ['If on, only this item changes: the profile becomes Incident · changed.', 'Incident stays saved: Undo, or switching to it again, puts it back in use.']);
   await shotOpen('profile-changed-forecast-860-light', SMALLEST, 'light', () => a.run(`document.querySelector(${JSON.stringify(standupEnds)})?.scrollIntoView({ block: 'center' })`));
   await fullSize(a);
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
@@ -2762,7 +2763,7 @@ async function practiceFlow() {
     rowEndsText.endsWith(' Incident · changed') && (await a.text('#status-profile'))?.trim() === 'Incident · changed',
     [rowEndsText, await a.text('#status-profile')]);
   await withSidebarOpen(a, ...SMALLEST, async () => {
-    await checkCard(a, 'profile-changed-info', 'The next switch sets it as Incident says.', 'the result’s (?) beside Incident · changed says what the next switch does');
+    await checkCard(a, 'profile-changed-info', 'What is on differs from Incident, the profile you last switched to. Incident itself is as you saved it; switching to it again sets everything as it says.', 'the result’s (?) beside Incident · changed says what that means');
     await shotOpen('profile-changed-result-card-860-light', SMALLEST, 'light', () => a.click('#profile-changed-info'));
     if (shots) await a.press('Escape');
   });
@@ -2911,13 +2912,27 @@ async function practiceFlow() {
   // profile last switched to, as changed: the bar, Profiles' list, title and the profile it opens, and Harnesses' line.
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
   same('after a hand click no profile is in use, and the status bar names the one last switched to: Incident · changed', (await a.text('#status-profile'))?.trim(), 'Incident · changed');
+  const changedCard = 'What is on differs from Incident, the profile you last switched to. Incident itself is as you saved it; switching to it again sets everything as it says.';
+  same('the status bar’s hover says what Incident · changed means', await a.run(`document.getElementById('status-profile')?.title`), `Profile: Incident · changed. ${changedCard} Click to switch profiles.`);
   await a.click('#nav-profiles');
-  same('Profiles opens Incident, titled Incident · changed and marked Changed in the list, its hover saying what the next switch does',
-    [await a.text('.profile-header h2'), await a.text('.profile-row.selected .profile-changed'), await a.run(`document.querySelector('.profile-row.selected .profile-changed')?.title`),
+  const titleWords = () => a.run(`[...document.querySelector('.profile-header h2').childNodes].filter(node => !node.classList?.contains('info-wrap')).map(node => node.textContent).join('')`);
+  same('Profiles opens Incident, titled Incident · changed and marked Changed in the list, each saying what that means',
+    [await titleWords(), await a.text('.profile-row.selected .profile-changed'), await a.run(`document.querySelector('.profile-row.selected .profile-changed')?.title`),
       await a.exists('.profile-row .profile-in-use'), await a.text('#profile-preview')],
-    ['Incident · changed', 'Changed', 'Incident was switched to last, and what is on has changed since. The next switch sets it as Incident says.', false, 'Switching turns 1 off']);
+    ['Incident · changed', 'Changed', changedCard, false, 'Switching turns 1 off']);
   await shotOpen('profile-changed-bar-header-860-light', SMALLEST, 'light');
-  await shotOpen('profile-changed-bar-header-1316-dark', [1316, 819], 'dark');
+  await withSidebarOpen(a, ...SMALLEST, async () => {
+    await checkCard(a, 'profile-changed-title-info', changedCard, 'the title’s (?) says what Incident · changed means, where the list folds into the picker');
+    await shotOpen('profile-changed-title-card-860-light', SMALLEST, 'light', () => a.click('#profile-changed-title-info'));
+    if (shots) await a.press('Escape');
+  });
+  await fullSize(a);
+  // Ticking an item into Incident (its own ticks) keeps it changed, and says so as before: what is on differs from it.
+  await a.click('#pf-skill\\:release-notes');
+  same('after a tick of his own Incident is still changed, its mark saying what is on differs from it, not that it was edited',
+    [await titleWords(), await a.run(`document.querySelector('.profile-row.selected .profile-changed')?.title`)], ['Incident · changed', changedCard]);
+  await shotOpen('profile-changed-after-tick-1316-light', [1316, 819], 'light');
+  await a.click('#pf-skill\\:release-notes');
   await fullSize(a);
   await a.click('#status-profile');
   same('the status bar’s menu names Incident as changed, unticked, a click away from switching back', [await a.all('.pf-menu-item .pf-menu-name', 'e.textContent'), await a.exists('.pf-menu-item[aria-checked="true"]')],
@@ -2925,6 +2940,8 @@ async function practiceFlow() {
   await a.click('#status-profile');
   await a.click('#nav-harnesses');
   same('Harnesses names it the same way: Profile: Incident · changed.', [(await a.text('.tools-note > span'))?.includes('Profile: Incident · changed.'), await a.text('#harnesses-profile')], [true, 'Incident · changed']);
+  await withSidebarOpen(a, ...SMALLEST, async () => same('at 860 with sidebar open, Profile: and Incident · changed. stay on one line',
+    await a.run(`document.querySelector('.tools-note-profile')?.getClientRects().length`), 1));
   await shotOpen('profile-changed-harnesses-860-light', SMALLEST, 'light');
   await fullSize(a);
   // On History, the switch's Undo turns back only what is still as the switch left it: standup, turned on since, stays.
@@ -2933,6 +2950,41 @@ async function practiceFlow() {
   check('its Undo from History says what it did with reload advice and Copy', /^Undone: 2 items turned on\..*In Copilot CLI, type \/skills reload\..*Codex picks it up/.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-copy-copilot-cli'), await a.text('.bands'));
   same('…and every skill is on again', skillsOn.map(key => folders(key).every(Boolean)), [true, true, true, true]);
   same('with that switch undone, and each one before it, none is the one last switched to: No profile', (await a.text('#status-profile'))?.trim(), 'No profile');
+  // With none switched to, the older sentence: two 35-letter profiles matching notes + standup (release-notes and review off by
+  // hand) and ended by turning review on, first one alone, then both: each name gives way while its words stay whole.
+  {
+    const oneName = 'QuarterlyWorkspaceManagementReviews', twoName = 'ProductionWorkspaceDeploymentGuides';
+    await openKind(a, 'skills');
+    for (const key of ['release-notes', 'review']) await a.click(`#${rowPart('switch', 'skills', key)}`);
+    for (const [name, sentence] of [[oneName, `${oneName} stopped being the profile in use.`], [twoName, `${oneName} and ${twoName} stopped being the profiles in use.`]]) {
+      await a.click('#nav-profiles');
+      await newProfile(a, name);
+      await a.click('#pf-skill\\:notes');
+      await a.click('#pf-skill\\:standup');
+      await openKind(a, 'skills');
+      await a.click(`#${rowPart('switch', 'skills', 'review')}`);
+      await withSidebarOpen(a, ...SMALLEST, async () => {
+        const whole = await profileSentenceWhole(a, sentence, { allowShortName: true });
+        check(`at 860 with sidebar open, ${name === oneName ? 'a 35-letter profile name gives way' : 'two 35-letter profile names give way'} while the rest of "${sentence.slice(-34)}" stays whole, with hover title`,
+          whole.ok && whole.nameShortened, whole);
+        await a.click('#problems-show-all');
+        check('Show all reveals the whole sentence', (await a.text('#header .result-whole .band-text') ?? '').includes(sentence), await a.text('#header .result-whole .band-text'));
+        await a.click('#problems-show-all');
+      });
+      await fullSize(a);
+      await a.click('#outcome-undo');
+    }
+    await a.click('#nav-profiles');
+    for (const name of [oneName, twoName]) {
+      await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes(${JSON.stringify(name)})).click()`);
+      await a.settle();
+      await a.click('#profile-delete');
+      await a.click('#profile-delete-confirm');
+    }
+    await openKind(a, 'skills');
+    for (const key of ['release-notes', 'review']) await a.click(`#${rowPart('switch', 'skills', key)}`);
+    same('…and with them gone and both turned back on, every skill is on as before', skillsOn.map(key => folders(key).every(Boolean)), [true, true, true, true]);
+  }
   // Tools: Copilot CLI unticked in Incident (last, since from then on Incident holds its own keep-outs). The header's clause and
   // a Changes tools row say notes goes out of Copilot CLI; the switch takes notes out of Copilot CLI alone, Claude Code's and Codex's
   // folders as they were; Undo switch puts it back.

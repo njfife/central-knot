@@ -61,7 +61,7 @@ import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { byHand, observe, passStarts, seenBefore, seenIn, type ToolsSeen } from './arrivals.ts';
 import { homePass, passTells, syncOnceReport, takenInReloads, type HomePass } from './homepass.ts';
 import { waysFrom } from './reload.ts';
-import { deleteProfile, profilesWithLast, readProfiles, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
+import { deleteProfile, profilesWithLast, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
 import { homeItems, inUse, nameNow, pluginLive, profileNow, switchable, switchPreview, type LiveItem, type PluginHome, type PluginLive } from './profileplan.ts';
 import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil, oneTurn } from './model.ts';
 import { keepEntries, linuxPlaces, placeAutostart, readAutostart, signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
@@ -1033,7 +1033,7 @@ function followProfiles(profiles: ProfilesView, items = lastItems, plugins = las
 /** The home in `tools` as profiles read it (profileplan.ts PluginHome), read now as a view reads it. */
 async function profileHome(tools: HarnessId[]): Promise<PluginHome> {
   const shared: ShareContext = { ...context(), reads: new Map() };
-  return { pluginItems: await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), tools), profiles: await readProfiles(current!.home),
+  return { pluginItems: await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), tools), profiles: await profilesWithLast(shared),
     skills: await skillsView(shared, tools), mcp: await serversView(shared, tools), agents: await agentsView(shared, tools) };
 }
 
@@ -1050,10 +1050,10 @@ const pluginSide = (tools: HarnessId[]): PluginSide => ({ live: async () => plug
   return (await runPlan(ops, { install: (...args) => never(args[3]), uninstall: (...args) => never([args[3]]), setSkill: markets.setSkill, setPart: markets.setPart, setWhole: markets.setWhole }, home)).done;
 } });
 
-/** Refreshes the menus' live library items and plugin copies for `tools`, from the same read the page and switch use (profileHome). */
+/** Refreshes the menus' profiles (the one last switched to too), live library items and plugin copies for `tools`, from the same read the page and switch use (profileHome). */
 async function refreshMenus(tools: HarnessId[]) {
   const home = await profileHome(tools), plugins = pluginLive(home);
-  followProfiles(lastProfiles, homeItems(home, plugins), plugins);
+  followProfiles(home.profiles, homeItems(home, plugins), plugins);
 }
 
 /** After a profile is made, changed or deleted (Central Knot's own file only, no tool changes): the profiles for the page, and the menus. */

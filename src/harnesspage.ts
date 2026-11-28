@@ -226,7 +226,8 @@ function everyHarness(home: HomeView) {
     ...(home.mode === 'actual' ? [] : [[home.mode === 'fixture' ? 'Practice copy: installed apps aren’t checked; ' : 'A folder: installed apps aren’t checked; ',
       button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', disabled: acting(), onclick: () => void loadHome('actual') }), ' shows their versions.']]),
     // A profile switches items in every tool at once, so the one in use is said once here, as Profiles names it (profileplan.ts profileNow).
-    ...(home.profiles.profiles.length ? [[`${nowLead(now)}: `, button({ variant: 'link', size: 'micro', label: now.name, id: 'harnesses-profile', onclick: () => showPage('profiles') }), '.']] : []),
+    // On one line: the label and the name it leads are read together.
+    ...(home.profiles.profiles.length ? [[h('span.tools-note-profile', {}, `${nowLead(now)}: `, button({ variant: 'link', size: 'micro', label: now.name, id: 'harnesses-profile', onclick: () => showPage('profiles') }), '.')]] : []),
   ];
   const firstManaged = cards.find(snapshot => managed(home, snapshot.harness))?.harness;
   return h('div.page', {}, caught ? h('div.bands', {}, caught) : null,

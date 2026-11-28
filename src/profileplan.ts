@@ -23,7 +23,7 @@
 // - `inUse` holds while a switch changes and holds nothing (never stored); while none is, the one last switched to is named
 //   `Everyday · changed` (`lastSwitched`, from History, never stored either): `profileNow` is the one rule every place that names
 //   the profile in use asks. `endedByChanges` says before a Library click which in use it would end (its changes projected over the
-//   live and plugin items: projected), by the rule its result says after it (`endedProfiles`), and `changedAfter` that name after it;
+//   live and plugin items: projected), by the rule its result says after it (`endedProfiles`), and the name every place would then give;
 //   `listedPlugins` is the one rule for which plugin rows
 //   a profile lists and `listedChanges` gives each listed changing row once with its cell words (read by the header's short line,
 //   `Changes N`, its headings and every row's cell); `switchPreview` (`PLUGIN_ITEMS_STAY`, `pluginStayNote`) gives
@@ -582,7 +582,7 @@ export function profileNow(view: Pick<ProfilesView, 'profiles' | 'last'>, live: 
   const name = now.length ? andList(now.map(profile => profile.name)) : changed ? changedName(changed.name) : NO_PROFILE;
   return { inUse: now, ...(changed ? { changed } : {}), name };
 }
-/** One profile's name where profiles are listed (both menus, the picker, the open profile's title): `Everyday · changed` for profileNow's `changed`. */
+/** One profile's name where profiles are listed (both menus, the picker): `Everyday · changed` for profileNow's `changed`. */
 export const nameNow = (now: ProfileNow, profile: Profile) => (profile.id === now.changed?.id ? changedName(profile.name) : profile.name);
 /** What leads profileNow's name where a sentence says it (the status bar's hover, Harnesses' line): "Profile in use", or for `Everyday · changed` "Profile". */
 export const nowLead = (now: ProfileNow) => (now.changed ? 'Profile' : 'Profile in use');
@@ -615,21 +615,16 @@ function projected(home: PluginHome, live: LiveItem[], plugins: PluginLive[], ch
     return own?.deleted ? [] : [{ ...copy, on: own ? own.on : copy.on, ...(sharesWith ? { sharesWith } : {}) }];
   }) })) };
 }
-/** The profiles in use a Library click would end (matrix.ts endsOf), by the rule its result says after it (app.ts profileEndedLine): endedProfiles. */
-export function endedByChanges(home: PluginHome, changes: readonly ItemChange[]): Profile[] {
-  if (!home.profiles?.profiles?.length) return [];
-  const plugins = pluginLive(home), live = homeItems(home, plugins), before = inUse(home.profiles.profiles, live, plugins), after = projected(home, live, plugins, changes);
-  return endedProfiles(before, inUse(before, after.live, after.plugins));
-}
-
 /**
- * The profile every place would name `<Profile> · changed` once a Library click's `changes` are made (profileNow over them
- * projected; a click never changes which was last switched to), if one would: matrix.ts endsOf says it before the click.
+ * What a Library click's `changes` would do to the profiles, from one projection of them (a click never changes which was last
+ * switched to): the profiles in use it would end (`ended`, by the rule its result says after it: endedProfiles), and the one
+ * every place would then name `<Profile> · changed` (`changed`: profileNow), if one. matrix.ts endsOf says both before the click.
  */
-export function changedAfter(home: PluginHome, changes: readonly ItemChange[]): Profile | undefined {
-  if (!home.profiles?.profiles?.length) return undefined;
-  const plugins = pluginLive(home), after = projected(home, homeItems(home, plugins), plugins, changes);
-  return profileNow(home.profiles, after.live, after.plugins).changed;
+export function endedByChanges(home: PluginHome, changes: readonly ItemChange[]): { ended: Profile[]; changed?: Profile } {
+  if (!home.profiles?.profiles?.length) return { ended: [] };
+  const plugins = pluginLive(home), live = homeItems(home, plugins), after = projected(home, live, plugins, changes);
+  const now = profileNow(home.profiles, after.live, after.plugins), ended = endedProfiles(inUse(home.profiles.profiles, live, plugins), now.inUse);
+  return now.changed ? { ended, changed: now.changed } : { ended };
 }
 
 /** Every profile in `before` when none of its ids still matches in `after` (even if another now matches), else empty. */

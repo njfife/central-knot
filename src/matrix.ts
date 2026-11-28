@@ -35,10 +35,10 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, CHANGED, fewNames, kindNouns, nextSwitchSets, NOTHING_CHANGED, orList, pageNames, profileBack, profileStops, readsIt, rowNames, rowNouns,
+import { andList, byToolOrder, CHANGED, changedCard, fewNames, kindNouns, NOTHING_CHANGED, orList, pageNames, profileBack, profileStops, readsIt, rowNames, rowNouns,
   saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind, type Ending } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type RowFigure, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
-import { changedAfter, copilotSharesYours, endedByChanges } from './profileplan.ts';
+import { copilotSharesYours, endedByChanges } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, homeReadOwed, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, readHomeOnce, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, setHome, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
@@ -1243,7 +1243,7 @@ export function listResult(): HTMLElement[] {
 export function profileSpan(line: string | undefined, id = 'profile-changed-info'): HTMLElement | null {
   if (!line) return null;
   const changed = line.endsWith(CHANGED), at = changed ? line.length - CHANGED.length : line.lastIndexOf(' stopped being the ');
-  const card = changed ? infoMark(id, 'the profile', nextSwitchSets(line.slice(0, at))) : null;
+  const card = changed ? infoMark(id, 'the profile', changedCard(line.slice(0, at))) : null;
   // The span's own title names the line where its name is cut; the (?) says the rest.
   card?.setAttribute('title', '');
   return h('span.band-profile', { title: line }, h('span.band-profile-name', {}, line.slice(0, at)), h('span.band-profile-rest', {}, line.slice(at)), card);
@@ -2655,14 +2655,12 @@ const switchClicks = (skill: ItemRow) => [{ kind: skill.kind, changes: [changeBy
 /**
  * The names of the profiles in use `clicks` would end, from the very changes they send (profileplan.ts endedByChanges; none projected
  * for no change), `may` while other clicks still wait or run, whose writes the view doesn't hold yet, and the profile then named
- * `<Profile> · changed` (profileplan.ts changedAfter) where one would be (words.ts Ending); undefined for none.
+ * `<Profile> · changed` where one would be (words.ts Ending); undefined for none.
  */
 function endsOf(clicks: Pick<Click, 'kind' | 'changes'>[]): Ending | undefined {
   const changes = clicks.flatMap(click => click.changes.map(change => ({ kind: partOfPage[click.kind], change })));
-  const ended = state.home && changes.length ? endedByChanges(state.home, changes) : [];
+  const { ended, changed } = state.home && changes.length ? endedByChanges(state.home, changes) : { ended: [] };
   if (!ended.length) return undefined;
-  // The name every place would give the profile after the click, where it is the one last switched to, changed (profileplan.ts profileNow).
-  const changed = changedAfter(state.home!, changes);
   return { names: ended.map(profile => profile.name), may: !!acting(), ...(changed ? { changed: changed.name } : {}) };
 }
 /** What `clicks` would end, as a control's hover (after `label`) and its description, worked out as the pointer or the focus comes to it, not as the page draws. */
@@ -2675,7 +2673,7 @@ const endsOnHover = (label: string, clicks: () => Pick<Click, 'kind' | 'changes'
   };
   return { onmouseenter: say, onfocus: say };
 };
-/** After a control, what its click would end (endsOf): "Would leave Everyday", or "Would be Everyday · changed" ("Either would …" after two), its sentence and what brings it back on hover; `line`, a row's head. */
+/** After a control, what its click would end (endsOf): "Would leave Everyday", or "Becomes Everyday · changed" ("Either …" after two), its sentence and what brings it back on hover; `line`, a row's head. */
 function endsMark(ending: ReturnType<typeof endsOf>, act: string, id: string, shown: 'mark' | 'either' | 'line' = 'mark') {
   if (!ending) return null;
   const said = `${act}, ${shown === 'line' ? 'only this item changes: ' : ''}${profileStops(ending)}.`, back = profileBack(ending);
