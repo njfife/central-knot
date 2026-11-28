@@ -162,8 +162,8 @@ test('reloadLines folds from exactly 3 shown steps on every page band (including
   assert.equal(unshownReloadRows(2, [{ tool: 'copilot-cli', hidden: false }, { tool: 'pi-cli', hidden: false }]), 0);
   // Instructions runBand follows the same band fold rule (3+ steps fold behind Reload steps (N)), and Plugins header whole places problems before reload rows.
   const prevPage = state.page, prevHome = state.home, prevShown = state.shownWhole, prevOutcome = state.outcome;
-  const okStep = (tool: HarnessId) => ({ source: 'm', marketName: 'team', plugin: 'kit', tool, action: 'install-items' as const, report: { ok: true, changed: true, message: 'ok', reloads: [{ tool, kind: 'mcp' as const, key: 'docs', on: true }] } });
-  const failStep = { source: 'm', marketName: 'team', plugin: 'bad', tool: 'claude-cli' as const, action: 'install' as const, report: { ok: false, changed: false, message: 'failed' } };
+  const okStep = (tool: HarnessId) => ({ source: 'm', marketName: 'team', plugin: 'kit', tool, action: 'install-items' as const, report: { tool, outcome: 'installed' as const, changed: true, message: 'ok', runs: [], reloads: [{ tool, kind: 'mcp' as const, key: 'docs', on: true }] } });
+  const failStep = { source: 'm', marketName: 'team', plugin: 'bad', tool: 'claude-cli' as const, action: 'install' as const, report: { tool: 'claude-cli' as const, outcome: 'failed' as const, changed: false, message: 'failed', runs: [] } };
   try {
     state.home = makeHome('/tmp/ck-reload-unit', []);
     state.outcome = undefined;

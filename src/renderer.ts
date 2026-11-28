@@ -298,7 +298,7 @@ function fitReloadChips(header: HTMLElement): boolean {
   const chips = [...strip.querySelectorAll<HTMLElement>('.result-copies > *')], more = strip.querySelector<HTMLElement>('#outcome-reload-more');
   const total = Number(more?.dataset.reloadRows || 0);
   const syncMore = () => {
-    const hiddenRows = unshownReloadRows(total, chips.map(chip => ({ tool: chip.dataset.reloadTool, hidden: chip.hidden })));
+    const hiddenRows = unshownReloadRows(total, chips.map(chip => ({ tool: chip.dataset.reloadTool, hidden: Boolean(chip.hidden) })));
     if (more) { more.textContent = hiddenRows ? `+${hiddenRows} more` : ''; more.hidden = !hiddenRows; }
     return hiddenRows > 0;
   };
