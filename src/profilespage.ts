@@ -20,7 +20,7 @@ import { brandMark, kindGlyph, lineFacts, openPlugin, outcomeBand, pluginTag, pr
 import { lineControl } from './pluginline.ts';
 import { pluginRowKey } from './pluginrows.ts';
 import { lineBusy, market, turnFromLine, viewCurrent, type LineAim } from './pluginstate.ts';
-import { afterLayout, button, checkbox, emptyState, findInput, h, icon, infoMark } from './dom.ts';
+import { button, checkbox, emptyState, findInput, h, icon, infoMark } from './dom.ts';
 import { itemFile, pagePlace, placePanel } from './filepanel.ts';
 import { allTurns, changeWords, claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, itemRowState, nameNow, nowLead, profileNow, keptOn, leftOut, listedChanges, listedPlugins, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, takenWhole, toolsOf, wholeCounts, withTool, wholeTurns, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn } from './profileplan.ts';
 import { DIRECTORY, noSingleSwitch, pageOfPart } from './pluginstatus.ts';
@@ -33,8 +33,15 @@ import type { InstalledPlugin, PluginItem, Profile } from './types.ts';
 let find = '';
 /** Whether the status bar's profile menu is open. */
 let menuOpen = false;
+/** Under 880 px .profiles-split scrolls while .pf-scroll expands to its content, so supply its box, sticky heads and panel padding to settleFileBox. */
+function narrowBoxRoom(box: HTMLElement) {
+  const split = document.getElementById('profiles-split');
+  if (!split || getComputedStyle(split).overflowY !== 'auto') return undefined;
+  const sticky = (split.querySelector<HTMLElement>('.pf-head')?.offsetHeight ?? 0) + (split.querySelector<HTMLElement>('.pf-section')?.offsetHeight ?? 0);
+  return { scroller: split, sticky, padding: parseFloat(getComputedStyle(box.parentElement!).paddingBottom) || 0 };
+}
 /** Profiles as a file panel's place (filepanel.ts pagePlace), and the Library key each row opens (its own, linked library copy, or plugin row). */
-const profilesFiles = pagePlace('profiles', { foundAndPlugins: true });
+const profilesFiles = pagePlace('profiles', { foundAndPlugins: true, boxRoom: narrowBoxRoom });
 export const rowKey = (item: LiveItem | PluginLive) => ('key' in item ? item.key
   : item.copies.map(copy => ('libraryKey' in copy.target ? copy.target.libraryKey : '')).find(Boolean) ?? pluginRowKey(item.plugin, item.marketName, item.kind, item.name));
 
@@ -599,20 +606,3 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !event.defaultPrevented && state.page === 'profiles' && profileState.confirmDelete
     && document.getElementById('profile-delete-confirm')) { event.preventDefault(); cancelDelete(); }
 });
-/** Under 880 px .profiles-split scrolls while .pf-scroll expands to its content, so cap the open file box against #profiles-split. */
-function settleNarrowFileBox(): void {
-  const split = document.getElementById('profiles-split'), box = split?.querySelector<HTMLElement>('.file-open-box');
-  if (!split || !box || getComputedStyle(split).overflowY !== 'auto') return;
-  const sides = split.getBoundingClientRect(), top = box.getBoundingClientRect().top, row = split.querySelector<HTMLElement>('.file-anchored');
-  const sticky = (split.querySelector<HTMLElement>('.pf-head')?.offsetHeight ?? 0) + (split.querySelector<HTMLElement>('.pf-section')?.offsetHeight ?? 0);
-  const panelStyle = getComputedStyle(box.parentElement!);
-  // Leave room for sticky table heads, the anchored row above the box, and one row's scroll margin below (as filepanel.ts settleFileBox does).
-  const end = Math.max(8, parseFloat(getComputedStyle(split).paddingBottom)) + (parseFloat(panelStyle.paddingBottom) || 0) + (parseFloat(panelStyle.scrollMarginBottom) || 0);
-  const from = row ? row.getBoundingClientRect().top : sides.top + sticky;
-  const room = Math.floor(sides.height - sticky - (top - from) - end), under = Math.floor(sides.bottom - top - end);
-  const pre = [...box.querySelectorAll<HTMLElement>('pre.content')].at(-1), text = pre && getComputedStyle(pre);
-  const least = !pre || !text ? 0 : box.offsetHeight - pre.offsetHeight + 8 * parseFloat(text.lineHeight) + parseFloat(text.paddingTop) + parseFloat(text.paddingBottom);
-  const floor = Math.min(least, Math.max(0, room));
-  box.style.maxHeight = `${Math.ceil(Math.max(floor, under >= floor ? Math.min(under, room) : room))}px`;
-}
-afterLayout(settleNarrowFileBox);

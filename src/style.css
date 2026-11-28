@@ -827,16 +827,18 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 }
 .select.file-copy-select .icon { right: 6px; }
 .file-open-close { color: var(--ink-soft); }
-.file-open-foot { border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-soft); }
+.file-open-foot { flex-wrap: nowrap; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-soft); }
+.file-open-foot > .path-text { flex: 1 1 0; min-width: 0; }
+.file-open-foot > .path-text > .middle-tail { flex: none; max-width: 100%; }
 /* The item's name first, where nothing beside the panel names it (filepanel.ts FilePlace named: the Overview's). */
-.file-open-named { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-.file-open-item { font-weight: 600; overflow-wrap: anywhere; }
-.file-open-item::after { content: "·"; margin-left: 8px; font-weight: 400; color: var(--ink-faint); }
-/* A page's panel says which version it shows (filepanel.ts versionWords), each part before a dot, a deleted item's after the bin, before its file's name. */
+.file-open-named { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; min-width: 0; overflow-x: clip; }
+.file-open-item { font-weight: 600; overflow-wrap: break-word; }
+/* A page's panel says which version it shows (filepanel.ts versionWords); hanging dots sit in the gap and clip on wrap so none ends or starts a line. */
 .file-open-now { display: inline-flex; align-items: center; }
 .file-open-now > .icon { margin-right: 4px; }
-.file-open-now::after { content: "·"; margin-left: 8px; color: var(--ink-faint); }
-.file-open-now:last-child::after { content: none; }
+.file-open-named > :not(:first-child)::before { content: "·"; display: inline-block; flex: none; width: 16px; margin-left: -16px; text-align: center; font-weight: 400; color: var(--ink-faint); }
+.file-open-named > .file-open-tabs::before { margin-right: -4px; }
+.file-open-named > .file-open-lead::before { margin-right: -8px; }
 .file-open-tabs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
 .file-tab { appearance: none; max-width: 100%; overflow-wrap: anywhere; border: 1px solid transparent; border-radius: 6px; padding: 2px 8px; background: transparent; color: var(--ink-soft); font: 500 11.5px/16px var(--mono); cursor: pointer; }
 .file-tab.is-active { background: var(--surface); border-color: var(--control-line); color: var(--ink); box-shadow: var(--lift); }
@@ -856,6 +858,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .file-open-box .content-owner + .content { padding-top: 4px; }
 .file-open-box > .content-block { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .file-open-box .content { flex: 1 1 auto; min-height: 0; max-width: none; padding: 10px 12px; border: 0; border-radius: 0; line-height: 17.5px; overflow-y: auto; overscroll-behavior: contain; }
+.file-open-box .content::-webkit-scrollbar { width: 8px; height: 8px; }
+.file-open-box .content::-webkit-scrollbar-thumb { background: var(--cell-line); border-radius: 4px; }
+.file-open-box .content::-webkit-scrollbar-track { background: transparent; }
 .file-open-state { margin: 0; padding: 12px; font-size: 12.5px; color: var(--ink-soft); }
 .file-open-foot-actions { display: inline-flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
 

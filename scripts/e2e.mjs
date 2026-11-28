@@ -5008,8 +5008,21 @@ async function practiceFlow() {
           }
           await openPf(longRowId, 'Step 1 of the release checklist.');
           await wait(80);
-          const longBox = await a.run(`(() => { const split = document.getElementById('profiles-split').getBoundingClientRect(), box = document.querySelector('.file-open-box').getBoundingClientRect(), row = document.querySelector('.pf-row.file-anchored'), head = document.querySelector('.pf-section')?.getBoundingClientRect(), next = row?.nextElementSibling?.getBoundingClientRect(); return { boxH: Math.round(box.height), splitH: Math.round(split.height), capped: box.height < split.height - 60, rowInSight: !!row && row.getBoundingClientRect().top >= (head?.bottom ?? split.top) - 2, nextInSight: !!next && next.top < split.bottom - 8 }; })()`);
-          same('at 860, a 60-line file box is capped inside .profiles-split and leaves its row and the next row in sight', [longBox.capped, longBox.rowInSight, longBox.nextInSight, ...await a.run(CUT_OFF)], [true, true, true]);
+          const longBox = await a.run(`(() => {
+            const split = document.getElementById('profiles-split').getBoundingClientRect(), boxEl = document.querySelector('.file-open-box'), box = boxEl.getBoundingClientRect();
+            const row = document.querySelector('.pf-row.file-anchored'), head = document.querySelector('.pf-section')?.getBoundingClientRect(), next = row?.nextElementSibling?.getBoundingClientRect();
+            const foot = boxEl.querySelector('.file-open-foot').getBoundingClientRect(), tail = boxEl.querySelector('.file-open-foot .middle-tail');
+            const named = boxEl.querySelector('.file-open-named'), item = boxEl.querySelector('.file-open-item'), pre = boxEl.querySelector('pre.content');
+            const barW = pre.offsetWidth - pre.clientWidth;
+            return { boxH: Math.round(box.height), splitH: Math.round(split.height), footH: Math.round(foot.height), preH: pre.clientHeight, barW,
+              capped: box.height < split.height - 60, rowInSight: !!row && row.getBoundingClientRect().top >= (head?.bottom ?? split.top) - 2,
+              nextInSight: !!next && next.top < split.bottom - 8, footOneLine: foot.height <= 36, tailUncut: !!tail && tail.scrollWidth <= tail.clientWidth,
+              noHangingDot: getComputedStyle(item, '::after').content === 'none' && getComputedStyle(named).overflowX === 'clip',
+              hasScrollbar: pre.scrollHeight > pre.clientHeight && barW > 0 && barW <= 10, moreTextShown: pre.clientHeight >= 130 };
+          })()`);
+          same('at 860, a 60-line file box is capped inside .profiles-split with its row and next row in sight, 1-line uncut filename foot, no hanging head dot, visible scrollbar and text past frontmatter',
+            [longBox.capped, longBox.rowInSight, longBox.nextInSight, longBox.footOneLine, longBox.tailUncut, longBox.noHangingDot, longBox.hasScrollbar, longBox.moreTextShown, ...await a.run(CUT_OFF)],
+            [true, true, true, true, true, true, true, true]);
           if (shots) await a.shot('profiles-long-file-860-light');
           await a.press('Escape');
         } finally { if (shots) { await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); } }
@@ -5038,6 +5051,16 @@ async function practiceFlow() {
       })()`);
       same('at the width where the name’s last word fits and the mark does not, the mark never wraps alone and the last word stays whole',
         [markCheck.markWithLastChar, markCheck.wholeLastWord], [true, true]);
+      await withSidebarOpen(a, 1316, 819, async () => {
+        await a.run(`document.querySelector('.pf-row[data-item="${longRowId}"]')?.scrollIntoView({ block: 'center' })`);
+        await a.settle();
+        await openPf(longRowId, 'Step 1 of the release checklist.');
+        await wait(80);
+        const wideBox = await a.run(`(() => { const box = document.querySelector('.file-open-box'), pre = box.querySelector('pre.content'), tail = box.querySelector('.file-open-foot .middle-tail'), barW = pre.offsetWidth - pre.clientWidth; return { footOneLine: box.querySelector('.file-open-foot').getBoundingClientRect().height <= 36, tailUncut: !!tail && tail.scrollWidth <= tail.clientWidth, hasScrollbar: pre.scrollHeight > pre.clientHeight && barW > 0 && barW <= 10 }; })()`);
+        same('at 1316×819, a 60-line file panel keeps a 1-line uncut filename foot, visible scrollbar, and nothing cut off', [wideBox.footOneLine, wideBox.tailUncut, wideBox.hasScrollbar, ...await a.run(CUT_OFF)], [true, true, true]);
+        if (shots) { await a.run(`window.centralKnot.setAppearance('dark')`); await wait(80); await a.shot('profiles-long-file-1316-dark'); await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); }
+        await a.press('Escape');
+      });
       await fullSize(a);
     } finally {
       if (installsBefore === undefined) rmSync(installRecord); else writeFileSync(installRecord, installsBefore);
