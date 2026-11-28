@@ -108,15 +108,28 @@ test('Switch back and See changes in the status bar menu follow switchOffer and 
   const heldCopy: PluginCopy = { tool: 'codex-cli', on: false, way: 'plugin-off', why: 'off', target: { libraryKey: 'p' } };
   const heldPlugin: PluginLive = { id: 'plugin:skill:a@m/p', kind: 'skill', name: 'p', plugin: 'a', marketName: 'm', copies: [heldCopy] };
   const heldProf = { ...profile('Held', [heldPlugin.id]), switchesPluginItems: true };
+  const partHeldProf = { ...profile('PartHeld', ['skill:dev', heldPlugin.id]), switchesPluginItems: true };
   const kinds = (rows: ReturnType<typeof statusMenuRows>) => rows.map(row => `${row.kind}:${row.profile.name}`);
-  assert.deepEqual([switchOffer(last, live, [], true), switchOffer(last, live, [], false), switchOffer({ ...last, items: [] }, live, [], true),
-    switchOffer(both, live, [], true), switchOffer(heldProf, liveItems(libraryOf([]), new Set()), [heldPlugin], true)],
-    [{ offered: true, enabled: true }, { offered: true, enabled: false }, { offered: false, enabled: false }, { offered: false, enabled: false }, { offered: false, enabled: false }]);
+  assert.deepEqual({
+    writable: switchOffer(last, live, [], true),
+    readOnly: switchOffer(last, live, [], false),
+    empty: switchOffer({ ...last, items: [] }, live, [], true),
+    inUse: switchOffer(both, live, [], true),
+    whollyHeld: switchOffer(heldProf, liveItems(libraryOf([]), new Set()), [heldPlugin], true),
+    partHeld: switchOffer(partHeldProf, live, [heldPlugin], true),
+  }, {
+    writable: { offered: true, enabled: true },
+    readOnly: { offered: true, enabled: false },
+    empty: { offered: false, enabled: false },
+    inUse: { offered: false, enabled: false },
+    whollyHeld: { offered: false, enabled: false },
+    partHeld: { offered: true, enabled: true },
+  });
   const changed = profileNow({ profiles: [first, last, other], last: 'Last' }, live, []);
-  assert.deepEqual(kinds(statusMenuRows([first, last, other], changed, live, [], true)), ['profile:First', 'profile:Last', 'switch-back:Last', 'see-changes:Last', 'profile:Other']);
-  assert.deepEqual(kinds(statusMenuRows([first, last], changed, live, [], false)), ['profile:First', 'profile:Last', 'see-changes:Last'], 'read-only hides Switch back, keeps See changes');
+  assert.deepEqual(kinds(statusMenuRows([first, last, other], changed, live, [], true)), ['profile:First', 'changed-heading:Last', 'switch-back:Last', 'see-changes:Last', 'profile:Other']);
+  assert.deepEqual(kinds(statusMenuRows([first, last], changed, live, [], false)), ['profile:First', 'changed-heading:Last', 'see-changes:Last'], 'read-only hides Switch back, keeps heading and See changes');
   assert.deepEqual(kinds(statusMenuRows([first, { ...last, items: [] }], profileNow({ profiles: [first, { ...last, items: [] }], last: 'Last' }, live, []), live, [], true)), ['profile:First', 'profile:Last'], 'empty offers neither');
-  assert.deepEqual(kinds(statusMenuRows([heldProf], profileNow({ profiles: [heldProf], last: 'Held' }, [], [heldPlugin]), [], [heldPlugin], true)), ['profile:Held'], 'held offers neither');
+  assert.deepEqual(kinds(statusMenuRows([heldProf], profileNow({ profiles: [heldProf], last: 'Held' }, [], [heldPlugin]), [], [heldPlugin], true)), ['profile:Held'], 'wholly held keeps clickable profile row');
   assert.deepEqual(kinds(statusMenuRows([both], profileNow({ profiles: [both], last: 'Both' }, live, []), live, [], true)), ['profile:Both'], 'in use offers neither');
 });
 
