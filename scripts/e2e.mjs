@@ -9507,8 +9507,8 @@ esac
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
   const a = await launch(data, [], tools);
-  const done = async () => { for (let tries = 0; tries < 120 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
-  const asked = async () => { for (let tries = 0; tries < 100 && /^Comparing/.test(await a.text('.uninstall-ask .band-text') ?? 'Comparing'); tries++) await wait(100); return a.text('.uninstall-ask .band-text'); };
+  const done = async () => { for (let tries = 0; tries < 120 && (await a.run(`document.body.dataset.busy === 'true' || !!document.querySelector('.plugin-click')`)); tries++) await wait(100); await a.settle(); };
+  const asked = async () => { for (let tries = 0; tries < 100 && (await a.run(`document.querySelector('.uninstall-ask .delete-now')?.disabled !== false`)); tries++) await wait(100); return a.text('.uninstall-ask .band-text'); };
 
   for (const m of [alphaM, betaM, officialM]) same(`added ${m}`, await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(m)}).then(r => r.problem ?? 'added')`), 'added');
   await a.click('#nav-harnesses');
@@ -9529,6 +9529,7 @@ esac
   // 3. Queued and running live states on Claude Code's Plugins tab switches.
   writeFileSync(join(home, 'slow'), '');
   await a.run(`document.getElementById('harness-plugin-switch-beta-market-shared-kit').click(); document.getElementById('harness-plugin-switch-alpha-market-solo-kit').click();`);
+  for (let tries = 0; tries < 50 && !(await a.exists('[data-click="running"]')); tries++) await wait(50);
   const liveSnap = await a.run(`(() => { const row = id => document.querySelector('.harness-plugin:has(#' + id + ')'); const r1 = row('harness-plugin-beta-market-shared-kit'), r2 = row('harness-plugin-alpha-market-solo-kit'); return [r1?.querySelector('.plugin-click')?.dataset.click ?? null, r1?.querySelector('.plugin-click')?.textContent?.trim() ?? '', r1?.querySelector('[role="switch"]')?.title ?? '', r2?.querySelector('.plugin-click')?.dataset.click ?? null, r2?.querySelector('.plugin-click')?.textContent?.trim() ?? '', r2?.querySelector('[role="switch"]')?.title ?? '']; })()`);
   same('queued and running clicks show live state on their rows and describe the disabled switches', liveSnap,
     ['running', 'Turning off in Claude Code…', 'Turning off in Claude Code…', 'waiting', 'Waiting to turn off in Claude Code', 'Waiting to turn off in Claude Code']);
@@ -9599,11 +9600,13 @@ esac
     'Uninstall solo-kit from Claude Code? It is no longer offered, so it can’t be installed again: there is no Undo.');
   writeFileSync(join(home, 'slow-uninstall'), '');
   await a.run(`document.getElementById('harness-plugin-uninstall-alpha-market-solo-kit-confirm').click(); document.getElementById('harness-switch-codex-cli').click();`);
+  for (let tries = 0; tries < 100 && JSON.parse(readFileSync(claudeInstalled, 'utf8')).plugins['solo-kit@alpha-market']; tries++) await wait(100);
   await done();
   rmSync(join(home, 'slow-uninstall'));
   same('Codex tab open during Claude Code’s irreversible uninstall neither shows its result nor offers Undo',
     [await a.exists('#plugins-result'), await a.exists('#plugins-undo')], [false, false]);
   await a.click('#harness-switch-claude-cli');
+  for (let tries = 0; tries < 50 && !(await a.exists('#plugins-result')); tries++) await wait(100);
   same('returning to Claude Code’s Plugins tab shows the irreversible completion in the header without Undo',
     [(await a.text('#plugins-result .toolbar-result-text'))?.trim() ?? '', await a.exists('#plugins-undo'), await a.run(`document.getElementById('header')?.offsetHeight ?? 0`)],
     ['solo-kit: uninstalled from Claude Code.', false, 48]);

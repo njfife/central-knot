@@ -314,7 +314,7 @@ function pluginRow({ entry, plugin, version }: InstalledMarketPlugin, tool: Harn
   const [uninstall, question] = own ? uninstallControl(entry, plugin, tool, `harness-plugin-uninstall-${entry.name}-${plugin.name}`, own) : [null, null];
   return h('div.harness-plugin', { role: 'listitem', title: note || undefined },
     h('div.harness-plugin-text', {},
-      h('strong', {}, pluginTitle(plugin), showMarket ? h('span.harness-plugin-market', {}, ` · ${marketTitle(entry)}`) : null, version ? h('span.harness-plugin-version', {}, ` ${version}`) : null),
+      h('strong', {}, pluginTitle(plugin), version ? h('span.harness-plugin-version', {}, ` ${version}`) : null, showMarket ? h('span.harness-plugin-market', {}, ` · ${marketTitle(entry)}`) : null),
       liveRow ?? (stateText ? h('span.harness-plugin-state', { title: words }, stateText) : null)),
     uninstall, pageLink, control, question);
 }
