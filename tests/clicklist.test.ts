@@ -60,8 +60,20 @@ const api = {
 };
 // The page's modules, loaded under node with no window: the little of the DOM they touch as they load and redraw. An element keeps
 // what is appended to it, so a test can read the words a part draws (textOf).
-const element = (): any => ({ attrs: {} as Record<string, string>, dataset: {}, style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, children: [], content: {}, setAttribute(k: string, v: string) { this.attrs[k] = v; }, addEventListener() {}, replaceChildren(...kids: unknown[]) { this.children = kids; },
-  append(...kids: unknown[]) { this.children.push(...kids); }, appendChild() {}, focus() {}, querySelector: () => element(), after() {} });
+const element = (): any => {
+  const classes = new Set<string>();
+  return {
+    attrs: {} as Record<string, string>, dataset: {}, style: { setProperty() {} },
+    classList: {
+      toggle(name: string, on?: boolean) { if (on === undefined ? !classes.has(name) : on) classes.add(name); else classes.delete(name); },
+      add(...names: string[]) { for (const name of names) classes.add(name); },
+      remove(...names: string[]) { for (const name of names) classes.delete(name); },
+      contains(name: string) { return classes.has(name); },
+    },
+    children: [], content: {}, setAttribute(k: string, v: string) { this.attrs[k] = v; }, addEventListener() {}, replaceChildren(...kids: unknown[]) { this.children = kids; },
+    append(...kids: unknown[]) { this.children.push(...kids); }, appendChild() {}, focus() {}, querySelector: () => element(), after() {},
+  };
+};
 const findById = (node: any, id: string): any => {
   if (!node || typeof node === 'string') return undefined;
   if (node.id === id || node.attrs?.id === id) return node;
@@ -70,6 +82,11 @@ const findById = (node: any, id: string): any => {
 };
 const textOf = (node: any): string => (typeof node === 'string' ? node : (node?.children ?? []).map(textOf).join(''));
 const announcement = element();
+const isHidden = (node: any): boolean => !!node?.classList?.contains('visually-hidden') || String(node?.className ?? '').split(/\s+/).includes('visually-hidden');
+/** What the status bar draws in sight (omitting a quiet bar and any visually-hidden spoken tail). */
+const visibleInBar = (): string => (isHidden(announcement) ? '' : announcement.children.filter((kid: any) => !isHidden(kid)).map(textOf).join(''));
+/** First sentence in the status bar (.said-first): the part that stays in sight at 860 px when .said-rest drops. */
+const firstInBar = (): string => (isHidden(announcement) ? '' : announcement.children.filter((kid: any) => String(kid?.className ?? '').split(/\s+/).includes('said-first')).map(textOf).join(''));
 Object.assign(globalThis, {
   window: { centralKnot: new Proxy(api, { get: (known, name) => (known as Record<string | symbol, unknown>)[name] ?? (() => Promise.resolve(null)) }), addEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {} }) },
   document: { body: element(), documentElement: element(), activeElement: null, hidden: false, hasFocus: () => true, getElementById: (id: string) => id === 'announcement' ? announcement : element(), querySelector: () => null, querySelectorAll: () => [], addEventListener(name: string, fn: () => void) { if (name === 'visibilitychange') main.visibilityChange = fn; }, createElement: element, createTextNode: element },
@@ -93,7 +110,7 @@ const { versionsList } = await import('../src/editparts.ts');
 const { timesApart } = await import('../src/model.ts');
 const { newItem } = await import('../src/library.ts');
 const { keptBack } = await import('../src/clickplan.ts');
-const { clickWords, toolBox } = await import('../src/pluginparts.ts');
+const { clickNote, clickWords, toolBox } = await import('../src/pluginparts.ts');
 const { owedTo } = await import('../src/pluginrecord.ts');
 const { toolNow } = await import('../src/pluginstatus.ts');
 
@@ -164,21 +181,103 @@ test('A click that ended is read back at once: its switch is free while the next
   assert.deepEqual(main.reads, { plugins: 2, home: 1 });
 });
 
-test('A row says its click’s aim while it waits and runs, then what main returned, a failure once, starting with its tool', async () => {
+test('A row says its click’s aim while it waits and runs, then its short row line; the plugin panel shows only while waiting or running', async () => {
   start();
   turnPlugin(entry, 'alpha', 'on');
   turnPlugin(entry, 'beta', 'keep-out', 'claude-cli');
   turnPlugin(entry, 'gamma', 'let-in', 'claude-cli');
   await settled();
   assert.deepEqual([words('alpha'), words('beta'), words('gamma')], ['Turning on…', 'Waiting to turn off in Claude Code', 'Waiting to turn on in Claude Code']);
+  assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => !!clickNote(entry, name)), [true, true, true]);
   await main.answer(installed('alpha'));
-  assert.deepEqual([words('alpha'), words('beta')], ['Installed in Claude Code', 'Turning off in Claude Code…']);
+  assert.deepEqual([words('alpha'), words('beta')], ['Turned on in Claude Code', 'Turning off in Claude Code…']);
+  assert.deepEqual([clickNote(entry, 'alpha'), !!clickNote(entry, 'alpha', true), !!clickNote(entry, 'beta')], [null, true, true]);
   await main.answer({ stopped, done: [] });
   await main.answer(refused('gamma'));
-  assert.deepEqual([words('beta'), words('gamma')], [stopped, 'Claude Code: Not installed. Plugin "gamma" not found.']);
   assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => clickWords(clickOn('/market', name)!).failed), [false, true, true]);
-  // On the list's row, in one short line: what it did and where; the reasons are in the band above and on the plugin's page.
-  assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => clickWords(clickOn('/market', name)!, true).text), ['Turned on in Claude Code', 'Not done', 'Not turned on in Claude Code']);
+  assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => clickWords(clickOn('/market', name)!).text), ['Turned on in Claude Code', 'Not done', 'Not turned on in Claude Code']);
+  assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => clickNote(entry, name)), [null, null, null]);
+  assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => !!clickNote(entry, name, true)), [true, true, true]);
+});
+
+test('A click that ends with nothing to do leaves the panel note and header empty and says it once in sight in the status bar', async () => {
+  start();
+  market.nav = { ...market.nav, source: '/market', plugin: 'alpha' };
+  turnPlugin(entry, 'alpha', 'on');
+  await settled();
+  assert.ok(clickNote(entry, 'alpha'), 'panel note shows while running');
+  await main.answer({ done: [], before: null, back: [] });
+  await settled();
+  assert.deepEqual([clickNote(entry, 'alpha'), pluginsResult(), firstInBar(), visibleInBar(), app.said.text, app.said.quiet],
+    [null, [], 'Nothing changed for alpha.', 'Nothing changed for alpha.', 'Nothing changed for alpha.', false]);
+});
+
+test('Two clicks in turn where one succeeds and the other changes nothing lead with the unchanged click in sight, without repeating the header', async () => {
+  const undoable = (name: string, tool: HarnessId = 'claude-cli', reloads?: { tool: HarnessId; kind: 'plugin'; plugin: string; on: true }[]): PluginTurnResult => ({
+    done: [{ source: '/market', marketName: 'team', plugin: name, tool, action: 'install', report: { ...report('installed', 'Installed.'), tool, ...(reloads ? { reloads } : {}) } }],
+    before: null,
+    back: [{ source: '/market', marketName: 'team', plugin: name, tool, action: 'plugin-off' }],
+  });
+  const withClaudeCli = () => {
+    (app.home as unknown as { snapshots: unknown[] }).snapshots = [{ harness: 'claude-cli', detection: 'Installed', probe: {} }];
+  };
+
+  // Two tool-box clicks on the same plugin's page: first installs in Claude Code (shown in header via reload advice), second changes nothing in Codex.
+  // The status bar shows ONLY the unchanged click (not repeating the header's sentence).
+  start();
+  withClaudeCli();
+  market.nav = { ...market.nav, source: '/market', plugin: 'alpha' };
+  turnPlugin(entry, 'alpha', 'let-in', 'claude-cli');
+  turnPlugin(entry, 'alpha', 'let-in', 'codex-cli');
+  await settled();
+  await main.answer(undoable('alpha', 'claude-cli', [{ tool: 'claude-cli', kind: 'plugin', plugin: 'alpha', on: true }]));
+  await main.answer({ done: [], before: null, back: [] });
+  await settled();
+  assert.equal(pluginsResult().length > 0, true, 'header holds Claude Code’s install result');
+  assert.deepEqual([firstInBar(), visibleInBar(), announcement.title, app.said.text, app.said.quiet],
+    ['Nothing changed for alpha in Codex.', 'Nothing changed for alpha in Codex.', 'Nothing changed for alpha in Codex.',
+      'Nothing changed for alpha in Codex. alpha: installed in Claude Code.', false]);
+
+  // Reverse order: first changes nothing, second succeeds with Undo in the header -> status bar shows only the unchanged click in sight.
+  start();
+  turnPlugin(entry, 'alpha', 'on');
+  turnPlugin(entry, 'beta', 'on');
+  await settled();
+  await main.answer({ done: [], before: null, back: [] });
+  await main.answer(undoable('beta'));
+  await settled();
+  assert.equal(pluginsResult().length > 0, true, 'header holds the undoable result');
+  assert.deepEqual([firstInBar(), visibleInBar(), announcement.title, app.said.text, app.said.quiet],
+    ['Nothing changed for alpha.', 'Nothing changed for alpha.', 'Nothing changed for alpha.',
+      'Nothing changed for alpha. beta: installed in Claude Code.', false]);
+
+  // Header holds nothing (first succeeded without reloads or surviving Undo, second changed nothing): status bar leads with the unchanged click so 860 keeps it in sight.
+  start();
+  turnPlugin(entry, 'alpha', 'on');
+  turnPlugin(entry, 'beta', 'on');
+  await settled();
+  await main.answer(undoable('alpha'));
+  await main.answer({ done: [], before: null, back: [] });
+  await settled();
+  assert.deepEqual(pluginsResult(), [], 'header is empty');
+  assert.deepEqual([firstInBar(), visibleInBar(), app.said.text, app.said.quiet],
+    ['Nothing changed for beta.', 'Nothing changed for beta. alpha: installed in Claude Code.',
+      'Nothing changed for beta. alpha: installed in Claude Code.', false]);
+
+  // Whole-switch click after a box click on the same plugin: names the plugin's other tools, never "Nothing changed for alpha." beside "alpha: installed in Codex.".
+  start();
+  (app.home as unknown as { snapshots: unknown[] }).snapshots = [{ harness: 'codex-cli', detection: 'Installed', probe: {} }];
+  market.nav = { ...market.nav, source: '/market', plugin: 'alpha' };
+  turnPlugin(entry, 'alpha', 'let-in', 'codex-cli');
+  turnPlugin(entry, 'alpha', 'on');
+  await settled();
+  await main.answer(undoable('alpha', 'codex-cli', [{ tool: 'codex-cli', kind: 'plugin', plugin: 'alpha', on: true }]));
+  await main.answer({ done: [], before: null, back: [] });
+  await settled();
+  assert.equal(pluginsResult().length > 0, true, 'header holds Codex’s install result');
+  assert.deepEqual([firstInBar(), visibleInBar(), announcement.title, app.said.text],
+    ['Nothing changed for alpha’s other tools.', 'Nothing changed for alpha’s other tools.', 'Nothing changed for alpha’s other tools.',
+      'Nothing changed for alpha’s other tools. alpha: installed in Codex.']);
 });
 
 test('A click that fails in the middle says why on its row, the clicks after it still run, and the list’s end is said as a whole', async () => {
@@ -2141,9 +2240,9 @@ test('On another plugin’s page (or after Refresh), the header omits "Last chan
 
 /** Builds a History-page restore fixture with `notes` and `standup`, mocked restore/refresh replies, and profiles. */
 function historyRestoreWorld(t: TestContext, events: Record<string, unknown>[],
-  { beforeOn, afterOn, beforeDeleted = [], profiles, reply }: {
+  { beforeOn, afterOn, beforeDeleted = [], profiles, last, reply }: {
     beforeOn: Record<string, boolean>; afterOn: Record<string, boolean>; beforeDeleted?: string[];
-    profiles: { id: string; name: string; items: string[] }[]; reply: Record<string, unknown>;
+    profiles: { id: string; name: string; items: string[] }[]; last?: string; reply: Record<string, unknown>;
   }) {
   start();
   const slot = homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'standup' }], { on: false });
@@ -2154,7 +2253,7 @@ function historyRestoreWorld(t: TestContext, events: Record<string, unknown>[],
     const view = structuredClone(base);
     for (const [key, isOn] of Object.entries(on)) view.skills.library[key]!.on = isOn;
     for (const key of deleted) view.skills.library[key]!.deleted = { at: '2026-11-25T09:00:00.000Z' };
-    view.profiles = { profiles: profiles.map(profile => ({ ...profile, switchesPluginItems: true })), plugins: [] };
+    view.profiles = { profiles: profiles.map(profile => ({ ...profile, switchesPluginItems: true })), plugins: [], ...(last ? { last } : {}) };
     return view;
   };
   app.home = viewWith(beforeOn, beforeDeleted);
@@ -2168,6 +2267,22 @@ const HISTORY_STANDUP_OFF = [
   { id: 'on-1', kind: 'on', item: 'standup', key: 'standup', of: 'skill', at: '2026-11-25T10:03:00.000Z', losers: [{ tool: 'claude-cli', hash: 'h1' }], orderProved: true },
 ];
 const STANDUP_WRITTEN = { results: [{ item: 'standup', harness: 'claude-cli', outcome: 'written', message: 'Written.' }], harnessWrites: 1, made: ['on-1'], reloads: [] };
+
+test('History Undo that ends Everyday, the profile last switched to, says Everyday · changed in its sentence’s place; two ended together, the same', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] }, backup = { id: 'p-2', name: 'Backup', items: ['skill:notes'] };
+  historyRestoreWorld(t, HISTORY_STANDUP_OFF, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday, backup], last: 'p-1', reply: STANDUP_WRITTEN });
+  await restoreEvent('off-1');
+  assert.match(app.outcome?.text ?? '', /\. Everyday · changed$/);
+  assert.equal(app.outcome?.profileLine, 'Everyday · changed');
+});
+
+test('History Undo that ends Everyday, the one last switched to, while Focus comes into use says it stopped being in use, as before', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const focus = { id: 'p-2', name: 'Focus', items: ['skill:notes', 'skill:standup'] };
+  historyRestoreWorld(t, HISTORY_STANDUP_OFF, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday, focus], last: 'p-1', reply: STANDUP_WRITTEN });
+  await restoreEvent('off-1');
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
+});
 
 test('History Undo that stops Everyday matching says so even when another profile (Focus) now matches', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };

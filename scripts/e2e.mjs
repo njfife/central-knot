@@ -2445,13 +2445,15 @@ async function fitsAtMinimum(a, where, again = async () => {}) {
 /** Checks that the History shortening warning's alert icon sits beside its text, not above it. */
 const warnIconBeside = page => page.run(`(() => { const mark = document.querySelector('#setting-history-question .icon')?.getBoundingClientRect(), text = document.querySelector('#history-shorten-text')?.getBoundingClientRect(); return !!(mark && text && mark.width > 0 && mark.right <= text.left && Math.abs(mark.top - text.top) <= 6); })()`);
 
+/** The words of a result's profile line (matrix.ts profileSpan: its name and the rest), without its (?)'s card; run in the page. */
+const PROFILE_WORDS = `(el => el && [...el.querySelectorAll('.band-profile-name, .band-profile-rest')].map(part => part.textContent).join(''))`;
 /** Combined header result words (Row 1 main text plus Row 2 profile sentence when folded onto its own line). */
 const headerResultWords = a => a.run(`(() => {
-  const parts = ['#header [data-outcome] .band-text', '#header .band-profile'].map(sel => document.querySelector(sel)?.textContent?.trim()).filter(Boolean);
+  const parts = [document.querySelector('#header [data-outcome] .band-text')?.textContent, ${PROFILE_WORDS}(document.querySelector('#header .band-profile'))].map(part => part?.trim()).filter(Boolean);
   return parts.join(' ');
 })()`);
 
-/** Checks that the header stays 48px and `sentence` (or its "stopped being..." words when `allowShortName`) is shown whole without Show all, with Undo and × inside the window. */
+/** Checks that the header stays 48px and `sentence` (or its "stopped being..." or " · changed" words when `allowShortName`) is shown whole without Show all, with Undo, × and any (?) inside the window. */
 const profileSentenceWhole = (a, sentence, { allowShortName = false, undoId = '#outcome-undo', dismissId = '#outcome-dismiss' } = {}) => a.run(`((sentence, allowShortName, undoId, dismissId) => {
   const header = document.querySelector('#header');
   const result = header?.querySelector('.header-result:not(.result-whole)');
@@ -2460,10 +2462,13 @@ const profileSentenceWhole = (a, sentence, { allowShortName = false, undoId = '#
   if (!header || !result || (undoId && !undo) || !dismiss) return { ok: false, why: 'missing header/result/undo/dismiss' };
   const hRect = header.getBoundingClientRect(), rRect = result.getBoundingClientRect();
   const uRect = undo?.getBoundingClientRect(), dRect = dismiss.getBoundingClientRect();
-  const el = result.querySelector('.band-profile');
-  if (!el || el.textContent !== sentence) return { ok: false, why: 'sentence not in .band-profile', got: el?.textContent };
+  const el = result.querySelector('.band-profile'), words = ${PROFILE_WORDS}(el);
+  if (!el || words !== sentence) return { ok: false, why: 'sentence not in .band-profile', got: words };
   const nameEl = el.querySelector('.band-profile-name'), restEl = el.querySelector('.band-profile-rest');
   if (!nameEl || !restEl) return { ok: false, why: 'missing name/rest spans' };
+  // A " · changed" line carries its (?), inside the window and the header; the older sentence has none.
+  const mark = el.querySelector('.info-mark')?.getBoundingClientRect(), wantsMark = sentence.endsWith(' · changed');
+  const markFits = wantsMark ? !!mark && mark.width > 0 && mark.right <= rRect.right + 1 && mark.right <= window.innerWidth + 1 && mark.bottom <= hRect.bottom + 1 : !mark;
   const eRect = el.getBoundingClientRect(), nRect = nameEl.getBoundingClientRect(), restRect = restEl.getBoundingClientRect();
   const restClipped = restRect.width <= 0 || restRect.bottom > hRect.bottom + 1 || restRect.right > eRect.right + 1
     || restRect.right > rRect.right + 1 || restRect.right > window.innerWidth + 1 || restEl.scrollWidth > restEl.clientWidth + 1;
@@ -2473,8 +2478,8 @@ const profileSentenceWhole = (a, sentence, { allowShortName = false, undoId = '#
   const moreOk = !moreEl || moreEl.hidden || (moreEl.getBoundingClientRect().height <= 20 && moreEl.scrollWidth <= moreEl.clientWidth + 1);
   const controlsFit = (!uRect || (uRect.width > 0 && uRect.right <= window.innerWidth + 1 && uRect.bottom <= hRect.bottom + 1))
     && dRect.width > 0 && dRect.right <= window.innerWidth + 1 && dRect.bottom <= hRect.bottom + 1;
-  return { ok: Math.round(hRect.height) === 48 && !restClipped && !nameClipped && moreOk && controlsFit && el.getAttribute('title') === sentence,
-    headerH: Math.round(hRect.height), restClipped, nameClipped, nameShortened, moreOk, controlsFit, title: el.getAttribute('title'),
+  return { ok: Math.round(hRect.height) === 48 && !restClipped && !nameClipped && moreOk && controlsFit && markFits && el.getAttribute('title') === sentence,
+    headerH: Math.round(hRect.height), restClipped, nameClipped, nameShortened, moreOk, controlsFit, markFits, title: el.getAttribute('title'),
     nameScrollW: nameEl.scrollWidth, nameClientW: nameEl.clientWidth, restScrollW: restEl.scrollWidth, restClientW: restEl.clientWidth };
 })(${JSON.stringify(sentence)}, ${JSON.stringify(allowShortName)}, ${JSON.stringify(undoId)}, ${JSON.stringify(dismissId)})`);
 
@@ -3059,6 +3064,18 @@ async function practiceFlow() {
   await switchFromBar('Incident');
   check('the switch’s result shows on Skills, with Undo switch', /^Switched to Incident/.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
   same('a skill it leaves out is under Off, in Central Knot only', [(await sectionsNow(a, 'skills')).find(([section]) => section === 'off')?.[1], folders('standup')], [['release-notes', 'review', 'standup'], gone]);
+  /** One picture at `size` in `theme`, with the sidebar open (under --shots), after `ready` (run at that size); the window is left at that size. */
+  const shotOpen = async (name, [width, height], theme, ready = async () => {}) => {
+    if (!shots) return;
+    await withSidebarOpen(a, width, height, async () => {
+      await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+      await wait(80);
+      await ready();
+      await a.shot(name);
+      await a.run(`window.centralKnot.setAppearance('system')`);
+      await wait(80);
+    });
+  };
   // History’s Undo ending the profile in use says so after its own words, keeping warnings and buttons; an Undo that leaves it,
   // a refused one, a profile switch’s own Undo, and an Undo with no profile in use add nothing.
   {
@@ -3072,8 +3089,8 @@ async function practiceFlow() {
   await openHistory(a, '#nav-history', () => a.exists('.history-row[data-kind="off"]'));
   await clickHistory('off', 'standup');
   const endedOnText = await a.text('.band-done .band-text') ?? '';
-  check('an item’s Undo in History that ends the profile in use says so after its own words, keeping its Undo and reloads',
-    endedOnText.startsWith('standup: turned on:') && endedOnText.endsWith('Incident stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'No profile' && await a.exists('#outcome-undo') && await a.exists('#outcome-copy-copilot-cli'),
+  check('an item’s Undo in History that ends the profile in use says so after its own words, Incident · changed, keeping its Undo and reloads',
+    endedOnText.startsWith('standup: turned on:') && endedOnText.endsWith(' Incident · changed') && (await a.text('#status-profile'))?.trim() === 'Incident · changed' && await a.exists('#outcome-undo') && await a.exists('#outcome-copy-copilot-cli'),
     [endedOnText, await a.text('#status-profile')]);
   await fitsAtMinimum(a, 'History Undo ending a profile');
   if (shots) {
@@ -3095,13 +3112,13 @@ async function practiceFlow() {
   // With no profile in use before the Undo, nothing about a profile is added.
   await a.click('#outcome-undo');
   same('an Undo with no profile in use before adds no profile sentence and restores Incident',
-    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test((await a.text('.band-done')) ?? '') || /stopped being the profile/.test((await statusShown()) ?? '')],
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile|· changed/.test((await a.text('.band-done')) ?? '') || /stopped being the profile|· changed/.test((await statusShown()) ?? '')],
     ['Incident', false]);
   // An Undo that turns an item off (no reload advice) and ends the profile still shows the band with the sentence.
   await clickHistory('on', 'notes', 'Turn it off');
   const endedOffText = await a.text('.band-done .band-text') ?? '';
   check('an item’s Turn-it-off Undo in History (no reloads) that ends the profile shows the band and says so',
-    endedOffText.startsWith('notes: turned off:') && endedOffText.endsWith('Incident stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'No profile' && await a.exists('#outcome-undo'),
+    endedOffText.startsWith('notes: turned off:') && endedOffText.endsWith(' Incident · changed') && (await a.text('#status-profile'))?.trim() === 'Incident · changed' && await a.exists('#outcome-undo'),
     [endedOffText, await a.text('#status-profile')]);
   await fitsAtMinimum(a, 'History Turn-it-off Undo ending a profile');
   if (shots) {
@@ -3119,7 +3136,7 @@ async function practiceFlow() {
   if (await a.exists('#outcome-undo')) await a.click('#outcome-undo');
   else await clickHistory('off', 'notes');
   same('undoing that brings Incident back with no profile sentence',
-    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test((await a.text('.band-done')) ?? '')],
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile|· changed/.test((await a.text('.band-done')) ?? '')],
     ['Incident', false]);
   // An Undo that leaves Incident in use (reverting an edit to notes) adds no profile sentence.
   const notesPath = join(practice, '.claude/skills/notes/SKILL.md'), notesBefore = readFileSync(notesPath, 'utf8');
@@ -3129,7 +3146,7 @@ async function practiceFlow() {
   await openHistory(a, '#header-refresh', () => a.run(`[...document.querySelectorAll('.history-row[data-kind="edit"]')].some(row => row.querySelector('.history-what strong')?.textContent === 'notes' && [...row.querySelectorAll('.history-actions button')].some(button => button.textContent.trim() === 'Undo'))`));
   await clickHistory('edit', 'notes', 'Undo');
   same('an item’s Undo that leaves Incident in use adds no profile sentence',
-    [(await a.text('#status-profile'))?.trim(), readFileSync(notesPath, 'utf8') === notesBefore, /stopped being the profile/.test((await a.text('.band-done')) ?? '') || /stopped being the profile/.test((await statusShown()) ?? '')],
+    [(await a.text('#status-profile'))?.trim(), readFileSync(notesPath, 'utf8') === notesBefore, /stopped being the profile|· changed/.test((await a.text('.band-done')) ?? '') || /stopped being the profile|· changed/.test((await statusShown()) ?? '')],
     ['Incident', true, false]);
   // A partly done Undo that still ends Incident keeps its warning and Undo button and appends the profile sentence.
   if (process.platform !== 'win32' && process.getuid() !== 0) {
@@ -3138,7 +3155,7 @@ async function practiceFlow() {
       await clickHistory('off', 'standup');
       const partialText = await a.text('.band-done .band-text') ?? '';
       check('a partly done Undo that ends Incident keeps its warning and button and says so',
-        partialText.includes('Claude Code’s skills folder can’t be written') && partialText.endsWith('Incident stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'No profile' && await a.exists('.band-done .tone-warning') && await a.exists('#outcome-undo'),
+        partialText.includes('Claude Code’s skills folder can’t be written') && partialText.endsWith(' Incident · changed') && (await a.text('#status-profile'))?.trim() === 'Incident · changed' && await a.exists('.band-done .tone-warning') && await a.exists('#outcome-undo'),
         [partialText, await a.text('#status-profile')]);
       if (shots) {
         await sizeTo(a, ...SMALLEST);
@@ -3161,12 +3178,12 @@ async function practiceFlow() {
     await clickHistory('off', 'standup');
     const refusedText = await a.text('.band-done .band-text') ?? '';
     check('a refused-whole Undo shows its refusal with no profile sentence',
-      refusedText.includes('The skills record is damaged') && !/stopped being the profile/.test(refusedText),
+      refusedText.includes('The skills record is damaged') && !/stopped being the profile|· changed/.test(refusedText),
       refusedText);
   } finally { writeFileSync(skillsRecordHere, skillsRecordSaved); }
   await a.click('#header-refresh');
   same('with the skills record back, Incident is in use again', (await a.text('#status-profile'))?.trim(), 'Incident');
-  // Two profiles matching before and neither after: plural sentence.
+  // Two profiles matching before and neither after: named as the one last switched to, Incident · changed.
   await a.click('#nav-profiles');
   await newProfile(a, 'Backup');
   await a.click('#pf-skill\\:notes');
@@ -3174,8 +3191,8 @@ async function practiceFlow() {
   same('both matching profiles are shown in the status bar before the Undo', (await a.text('#status-profile'))?.trim(), 'Incident and Backup');
   await clickHistory('off', 'standup');
   const pluralText = await a.text('.band-done .band-text') ?? '';
-  check('an Undo ending two matching profiles uses the plural sentence',
-    pluralText.endsWith('Incident and Backup stopped being the profiles in use.') && (await a.text('#status-profile'))?.trim() === 'No profile',
+  check('an Undo ending two matching profiles names the one last switched to: Incident · changed',
+    pluralText.endsWith(' Incident · changed') && (await a.text('#status-profile'))?.trim() === 'Incident · changed',
     [pluralText, await a.text('#status-profile')]);
   await fitsAtMinimum(a, 'History Undo ending two profiles');
   // Wrapping text with reload lines at 860 wide (sidebar open) stays beside its icon and keeps Undo and × on row 1.
@@ -3223,20 +3240,35 @@ async function practiceFlow() {
   await a.settle();
   const profileUndoText = await a.text('.band-done .band-text') ?? '';
   check('undoing a profile’s own switch from History adds no profile sentence',
-    /^Undone: 3 items turned on\./.test(profileUndoText) && !/stopped being the profile/.test(profileUndoText) && (await a.text('#status-profile'))?.trim() === 'No profile',
+    /^Undone: 3 items turned on\./.test(profileUndoText) && !/stopped being the profile|· changed/.test(profileUndoText) && (await a.text('#status-profile'))?.trim() === 'No profile',
     [profileUndoText, await a.text('#status-profile')]);
   await openKind(a, 'skills');
   await switchFromBar('Incident');
   // Every ordinary act that ends Incident says so; its Undo, on-then-off in one run, a keep-out, and a switch from the bar say none.
+  // Before the click, standup's opened row says what it would end in the words said after it: Incident · changed.
+  const standupEnds = `#${rowPart('profile-ends', 'skills', 'standup')}`;
+  await openRow('standup', standupEnds);
+  same('before the click, the opened row says what the status bar will then say, Incident staying saved on hover',
+    [(await a.text(standupEnds))?.trim(), await a.run(`document.querySelector(${JSON.stringify(standupEnds)})?.title`)],
+    ['If on, only this item changes: the status bar will say Incident · changed.', 'Incident stays saved: Undo, or switching to it again, puts it back in use.']);
+  await shotOpen('profile-changed-forecast-860-light', SMALLEST, 'light', () => a.run(`document.querySelector(${JSON.stringify(standupEnds)})?.scrollIntoView({ block: 'center' })`));
+  await fullSize(a);
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
   const rowEndsText = await headerResultWords(a);
-  check('turning standup on from its row ends Incident and says so in the result while the bar reads No profile',
-    rowEndsText.endsWith('Incident stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'No profile',
+  check('turning standup on from its row ends Incident: the result and the bar say Incident · changed',
+    rowEndsText.endsWith(' Incident · changed') && (await a.text('#status-profile'))?.trim() === 'Incident · changed',
     [rowEndsText, await a.text('#status-profile')]);
+  await withSidebarOpen(a, ...SMALLEST, async () => {
+    await checkCard(a, 'profile-changed-info', 'What is on differs from Incident, the profile you last switched to. Incident itself is as you saved it; switching to it again sets what Central Knot manages as it says.', 'the result’s (?) beside Incident · changed says what that means');
+    await shotOpen('profile-changed-result-card-860-light', SMALLEST, 'light', () => a.click('#profile-changed-info'));
+    if (shots) await a.press('Escape');
+  });
+  await fullSize(a);
+  await a.click(`#${rowPart('open', 'skills', 'standup')}`);
   for (const [width, height] of [SMALLEST, [1316, 819]]) {
     await sizeTo(a, width, height);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
-    const whole = await profileSentenceWhole(a, 'Incident stopped being the profile in use.');
+    const whole = await profileSentenceWhole(a, 'Incident · changed');
     check(`row switch ending Incident shows the profile sentence whole without Show all at ${width} with sidebar open, keeping 48px header`, whole.ok, whole);
     if (shots) {
       for (const theme of ['light', 'dark']) {
@@ -3253,17 +3285,40 @@ async function practiceFlow() {
   await fullSize(a);
   await a.click('#outcome-undo');
   same('its Undo restores Incident with no profile sentence',
-    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test(await headerResultWords(a))],
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile|· changed/.test(await headerResultWords(a))],
     ['Incident', false]);
+  // A profile that can't be switched to (nothing left in it) is still the one last switched to: Incident emptied, in use while
+  // nothing is on, then ended by notes turned on. Its card makes no promise of a switch. Then all as it was.
+  const tickNotes = async () => {
+    await a.click('#nav-profiles');
+    await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Incident')).click()`); await a.settle();
+    await a.click('#pf-skill\\:notes');
+    await openKind(a, 'skills');
+  };
+  await tickNotes();
+  await a.click(`#${rowPart('switch', 'skills', 'notes')}`);
+  same('emptied, Incident is in use while nothing is on', (await a.text('#status-profile'))?.trim(), 'Incident');
+  await a.click(`#${rowPart('switch', 'skills', 'notes')}`);
+  same('notes on ends it: Incident · changed', [(await headerResultWords(a)).endsWith(' Incident · changed'), (await a.text('#status-profile'))?.trim()], [true, 'Incident · changed']);
+  await withSidebarOpen(a, ...SMALLEST, async () => {
+    await checkCard(a, 'profile-changed-info', 'What is on differs from Incident, the profile you last switched to. Incident itself is as you saved it.', 'the result’s (?) for a profile with nothing in it promises no switch');
+    await shotOpen('profile-changed-empty-card-860-light', SMALLEST, 'light', () => a.click('#profile-changed-info'));
+    if (shots) await a.press('Escape');
+  });
+  await fullSize(a);
+  await a.click('#outcome-undo');
+  await tickNotes();
+  await a.click(`#${rowPart('switch', 'skills', 'notes')}`);
+  same('notes ticked back into Incident and turned on: Incident is in use as before', (await a.text('#status-profile'))?.trim(), 'Incident');
   await a.clickInRun(`#${rowPart('switch', 'skills', 'standup')}`);
   await a.clickInRun(`#${rowPart('switch', 'skills', 'standup')}`);
   same('turning standup on then off in one run leaves Incident in use with no profile sentence',
-    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test(await headerResultWords(a))],
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile|· changed/.test(await headerResultWords(a))],
     ['Incident', false]);
   await openRow('notes', `#${rowPart('enable', 'skills', 'notes', 'codex-cli')}`);
   await a.click(`#${rowPart('enable', 'skills', 'notes', 'codex-cli')}`);
   same('a keep-out in one tool leaves Incident in use with no profile sentence',
-    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test(await headerResultWords(a))],
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile|· changed/.test(await headerResultWords(a))],
     ['Incident', false]);
   await a.click('#outcome-undo');
   await a.click(`#${rowPart('open', 'skills', 'notes')}`);
@@ -3275,7 +3330,7 @@ async function practiceFlow() {
   await switchFromBar('WithStandup');
   const barSwitchText = await headerResultWords(a);
   check('switching from Incident to another profile from the bar adds no profile sentence',
-    barSwitchText.startsWith('Switched to WithStandup:') && !/stopped being the profile/.test(barSwitchText) && (await a.text('#status-profile'))?.trim() === 'WithStandup',
+    barSwitchText.startsWith('Switched to WithStandup:') && !/stopped being the profile|· changed/.test(barSwitchText) && (await a.text('#status-profile'))?.trim() === 'WithStandup',
     [barSwitchText, await a.text('#status-profile')]);
   await sizeTo(a, ...SMALLEST);
   if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
@@ -3292,7 +3347,7 @@ async function practiceFlow() {
   await fullSize(a);
   await a.click('#outcome-undo');
   same('undoing that bar switch restores Incident with no profile sentence',
-    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test(await headerResultWords(a))],
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile|· changed/.test(await headerResultWords(a))],
     ['Incident', false]);
   await a.click('#nav-profiles');
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('WithStandup')).click()`);
@@ -3314,7 +3369,7 @@ async function practiceFlow() {
     await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
     await sizeTo(a, ...SMALLEST);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
-    const withProblem = await profileSentenceWhole(a, 'Incident stopped being the profile in use.');
+    const withProblem = await profileSentenceWhole(a, 'Incident · changed');
     check('at 860 with sidebar open, the profile sentence stays whole beside a problem line and reload chips in the 48px header',
       withProblem.ok && await a.exists('#header .problem-line') && await a.exists('#header .result-reloads'),
       withProblem);
@@ -3322,61 +3377,145 @@ async function practiceFlow() {
     await fullSize(a);
   } finally { chmodSync(join(practice, '.claude/skills'), 0o755); }
   await a.click('#outcome-undo');
-  // Long 35-letter single profile name, then two 35-letter profiles matching notes + standup (no extra profile switch in History).
+  // Long 35-letter names (40 is the most a name may have). Incident, the profile last switched to, renamed (found by its id, the
+  // rename keeping it: main.ts profilesSaved): beside the short " · changed" and its (?) the name is shown whole at 860, and the
+  // status bar cuts the name, never " · changed"; a second one in use beside it, both ended name the one last switched to alone.
   const longOne = 'QuarterlyWorkspaceManagementReviews', longTwo = 'ProductionWorkspaceDeploymentGuides';
-  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+  const openNamed = async name => { await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes(${JSON.stringify(name)})).click()`); await a.settle(); };
+  const renameOpen = async name => {
+    await a.click('#profile-rename');
+    await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = ${JSON.stringify(name)}; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+    await a.settle();
+  };
   await a.click('#nav-profiles');
-  await newProfile(a, longOne);
-  await a.click('#pf-skill\\:notes');
-  await a.click('#pf-skill\\:standup');
+  await openNamed('Incident');
+  await renameOpen(longOne);
   await openKind(a, 'skills');
   await a.click(`#${rowPart('switch', 'skills', 'review')}`);
   await sizeTo(a, ...SMALLEST);
   if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
-  const oneLong = await profileSentenceWhole(a, `${longOne} stopped being the profile in use.`, { allowShortName: true });
-  check('at 860 with sidebar open, a 35-letter profile name gives way while "stopped being the profile in use." stays whole, with hover title',
-    oneLong.ok && oneLong.nameShortened, oneLong);
+  const oneLong = await profileSentenceWhole(a, `${longOne} · changed`);
+  check('at 860 with sidebar open, the 35-letter name of the profile last switched to, renamed since, is whole beside " · changed" and its (?), with hover title', oneLong.ok, oneLong);
+  same('…and the status bar cuts the name, never " · changed"', await a.run(`(() => {
+    const bar = document.getElementById('status-profile'), clip = bar?.querySelector('.status-clip'), word = bar?.querySelector('.status-changed');
+    return [clip?.textContent, !!clip && clip.scrollWidth > clip.clientWidth, word?.textContent, !!word && word.getBoundingClientRect().right <= bar.getBoundingClientRect().right + 1];
+  })()`), [longOne, true, ' · changed', true]);
   await shotAt860('profile-long-name-860-light');
   await a.click('#problems-show-all');
-  check('Show all reveals the whole 35-letter profile name', (await a.text('#header .result-whole .band-text') ?? '').includes(`${longOne} stopped being the profile in use.`), await a.text('#header .result-whole .band-text'));
+  check('Show all reveals the whole 35-letter profile name', (await a.text('#header .result-whole .band-text') ?? '').includes(`${longOne} · changed`), await a.text('#header .result-whole .band-text'));
   await a.click('#problems-show-all');
   await fullSize(a);
   await a.click('#outcome-undo');
   await a.click('#nav-profiles');
   await newProfile(a, longTwo);
   await a.click('#pf-skill\\:notes');
-  await a.click('#pf-skill\\:standup');
   await openKind(a, 'skills');
+  same('both 35-letter profiles are in use', (await a.text('#status-profile'))?.trim(), `${longOne} and ${longTwo}`);
   await a.click(`#${rowPart('switch', 'skills', 'review')}`);
   await sizeTo(a, ...SMALLEST);
   if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
-  const twoLong = await profileSentenceWhole(a, `${longOne} and ${longTwo} stopped being the profiles in use.`, { allowShortName: true });
-  check('at 860 with sidebar open, two 35-letter profile names give way while "stopped being the profiles in use." stays whole, with hover title',
-    twoLong.ok && twoLong.nameShortened, twoLong);
+  const twoLong = await profileSentenceWhole(a, `${longOne} · changed`);
+  check('at 860 with sidebar open, a click ending two profiles in use names the one last switched to alone, whole', twoLong.ok, twoLong);
   await shotAt860('profile-two-long-names-860-light');
-  await a.click('#problems-show-all');
-  check('Show all reveals both whole 35-letter profile names', (await a.text('#header .result-whole .band-text') ?? '').includes(`${longOne} and ${longTwo} stopped being the profiles in use.`), await a.text('#header .result-whole .band-text'));
-  await a.click('#problems-show-all');
   await fullSize(a);
   await a.click('#outcome-undo');
   await a.click('#nav-profiles');
-  for (const name of [longOne, longTwo]) {
-    await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes(${JSON.stringify(name)})).click()`);
-    await a.settle();
-    await a.click('#profile-delete');
-    await a.click('#profile-delete-confirm');
-  }
+  await openNamed(longTwo);
+  await a.click('#profile-delete');
+  await a.click('#profile-delete-confirm');
+  await openNamed(longOne);
+  await renameOpen('Incident');
   await openKind(a, 'skills');
-  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
   }
-  // Turned back on by hand: the profile in use is worked out, so the status bar follows at once.
+  // Turned on by hand: the profile in use is worked out, so the status bar follows at once, and every place names Incident, the
+  // profile last switched to, as changed: the bar, Profiles' list, title and the profile it opens, and Harnesses' line.
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
-  same('after a hand click no profile is in use, and the status bar says so', (await a.text('#status-profile'))?.trim(), 'No profile');
+  same('after a hand click no profile is in use, and the status bar names the one last switched to: Incident · changed', (await a.text('#status-profile'))?.trim(), 'Incident · changed');
+  const changedCard = 'What is on differs from Incident, the profile you last switched to. Incident itself is as you saved it; switching to it again sets what Central Knot manages as it says.';
+  same('the status bar’s hover says what Incident · changed means', await a.run(`document.getElementById('status-profile')?.title`), `Profile: Incident · changed. ${changedCard} Click to switch profiles.`);
+  await a.click('#nav-profiles');
+  const titleWords = () => a.run(`[...document.querySelector('.profile-header h2').childNodes].filter(node => !node.classList?.contains('info-wrap')).map(node => node.textContent).join('')`);
+  same('Profiles opens Incident, titled Incident · changed and so named in the list, each saying what that means',
+    [await titleWords(), await a.text('.profile-row.selected .profile-row-head'), await a.run(`document.querySelector('.profile-row.selected .profile-changed-word')?.title`),
+      await a.exists('.profile-row .profile-in-use'), await a.text('#profile-preview')],
+    ['Incident · changed', 'Incident · changed', changedCard, false, 'Switching turns 1 off']);
+  await withSidebarOpen(a, 1316, 819, async () => same('in the list, · changed sits right after the name, on its line', await a.run(`(() => {
+    const row = document.querySelector('.profile-row.selected'), name = row?.querySelector('.profile-row-name')?.getBoundingClientRect(), word = row?.querySelector('.profile-changed-word')?.getBoundingClientRect();
+    return !!name && !!word && Math.abs(word.left - name.right) <= 1 && Math.abs(word.top - name.top) <= 1;
+  })()`), true));
+  await shotOpen('profile-changed-list-row-1316-light', [1316, 819], 'light');
+  await shotOpen('profile-changed-bar-header-860-light', SMALLEST, 'light');
+  await withSidebarOpen(a, ...SMALLEST, async () => {
+    await checkCard(a, 'profile-changed-title-info', changedCard, 'the title’s (?) says what Incident · changed means, where the list folds into the picker');
+    await a.click('#profile-changed-title-info');
+    same('its card opens clear of Switch, below the whole header', await a.run(`(() => {
+      const card = document.getElementById('profile-changed-title-info-card')?.getBoundingClientRect(), header = document.querySelector('.profile-header').getBoundingClientRect();
+      const button = document.getElementById('profile-switch')?.getBoundingClientRect();
+      return !!card && !!button && card.top >= header.bottom - 1 && (card.top >= button.bottom || card.bottom <= button.top || card.left >= button.right || card.right <= button.left);
+    })()`), true);
+    await a.press('Escape');
+    await shotOpen('profile-changed-title-card-860-light', SMALLEST, 'light', () => a.click('#profile-changed-title-info'));
+    if (shots) await a.press('Escape');
+  });
+  await fullSize(a);
+  // Ticking an item into Incident (its own ticks) keeps it changed, and says so as before: what is on differs from it.
+  await a.click('#pf-skill\\:release-notes');
+  same('after a tick of his own Incident is still changed, its mark saying what is on differs from it, not that it was edited',
+    [await titleWords(), await a.run(`document.querySelector('.profile-row.selected .profile-changed-word')?.title`)], ['Incident · changed', changedCard]);
+  await shotOpen('profile-changed-after-tick-1316-light', [1316, 819], 'light');
+  await a.click('#pf-skill\\:release-notes');
+  await fullSize(a);
+  await a.click('#status-profile');
+  same('the status bar’s menu names Incident as changed, unticked, a click away from switching back', [await a.all('.pf-menu-item .pf-menu-name', 'e.textContent'), await a.exists('.pf-menu-item[aria-checked="true"]')],
+    [['Incident · changed', 'Edit profiles…'], false]);
+  await a.click('#status-profile');
+  await a.click('#nav-harnesses');
+  same('Harnesses names it the same way: Profile: Incident · changed.', [(await a.text('.tools-note > span'))?.includes('Profile: Incident · changed.'), await a.text('#harnesses-profile')], [true, 'Incident · changed']);
+  await withSidebarOpen(a, ...SMALLEST, async () => same('at 860 with sidebar open, Profile: and Incident · changed. stay on one line',
+    await a.run(`document.querySelector('.tools-note-profile')?.getClientRects().length`), 1));
+  await shotOpen('profile-changed-harnesses-860-light', SMALLEST, 'light');
+  await fullSize(a);
   // On History, the switch's Undo turns back only what is still as the switch left it: standup, turned on since, stays.
   await a.click('#nav-history');
   await a.run(`document.querySelector('.history-row[data-kind="profile"] .history-actions button').click()`); await a.settle();
   check('its Undo from History says what it did with single-mention reload advice and Copy', /^Undone: 2 items turned on\..*Copilot CLI: \/skills reload.*Codex picks it up/.test(await a.text('.band-done') ?? '') && !/In Copilot CLI, type \/skills reload\./.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-copy-copilot-cli'), await a.text('.bands'));
   same('…and every skill is on again', skillsOn.map(key => folders(key).every(Boolean)), [true, true, true, true]);
+  same('with that switch undone, and each one before it, none is the one last switched to: No profile', (await a.text('#status-profile'))?.trim(), 'No profile');
+  // With none switched to, the older sentence: two 35-letter profiles matching notes + standup (release-notes and review off by
+  // hand) and ended by turning review on, first one alone, then both: each name gives way while its words stay whole.
+  {
+    const oneName = 'QuarterlyWorkspaceManagementReviews', twoName = 'ProductionWorkspaceDeploymentGuides';
+    await openKind(a, 'skills');
+    for (const key of ['release-notes', 'review']) await a.click(`#${rowPart('switch', 'skills', key)}`);
+    for (const [name, sentence] of [[oneName, `${oneName} stopped being the profile in use.`], [twoName, `${oneName} and ${twoName} stopped being the profiles in use.`]]) {
+      await a.click('#nav-profiles');
+      await newProfile(a, name);
+      await a.click('#pf-skill\\:notes');
+      await a.click('#pf-skill\\:standup');
+      await openKind(a, 'skills');
+      await a.click(`#${rowPart('switch', 'skills', 'review')}`);
+      await withSidebarOpen(a, ...SMALLEST, async () => {
+        const whole = await profileSentenceWhole(a, sentence, { allowShortName: true });
+        check(`at 860 with sidebar open, ${name === oneName ? 'a 35-letter profile name gives way' : 'two 35-letter profile names give way'} while the rest of "${sentence.slice(-34)}" stays whole, with hover title`,
+          whole.ok && whole.nameShortened, whole);
+        await a.click('#problems-show-all');
+        check('Show all reveals the whole sentence', (await a.text('#header .result-whole .band-text') ?? '').includes(sentence), await a.text('#header .result-whole .band-text'));
+        await a.click('#problems-show-all');
+      });
+      await fullSize(a);
+      await a.click('#outcome-undo');
+    }
+    await a.click('#nav-profiles');
+    for (const name of [oneName, twoName]) {
+      await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes(${JSON.stringify(name)})).click()`);
+      await a.settle();
+      await a.click('#profile-delete');
+      await a.click('#profile-delete-confirm');
+    }
+    await openKind(a, 'skills');
+    for (const key of ['release-notes', 'review']) await a.click(`#${rowPart('switch', 'skills', key)}`);
+    same('…and with them gone and both turned back on, every skill is on as before', skillsOn.map(key => folders(key).every(Boolean)), [true, true, true, true]);
+  }
   // Tools: Copilot CLI unticked in Incident (last, since from then on Incident holds its own keep-outs). The header's clause and
   // a Changes tools row say notes goes out of Copilot CLI; the switch takes notes out of Copilot CLI alone, Claude Code's and Codex's
   // folders as they were; Undo switch puts it back.
@@ -4400,8 +4539,8 @@ async function practiceFlow() {
   for (let tries = 0; tries < 50 && !(await a.exists(sparkSwitch)); tries++) await wait(100);
   const dirReason = 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).';
   same('a plugin whose box is disabled shows its short box line on the row and a disabled switch described and hovered by the box’s reason',
-    await a.run(`(() => { const row = document.querySelector('.harness-plugin:has(${sparkSwitch})'); const sw = row?.querySelector(${JSON.stringify(sparkSwitch)}); return [row?.querySelector('.harness-plugin-state')?.textContent?.trim() ?? '', sw?.disabled ?? null, sw?.getAttribute('aria-checked') ?? null, sw?.getAttribute('aria-label') ?? null, sw?.getAttribute('aria-description') ?? null, sw?.title ?? null]; })()`),
-    ['Can’t be taken out here', true, 'true', 'spark in Claude Code', dirReason, dirReason]);
+    await a.run(`(() => { const row = document.querySelector('.harness-plugin:has(${sparkSwitch})'); const sw = row?.querySelector(${JSON.stringify(sparkSwitch)}); const st = row?.querySelector('.harness-plugin-state'); return [st?.textContent?.trim() ?? '', st?.title ?? null, sw?.disabled ?? null, sw?.getAttribute('aria-checked') ?? null, sw?.getAttribute('aria-label') ?? null, sw?.getAttribute('aria-description') ?? null, sw?.title ?? null]; })()`),
+    ['Can’t be turned off here', dirReason, true, 'true', 'spark in Claude Code', dirReason, dirReason]);
   writeFileSync(dirRecord, dirBefore);
   rmSync(join(practice, '.claude/plugins/cache/anthropic-plugin-directory'), { recursive: true, force: true });
   await a.click('#header-refresh');
@@ -4423,8 +4562,10 @@ async function practiceFlow() {
   writeFileSync(claudeStub, `#!/bin/sh\n[ "$*" = "plugin update issue-tracker@ck-test-market --scope user" ] || exit 9\nmkdir -p '${newCopy}/skills/triage' && cp '${join(market, 'plugins/issue-tracker/skills/triage/SKILL.md')}' '${newCopy}/skills/triage/'\nprintf '{"version":2,"plugins":{"issue-tracker@ck-test-market":[{"scope":"user","installPath":"${newCopy}","version":"2.0.0"}]}}' > "$HOME/.claude/plugins/installed_plugins.json"\necho 'Plugin "issue-tracker" updated from 1.9.0 to 2.0.0 for scope user.'\n`);
   await a.click('#pupdate-0-issue-tracker');
   for (let tries = 0; tries < 30 && !/Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? ''); tries++) await wait(100);
-  check('the click updates it at once, read back from Claude Code’s record, says it can’t be undone, and offers no Undo', /Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? '') && !/Marketplace has/.test(await a.text('.plugin-panel') ?? '')
-    && /updated to 2\.0\.0 in Claude Code, which can’t be undone/i.test(await a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`)) && !(await a.exists('#plugins-undo')), [await a.text('.plugin-panel'), await a.run(`document.querySelector('#announcement')?.dataset.text`), await a.text('.bands')]);
+  const announcementInSight = () => a.run(`(() => { const el = document.querySelector('#announcement'); if (!el) return null; const r = el.getBoundingClientRect(); return { text: el.dataset.text ?? '', visible: !el.classList.contains('visually-hidden') && r.width > 0 && r.height > 0 }; })()`);
+  const updateSaid = await announcementInSight();
+  check('the click updates it at once, read back from Claude Code’s record, says it can’t be undone in sight, and offers no Undo', /Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? '') && !/Marketplace has/.test(await a.text('.plugin-panel') ?? '')
+    && !!updateSaid?.visible && /updated to 2\.0\.0 in Claude Code, which can’t be undone/i.test(updateSaid.text) && !(await a.exists('#plugins-undo')) && !(await a.exists('.plugin-panel .plugin-click')), [await a.text('.plugin-panel'), updateSaid, await a.text('.bands')]);
   // The copy changes at the same version (2.0.0): once read again, the page says so and offers Update. Claude Code's own
   // update keeps its copy ("already at the latest"), so Update uninstalls it (keeping its data: --keep-data) and installs it again, and compares after.
   const triage = join(newCopy, 'skills/triage/SKILL.md'), record = readFileSync(join(practice, '.claude/plugins/installed_plugins.json'), 'utf8');
@@ -4437,8 +4578,9 @@ async function practiceFlow() {
   same('a copy that differs at the same version says so and offers Update', [/Installed · 2\.0\.0 · differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? ''), await a.run(`document.querySelector('#pbox-0-issue-tracker-claude-cli')?.dataset.state`), await a.text('#pupdate-0-issue-tracker')], [true, 'outdated', 'Update in Claude Code']);
   await a.click('#pupdate-0-issue-tracker');
   for (let tries = 0; tries < 30 && /differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? 'differs from the marketplace’s copy'); tries++) await wait(100);
-  check('Update reinstalls it where Claude Code keeps its copy, and the result says so', !/differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? '') && readFileSync(triage, 'utf8') === readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8')
-    && /reinstalled from the marketplace’s copy of 2\.0\.0 in Claude Code/i.test(await a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`)), [await a.text('.plugin-panel'), await a.run(`document.querySelector('#announcement')?.dataset.text`)]);
+  const reinstallSaid = await announcementInSight();
+  check('Update reinstalls it where Claude Code keeps its copy, and the result says so in sight', !/differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? '') && readFileSync(triage, 'utf8') === readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8')
+    && !!reinstallSaid?.visible && /reinstalled from the marketplace’s copy of 2\.0\.0 in Claude Code/i.test(reinstallSaid.text), [await a.text('.plugin-panel'), reinstallSaid]);
   writeFileSync(claudeStub, stubBefore);
   // Claude Code lets it go outside the app; coming back to Plugins reads the install states, and the copies, again.
   writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), '{"version":2,"plugins":{}}');
@@ -4468,7 +4610,7 @@ async function practiceFlow() {
     && !holds.includes('No tool reads a plugin’s own instruction file into a session.')
     && await a.text('#plugin-instructions-info-card') === 'The model sees one only when something tells it to read the file, such as one of the plugin’s skills.'
     && /Instruction files \(1\), read by no tool[\s\S]*AGENTS\.md/.test(holds)
-    && /Hooks that can add text \(2\)\s*These run when a session starts or you send a prompt \(in Codex, once you trust them\); what they add is known only when they run\.\s*When a session starts\s*echo '\{"hookSpecificOutput"[^]*?When a session starts\s*node \$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/remind\.mjs --days 2/.test(holds)
+    && /Hooks that can add text \(2\)\s*These run when a session starts \(in Codex, once you trust them\); what they add is known only when they run\.\s*When a session starts\s*echo '\{"hookSpecificOutput"[^]*?When a session starts\s*node \$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/remind\.mjs --days 2/.test(holds)
     && /Other hooks \(1\)\s*Before a tool runs\s*echo checked/.test(holds) && /Session text\s*(comes from|is limited|waits for trust)/.test(holds)
     && JSON.stringify(eventTitles) === JSON.stringify([['When a session starts', 'SessionStart'], ['When a session starts', 'SessionStart'], ['Before a tool runs', 'PreToolUse']]), { holds, eventTitles });
   // It holds more than its instruction file, so its panel doesn't say that installing it won't make the tools read its files.
@@ -10039,8 +10181,8 @@ esac
     [['true', false, 'installed'], ['mixed', false, 'items'], true]);
   await a.click(box('pi-cli'));
   await done();
-  same('unticked, its items leave Pi alone (not triage, his own now), it is recorded, the row says so, and the switch shows partial', [inPi(), installed(), entry()?.except, await boxIs('pi-cli'), await a.text('.plugin-panel .plugin-click'), await switchIs('#pswitch-page-0-issue-tracker')],
-    [[true, false], true, ['pi-cli'], ['false', false, 'absent'], 'Its items taken out of Pi', 'true partial']);
+  same('unticked, its items leave Pi alone (not triage, his own now), it is recorded, the header says so once, and the switch shows partial', [inPi(), installed(), entry()?.except, await boxIs('pi-cli'), await a.text('.plugin-panel .plugin-click'), await a.text('#plugins-result .toolbar-result-text'), await switchIs('#pswitch-page-0-issue-tracker')],
+    [[true, false], true, ['pi-cli'], ['false', false, 'absent'], null, 'Its items taken out of Pi.', 'true partial']);
   // Its items are put back by Central Knot, through no tool's command: the tooltip ends its sentence where nothing follows.
   const undoTitle = await a.run(`document.querySelector('#plugins-undo')?.title ?? ''`);
   check('the Undo of a click in Pi alone says a whole sentence, nothing empty after a colon', /^Reverses what changed for issue-tracker\.( |$)/.test(undoTitle) && !/: \./.test(undoTitle), undoTitle);
@@ -10090,7 +10232,7 @@ esac
   same('Off loses nothing: its data folder, saved options and install record are as they were', kept(), keptBefore);
   const keptLine = '.plugin-tool[data-tool="claude-cli"] .plugin-tool-state';
   same('the hover on “Off, kept installed” says what is kept', await a.run(`document.querySelector('${keptLine}').title`), 'Off in Claude Code: still installed at 2.0.0, with its data and settings.');
-  check('its result says it was turned off, and nothing Undo can’t put back', /^Turned off in Claude Code$/.test(await a.text('.plugin-panel .plugin-click') ?? '') && !/Undo installs/.test(await a.text('#plugins-result') ?? ''),
+  check('its result is said once in the header as turned off, with no panel duplicate and nothing Undo can’t put back', await a.text('.plugin-panel .plugin-click') === null && /turned off in Claude Code\./i.test(await a.text('#plugins-result .toolbar-result-text') ?? '') && !/Undo installs/.test(await a.text('#plugins-result') ?? ''),
     [await a.text('.plugin-panel .plugin-click'), await a.text('#plugins-result')]);
   await keptShots('plugin-keep-off');
   if (shots) {
@@ -18920,13 +19062,14 @@ echo "$*" >> "$HOME/claude-calls.txt"
   for (let tries = 0; tries < 100 && !(await a.exists('#popen-0-superpowers')); tries++) await wait(100);
   await a.click('#popen-0-superpowers');
   for (let tries = 0; tries < 100 && await a.run(`document.querySelector('#pbox-0-superpowers-codex-cli')?.dataset.state`) !== 'installed'; tries++) await wait(100);
-  same('on superpowers’ page, In each tool has no Hooks or Session text line for Codex, which runs none of its hooks', await a.run(`[...document.querySelectorAll('.plugin-outcome-row')]
-    .map(row => [row.querySelector('.plugin-outcome-tools strong').textContent, [...row.querySelectorAll('.plugin-outcome-kind')].map(kind => kind.textContent)])`),
-  [['Claude Code', ['Skills', 'Hooks', 'Session text']], ['Copilot CLI', ['Skills', 'Hooks', 'Session text']], ['Codex', ['Skills']]]);
+  same('on superpowers’ page, In each tool starts shut naming Copilot CLI’s limits (Copilot CLI first) and has no Hooks or Session text line for Codex',
+    [await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), await a.text('#plugin-outcomes-toggle'), await a.text('.plugin-tool[data-tool="codex-cli"] .plugin-tool-state'),
+      await a.run(`[...document.querySelectorAll('.plugin-outcome-row')].map(row => [row.querySelector('.plugin-outcome-tools strong').textContent, [...row.querySelectorAll('.plugin-outcome-kind')].map(kind => kind.textContent)])`)],
+    [false, 'In each tool · limits in Copilot CLI', 'Installed · 7.0.2', [['Copilot CLI', ['Skills', 'Hooks', 'Session text']], ['Claude Code', ['Skills', 'Hooks', 'Session text']], ['Codex', ['Skills']]]]);
   // Its hooks group says the same of its hook: Codex is named as taking no text from it, and nothing is said of trusting it there.
   same('on superpowers’ page, the line under its hooks that can add text names Codex as taking text from none, with no wait for trust', await a.run(`[...document.querySelectorAll('.plugin-group')]
     .find(group => group.querySelector('h4')?.textContent.startsWith('Hooks that can add text'))?.querySelector('.plugin-group-note')?.textContent`),
-  'These run when a session starts or you send a prompt; what they add is known only when they run. In Codex, none of them adds text.');
+  'These run when a session starts; what they add is known only when they run. In Codex, none of them adds text.');
   // Nothing the strips offer wrote a file: in the tools' folders, only Claude Code's settings changed, where its disable turned it off.
   const after = toolFolders();
   same('in the tools’ folders only the disable’s settings changed', Object.entries(after).flatMap(([folder, files]) => Object.keys({ ...files, ...before[folder] }).filter(path => files[path] !== before[folder][path]).map(path => join(folder, path))),
@@ -18935,10 +19078,11 @@ echo "$*" >> "$HOME/claude-calls.txt"
   await a.click('#plugin-back');
   await a.click('#popen-0-stop-hooks');
   for (let tries = 0; tries < 100 && !(await a.exists('.plugin-outcome-row')); tries++) await wait(100);
-  same('a plugin with only Stop hooks: In each tool says none is confirmed to run in Copilot CLI or Codex', await a.run(`[...document.querySelectorAll('.plugin-outcome-row')]
-    .map(row => [row.querySelector('.plugin-outcome-tools strong').textContent, [...row.querySelectorAll('.plugin-outcome-item')].map(item => item.textContent)])`),
-  [['Claude Code', ['Hooks run; a hook that fails does not stop the install']], ['Copilot CLI', ['Hooks may not run: not confirmed in Copilot CLI']], ['Codex', ['Hooks may not run: not confirmed in Codex']]]);
-  await pictures('stop-hooks-each-tool', '.plugin-outcome-list', atTwo, true);
+  same('a plugin with only Stop hooks: In each tool starts shut naming Copilot CLI and Codex (limited tools first) and says none is confirmed to run there',
+    [await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), await a.text('#plugin-outcomes-toggle'),
+      await a.run(`[...document.querySelectorAll('.plugin-outcome-row')].map(row => [row.querySelector('.plugin-outcome-tools strong').textContent, [...row.querySelectorAll('.plugin-outcome-item')].map(item => item.textContent)])`)],
+    [false, 'In each tool · limits in Copilot CLI and Codex', [['Copilot CLI', ['Hooks may not run: not confirmed in Copilot CLI']], ['Codex', ['Hooks may not run: not confirmed in Codex']], ['Claude Code', ['Hooks run; a hook that fails does not stop the install']]]]);
+  if (shots) { await a.click('#plugin-outcomes-toggle'); await pictures('stop-hooks-each-tool', '.plugin-outcome-list', atTwo, true); }
   // The Overview's "—" for Pi's and OpenCode's plugins says what their plugin pages do there: their items go in, not the plugin.
   await a.click('#nav-overview');
   for (let tries = 0; tries < 100 && !(await a.exists('#overview-tools-key')); tries++) await wait(100);
@@ -19445,8 +19589,8 @@ async function hookRunFlow() {
   await waitFor(`!!document.querySelector('#session-copilot-cli button[data-hook-run]')`);
   const copilotPluginRow = await rowOf('session-copilot-cli', 'copilot-plugin-hook');
   same('Copilot CLI installed plugin hook keeps View source alone and no Run it', [!!copilotPluginRow?.srcId, copilotPluginRow?.runId], [true, null]);
-  same('Copilot CLI strip with runnable own hook and non-runnable plugin hook uses standing line',
-    await a.text('#session-copilot-cli .session-run-warn'), runWarn);
+  same('Copilot CLI strip with runnable own hook and non-runnable plugin hook omits the plugin standing line',
+    await a.run(`(() => { const w = document.querySelectorAll('#session-copilot-cli .session-run-warn'); return [w.length, !w[0]?.textContent?.includes('Plugin')]; })()`), [1, true]);
   const copRes = await runAndWait('session-copilot-cli', 'copilot-plain.sh');
   check('Copilot CLI plain stdout shows ignored sentence with quiet meta and Show all it printed fold',
     /^Copilot CLI would ignore this: no top-level additionalContext\. as Copilot CLI, run in ~, /.test(copRes) && copRes.includes('Show all it printed'), copRes);
@@ -20849,38 +20993,38 @@ async function profilePluginsFlow() {
     [await a.all('.history-row[data-kind="profile"] .history-about', 'e.textContent'), await a.all('.history-row[data-kind="profile"] .history-done', 'e.textContent')],
     [['Switched to Work: 1 item turned on.', 'Switched to Quiet: 1 item turned off.', 'Undid the switch to Quiet: 1 item turned on.', 'Switched to Quiet: 1 item turned off.'], ['Undone']]);
 
-  // Turning a plugin item off from the Library while Work is in use says Work stopped being the profile in use; its Undo restores Work with no profile sentence.
+  // Turning a plugin item off from the Library while Work, switched to from the bar just now, is in use says Work · changed; its Undo restores Work with no profile sentence.
   const triageKey = 'triage';
   await openKind(a, 'skills');
   for (let tries = 0; tries < 60 && !(await a.exists(byId(rowPart('switch', 'skills', triageKey)))); tries++) await wait(100);
   await a.click(byId(rowPart('switch', 'skills', triageKey)));
   await done();
   const pluginRowText = await headerResultWords(a);
-  check('a plugin item’s row switch on the Library ending Work says so and the bar reads No profile',
-    pluginRowText.endsWith('Work stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'No profile',
+  check('a plugin item’s row switch on the Library ending Work says so and the bar reads Work · changed',
+    pluginRowText.endsWith(' Work · changed') && (await a.text('#status-profile'))?.trim() === 'Work · changed',
     [pluginRowText, await a.text('#status-profile')]);
   await a.click('#outcome-undo');
   await done();
   same('its Undo restores Work with no profile sentence',
-    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test(await headerResultWords(a))],
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile|· changed/.test(await headerResultWords(a))],
     ['Work', false]);
   await a.click(byId(rowPart('open', 'skills', triageKey)));
   await a.click(byId(rowPart('enable', 'skills', triageKey, 'codex-cli')));
   await done();
   const pluginToolText = await headerResultWords(a);
-  check('a plugin item’s tool switch in an opened row ending Work says so and the bar reads No profile',
-    pluginToolText.endsWith('Work stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'No profile',
+  check('a plugin item’s tool switch in an opened row ending Work says so and the bar reads Work · changed',
+    pluginToolText.endsWith(' Work · changed') && (await a.text('#status-profile'))?.trim() === 'Work · changed',
     [pluginToolText, await a.text('#status-profile')]);
   await a.click('#outcome-undo-plugin');
   await done();
   await a.click(byId(rowPart('open', 'skills', triageKey)));
   same('undoing the plugin item’s tool switch restores Work and Codex’s config byte for byte with no profile sentence',
-    [readNow(config), (await a.text('#status-profile'))?.trim(), /stopped being the profile/.test(await headerResultWords(a))],
+    [readNow(config), (await a.text('#status-profile'))?.trim(), /stopped being the profile|· changed/.test(await headerResultWords(a))],
     [codexBefore, 'Work', false]);
 
-  // Plugin acts ending Work say "Work stopped being the profile in use." on Row 2 of #plugins-result (or under a Library plugin line) and in the spoken announcement.
+  // Plugin acts ending Work say "Work · changed" on Row 2 of #plugins-result (or under a Library plugin line) and in the spoken announcement.
   const spoken = () => a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`);
-  const pluginProfile = () => a.run(`document.querySelector('#header .band-profile')?.textContent ?? ''`);
+  const pluginProfile = () => a.run(`${PROFILE_WORDS}(document.querySelector('#header .band-profile')) ?? ''`);
   const waitEnabled = async sel => {
     for (let tries = 0; tries < 80 && !(await a.exists(`${sel}:not([disabled])`)); tries++) await wait(100);
     if (!(await a.exists(`${sel}:not([disabled])`))) throw new Error(`Waited for ${sel}: ${(await a.exists(sel)) ? 'drawn and disabled' : 'absent'}`);
@@ -20891,9 +21035,9 @@ async function profilePluginsFlow() {
   await waitEnabled('#pbox-0-issue-tracker-codex-cli');
   await a.click('#pbox-0-issue-tracker-codex-cli');
   await done();
-  same('unticking Codex’s box ends Work: #plugins-result row 2 and spoken text say Work stopped being the profile in use',
-    [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await pluginProfile(), (await spoken()).includes('Work stopped being the profile in use.')],
-    ['No profile', true, 'Work stopped being the profile in use.', true]);
+  same('unticking Codex’s box ends Work: #plugins-result row 2 and spoken text say Work · changed',
+    [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await pluginProfile(), (await spoken()).includes('Work · changed')],
+    ['Work · changed', true, 'Work · changed', true]);
   same('plugins result line 1 and profile line match the item list’s 12px ink with no 3em name gap',
     await a.run(`(() => {
       const r = getComputedStyle(document.querySelector('#plugins-result'));
@@ -20905,14 +21049,14 @@ async function profilePluginsFlow() {
   for (const [width, height] of [SMALLEST, [1316, 819]]) {
     await sizeTo(a, width, height);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
-    const whole = await profileSentenceWhole(a, 'Work stopped being the profile in use.', { undoId: '#plugins-undo', dismissId: '#report-dismiss' });
+    const whole = await profileSentenceWhole(a, 'Work · changed', { undoId: '#plugins-undo', dismissId: '#report-dismiss' });
     check(`unticking Codex’s box shows the profile sentence whole at ${width} with sidebar open, keeping 48px header`, whole.ok, whole);
   }
   await fullSize(a);
   await a.click('#plugins-undo');
   await done();
   same('its Undo restores Work with no profile sentence',
-    [(await a.text('#status-profile'))?.trim(), await pluginProfile(), /stopped being the profile/.test(await spoken())],
+    [(await a.text('#status-profile'))?.trim(), await pluginProfile(), /stopped being the profile|· changed/.test(await spoken())],
     ['Work', '', false]);
   // Tick Codex's box while Work is out of use (brings Work in: says nothing), then plain Undo ends Work and still draws #plugins-result.
   await waitEnabled('#pbox-0-issue-tracker-codex-cli');
@@ -20923,17 +21067,17 @@ async function profilePluginsFlow() {
   await a.click('#pbox-0-issue-tracker-codex-cli');
   await done();
   same('ticking Codex’s box brings Work into use with no profile sentence',
-    [(await a.text('#status-profile'))?.trim(), await pluginProfile(), /stopped being the profile/.test(await spoken())],
+    [(await a.text('#status-profile'))?.trim(), await pluginProfile(), /stopped being the profile|· changed/.test(await spoken())],
     ['Work', '', false]);
   await a.click('#plugins-undo');
   await done();
-  same('plain Undo ending Work draws #plugins-result row 2 and speaks Work stopped being the profile in use',
-    [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await a.exists('#plugins-undo'), await pluginProfile(), (await spoken()).includes('Work stopped being the profile in use.')],
-    ['No profile', true, false, 'Work stopped being the profile in use.', true]);
+  same('plain Undo ending Work draws #plugins-result row 2 and speaks Work · changed',
+    [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await a.exists('#plugins-undo'), await pluginProfile(), (await spoken()).includes('Work · changed')],
+    ['Work · changed', true, false, 'Work · changed', true]);
   for (const [width, height] of [SMALLEST, [1316, 819]]) {
     await sizeTo(a, width, height);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
-    const whole = await profileSentenceWhole(a, 'Work stopped being the profile in use.', { undoId: null, dismissId: '#report-dismiss' });
+    const whole = await profileSentenceWhole(a, 'Work · changed', { undoId: null, dismissId: '#report-dismiss' });
     check(`plain Undo ending Work shows the profile sentence whole at ${width} with sidebar open, keeping 48px header`, whole.ok, whole);
   }
   await fullSize(a);
@@ -20949,7 +21093,7 @@ async function profilePluginsFlow() {
   await a.click('#pbox-0-issue-tracker-codex-cli');
   await done();
   same('unticking then re-ticking Codex’s box in one run leaves Work in use with no profile sentence',
-    [(await a.text('#status-profile'))?.trim(), await pluginProfile(), /stopped being the profile/.test(await spoken())],
+    [(await a.text('#status-profile'))?.trim(), await pluginProfile(), /stopped being the profile|· changed/.test(await spoken())],
     ['Work', '', false]);
   // A skill's switch under the plugin ending Work says so on #plugins-result row 2 and in spoken text; its Undo restores Work with no sentence.
   const triageSkillSwitch = '#pskill-0-issue-tracker-triage-codex-cli';
@@ -20957,12 +21101,12 @@ async function profilePluginsFlow() {
   await a.click(triageSkillSwitch);
   await done();
   same('turning triage off via its plugin-page switch ends Work and says so on #plugins-result row 2 and in spoken text',
-    [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await pluginProfile(), (await spoken()).includes('Work stopped being the profile in use.')],
-    ['No profile', true, 'Work stopped being the profile in use.', true]);
+    [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await pluginProfile(), (await spoken()).includes('Work · changed')],
+    ['Work · changed', true, 'Work · changed', true]);
   await a.click('#plugins-undo');
   await done();
   same('its Undo restores Work with no profile sentence',
-    [(await a.text('#status-profile'))?.trim(), await pluginProfile(), /stopped being the profile/.test(await spoken())],
+    [(await a.text('#status-profile'))?.trim(), await pluginProfile(), /stopped being the profile|· changed/.test(await spoken())],
     ['Work', '', false]);
   // One successful click leaving Work in use says nothing: install issue-tracker in Copilot CLI while Work already ticks triage & issues.
   const snapProfiles = readNow(join(home, '.central-knot/profiles.json')), snapPlugins = readNow(join(home, '.central-knot/plugins.json'));
@@ -20973,7 +21117,7 @@ async function profilePluginsFlow() {
   await a.click('#pbox-0-issue-tracker-copilot-cli');
   await done();
   same('one successful click leaving Work in use says nothing about any profile',
-    [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await pluginProfile(), /stopped being the profile/.test(await spoken())],
+    [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await pluginProfile(), /stopped being the profile|· changed/.test(await spoken())],
     ['Work', true, '', false]);
   // Turn the plugin on (let-in) on the Library’s plugin line ending Work: live Copilot CLI document-tools kept off, so Work is in use until its line turns it on.
   const pluginsNow = JSON.parse(readNow(join(home, '.central-knot/plugins.json')));
@@ -20995,19 +21139,19 @@ async function profilePluginsFlow() {
   await a.click(letInBtn);
   await done();
   for (let tries = 0; tries < 60 && !(await a.exists('[data-result="copilot-cli:skill:pdf-reader"]')); tries++) await wait(100);
-  const lineProfile = () => a.run(`document.querySelector('[data-result="copilot-cli:skill:pdf-reader"]')?.parentElement?.querySelector('.band-profile')?.textContent ?? ''`);
+  const lineProfile = () => a.run(`${PROFILE_WORDS}(document.querySelector('[data-result="copilot-cli:skill:pdf-reader"]')?.parentElement?.querySelector('.band-profile')) ?? ''`);
   const lineStatusCheck = await a.run(`(() => {
     const el = document.querySelector('#announcement');
     const visible = [...el.children].filter(k => !k.classList.contains('visually-hidden')).map(k => k.textContent).join('');
-    return [visible.startsWith('Turned on document-tools in Copilot CLI.'), /stopped being the profile/.test(visible), /stopped being the profile/.test(el.title), (el.textContent ?? '').includes('Work stopped being the profile in use.')];
+    return [visible.startsWith('Turned on document-tools in Copilot CLI.'), /· changed/.test(visible), /· changed/.test(el.title), (el.textContent ?? '').includes('Work · changed')];
   })()`);
   same('Turn the plugin on on the Library’s plugin line ends Work: profile line draws under the line’s result, spoken text carries the whole result, and status bar keeps prior wording',
-    [(await a.text('#status-profile'))?.trim(), await lineProfile(), (await spoken()).includes('Work stopped being the profile in use.'), ...lineStatusCheck],
-    ['No profile', 'Work stopped being the profile in use.', true, true, false, false, true]);
+    [(await a.text('#status-profile'))?.trim(), await lineProfile(), (await spoken()).includes('Work · changed'), ...lineStatusCheck],
+    ['Work · changed', 'Work · changed', true, true, false, false, true]);
   await a.click(byId(rowPart('line-undo', 'skills', pdfKey, 'copilot-cli')));
   await done();
   same('its line Undo restores Work with no profile sentence',
-    [(await a.text('#status-profile'))?.trim(), await lineProfile(), /stopped being the profile/.test(await spoken())],
+    [(await a.text('#status-profile'))?.trim(), await lineProfile(), /stopped being the profile|· changed/.test(await spoken())],
     ['Work', '', false]);
   // Clean up temporary live Copilot CLI files so what follows starts from the exact same home state.
   rmSync(join(home, '.copilot'), { recursive: true, force: true });
@@ -21029,7 +21173,7 @@ async function profilePluginsFlow() {
   same('with the plugin off in Codex, the header says why Work can’t switch, with the press, what it does in (?) and its hover; the rows say why, with no press of their own; no Switching head',
     [await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text('.profile-header p'), await a.text('#profile-preview-info-card'), await a.exists('#profile-switch'), await a.text('#profile-turn-on'),
       await a.run(`document.querySelector('#profile-turn-on').title`), await a.exists('[id^="pf-turn-on-"], [id^="pf-plugin-"]'), await a.text('.pf-head .pf-state'), (await a.text('#status-profile'))?.trim()],
-    [['Its plugin is off in Codex.'], 'Can’t switch · issue-tracker is off in Codex', pressSaid, false, press, pressSaid, false, '', 'No profile']);
+    [['Its plugin is off in Codex.'], 'Can’t switch · issue-tracker is off in Codex', pressSaid, false, press, pressSaid, false, '', 'Work · changed']);
   if (await a.exists('#profile-preview-info')) await checkCard(a, 'profile-preview-info', pressSaid, 'held header (?) card says what the press does');
   else check('held header (?) mark exists', false);
   await pictures('profile-plugin-off');
@@ -21517,7 +21661,7 @@ async function profilePluginsFlow() {
       await b.text('.profile-header p'), await b.text('#profile-preview-info-card'), (await b.text('#status-profile'))?.trim()],
     ['mine', undefined, quietFiles.codex, quietFiles.claude, true, 'In use · 2 on', 'In use · 2 items on. Plugin items stay as they are.', 'Old work and Mine']);
 
-  // Short-list item 1: after uninstall + external disabledMcpServers, background pass updates the native menu so Old work shows Switching (not In use) and clicking it clears the rule.
+  // Short-list item 1: after uninstall + external disabledMcpServers, background pass updates the native menu so Old work, the one last switched to, shows changed and Switching (not In use) and clicking it clears the rule.
   writeFileSync(join(oldHome, '.copilot/config.json'), JSON.stringify({ installedPlugins: [] }));
   writeFileSync(oldCopilotSettings, `${JSON.stringify({ ...JSON.parse(readNow(oldCopilotSettings)), disabledMcpServers: ['issues'] }, null, 2)}\n`);
   if (b.inspect) {
@@ -21525,10 +21669,10 @@ async function profilePluginsFlow() {
     try {
       let clicked = 0;
       for (let tries = 0; tries < 60 && !clicked; tries++) {
-        clicked = await menu.clickMenu('Old work · Switching turns 1 item on. Plugin items stay as they are.', false);
+        clicked = await menu.clickMenu('Old work · changed · Switching turns 1 item on. Plugin items stay as they are.', false);
         if (!clicked) await wait(100);
       }
-      check('native menu shows Old work turning 1 item on (not In use) after external disabledMcpServers, and clicking it switches', clicked >= 1);
+      check('native menu shows Old work, the one last switched to, changed and turning 1 item on (not In use) after external disabledMcpServers, and clicking it switches', clicked >= 1);
     } finally { menu.close(); }
     for (let tries = 0; tries < 80 && JSON.parse(readNow(oldCopilotSettings)).disabledMcpServers; tries++) await wait(100);
     await bDone();
@@ -22217,9 +22361,9 @@ async function sameNamePluginFlow() {
   same('with no server of his by that name, Off reads as today and brings Skill only into use', [await said(), (await a.text('#status-profile'))?.trim()], ['issues (MCP server) is off in Copilot CLI and Codex.', 'Skill only']);
   await a.click('#outcome-dismiss');
   await a.click(serverSwitch); await done();
-  same('with no server of his by that name, On reads as today and says Skill only stopped being the profile in use',
-    [await said(), await a.text('#header .band-profile'), (await a.text('#status-profile'))?.trim()],
-    ['issues (MCP server) is on in Copilot CLI and Codex.', 'Skill only stopped being the profile in use.', 'No profile']);
+  same('with no server of his by that name, On reads as today and says Skill only, the profile last switched to, is changed',
+    [await said(), await a.run(`${PROFILE_WORDS}(document.querySelector('#header .band-profile'))`), (await a.text('#status-profile'))?.trim()],
+    ['issues (MCP server) is on in Copilot CLI and Codex.', 'Skill only · changed', 'Skill only · changed']);
   // Two plugin items' switches one right after the other, with a hand edit of a skill of his and a History read between them
   // (worked example 9 of the click-reads step): what is written and said is as before that step.
   const notes = join(home, '.codex/skills/notes/SKILL.md');
@@ -24907,8 +25051,9 @@ async function skillFileFlow() {
 /**
  * A plugin's own page says less and folds the rest: Your tools (?) clearing every pbox-* (without Cowork when Claude desktop is
  * absent), kept-out absent boxes reading Not installed whose ticks place items, standing words gone with Claude Code's whole-plugin
- * rule on Skills (N) (?), Readme and In each tool folds opening by keyboard, keeping state across redraws, and clearing on any
- * leave (including a sidebar trip to Overview and back; In each tool open at once for limited/failed only), and instructions-only
+ * rule on Skills (N) (?), Readme and In each tool folds starting shut (with In each tool naming limited tools in its summary),
+ * opening by keyboard, keeping state across redraws, and clearing on any leave (including a sidebar trip to Overview and back),
+ * MCP server entries opening pretty-printed in place, grid-aligned wrapped tool boxes, hidden narrow marketplace strip on a plugin's page, and instructions-only
  * advice without a jump. (Instruction files heading/card: practiceFlow; Cowork card: fewToolsFlow; kept-off data: pluginSwitchFlow.)
  */
 async function pluginPageSaysLessFlow() {
@@ -24924,6 +25069,7 @@ async function pluginPageSaysLessFlow() {
       { name: 'limited-kit', source: './plugins/limited-kit', version: '1.0.0', description: 'A command with a Codex limit.' },
       { name: 'failed-kit', source: './plugins/failed-kit', version: '1.0.0', description: 'An MCP server using CLAUDE_PLUGIN_ROOT.' },
       { name: 'agent-kit', source: './plugins/agent-kit', version: '1.0.0', description: 'An agent Codex ignores.' },
+      { name: 'dir-kit', source: { source: 'git-subdir', url: 'https://127.0.0.1:1/example/dir-kit.git', path: 'plugins/dir-kit' }, version: '1.0.0', description: 'Installed from the Anthropic Directory.' },
       { name: 'only-notes', source: './plugins/only-notes', version: '1.0.0', description: 'Reference notes only.' },
     ],
   }, null, 2));
@@ -24935,7 +25081,8 @@ async function pluginPageSaysLessFlow() {
   put(join(market, 'plugins/limited-kit/skills/helper/SKILL.md'), skillMd('helper', 'Helps deploy.'));
   put(join(market, 'plugins/limited-kit/commands/deploy.md'), '---\ndescription: Deploy a release.\n---\nRun deploy.\n');
   put(join(market, 'plugins/limited-kit/README.md'), '# limited-kit\n\nDetailed documentation for limited-kit.\n');
-  put(join(market, 'plugins/failed-kit/.mcp.json'), JSON.stringify({ mcpServers: { rooter: { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/server.js'] } } }));
+  const rooterEntry = { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/server.js'], env: { API_TOKEN: 'keep-as-written-123' } };
+  put(join(market, 'plugins/failed-kit/.mcp.json'), JSON.stringify({ mcpServers: { rooter: rooterEntry } }));
   put(join(market, 'plugins/failed-kit/README.md'), '# failed-kit\n\nDetailed documentation for failed-kit.\n');
   put(join(market, 'plugins/agent-kit/agents/reviewer.md'), '---\nname: reviewer\ndescription: Reviews changes.\n---\nReview carefully.\n');
   put(join(market, 'plugins/agent-kit/README.md'), '# agent-kit\n\nDetailed documentation for agent-kit.\n');
@@ -24954,7 +25101,11 @@ async function pluginPageSaysLessFlow() {
   const codexCache = join(home, '.codex/plugins/cache/ck-less-market/plain-kit/1.0.0');
   put(join(codexCache, 'skills/alpha/SKILL.md'), alphaMd);
   put(join(codexCache, 'skills/beta/SKILL.md'), betaMd);
-  put(join(home, '.codex/config.toml'), `[marketplaces.ck-less-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."plain-kit@ck-less-market"]\nenabled = true\n`);
+  // limited-kit is installed in Codex (Sequence 3): its installed box carries no limit note, while In each tool still names Codex's limit.
+  const limitedCodexCache = join(home, '.codex/plugins/cache/ck-less-market/limited-kit/1.0.0');
+  put(join(limitedCodexCache, 'skills/helper/SKILL.md'), skillMd('helper', 'Helps deploy.'));
+  put(join(limitedCodexCache, 'commands/deploy.md'), '---\ndescription: Deploy a release.\n---\nRun deploy.\n');
+  put(join(home, '.codex/config.toml'), `[marketplaces.ck-less-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."plain-kit@ck-less-market"]\nenabled = true\n\n[plugins."limited-kit@ck-less-market"]\nenabled = true\n`);
   put(join(home, '.central-knot/plugins.json'), JSON.stringify({
     formatVersion: 1,
     tools: ['claude-cli', 'codex-cli', 'pi-cli', 'opencode-cli'],
@@ -24989,11 +25140,12 @@ async function pluginPageSaysLessFlow() {
   await a.click('#nav-plugins');
   await openPluginPage('plain-kit');
 
-  // 1 & 3. Your tools (?) card wording (no Cowork when Claude desktop is absent); clears every pbox-* and #status at 860 (opening above its panel) and opens below its panel at 1316.
+  // 1 & 3. Your tools (?) card wording (no Cowork when Claude desktop is absent); clears every pbox-* and #status at 860 and 1316;
+  // under 880 px the marketplace strip hides on a plugin's page and returns on the list; wrapped tool boxes line up on a CSS grid.
   same('Your tools has an infoMark whose card explains ticking and unticking without Cowork when Claude desktop is absent',
     [await a.exists('#plugin-cowork-note'), await openCard('plugin-tools-info')],
     [false, [true, 'Tick to turn the plugin or its items on in that tool. Untick to turn them off.']]);
-  for (const [width, height, expectedPlace] of [[...SMALLEST, 'above'], [1316, 819, 'below']]) {
+  for (const [width, height, stripHidden] of [[...SMALLEST, true], [1316, 819, false]]) {
     await sizeTo(a, width, height);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
     await a.click('#plugin-tools-info');
@@ -25007,24 +25159,62 @@ async function pluginPageSaysLessFlow() {
         const br = b.getBoundingClientRect();
         return !(r.bottom <= br.top || r.top >= br.bottom || r.right <= br.left || r.left >= br.right);
       }).map(b => b.id);
-      const place = r.bottom <= panel.top ? 'above' : r.top >= panel.bottom ? 'below' : 'overlap';
+      const clearPanel = r.bottom <= panel.top || r.top >= panel.bottom;
       const clearsStatus = r.top >= 8 && r.bottom <= status.top - 8;
-      return { open: true, hits, clearsStatus, place, ...(clearsStatus && place === ${JSON.stringify(expectedPlace)} ? {} : { cardTop: Math.round(r.top), cardBottom: Math.round(r.bottom), panelTop: Math.round(panel.top), panelBottom: Math.round(panel.bottom), statusTop: Math.round(status.top) }) };
+      const strip = document.querySelector('.market-list');
+      const hidden = strip ? getComputedStyle(strip).display === 'none' && strip.getBoundingClientRect().height === 0 : null;
+      return { open: true, hits, clearsStatus, clearPanel, hidden, ...(clearsStatus && clearPanel ? {} : { cardTop: Math.round(r.top), cardBottom: Math.round(r.bottom), panelTop: Math.round(panel.top), panelBottom: Math.round(panel.bottom), statusTop: Math.round(status.top) }) };
     })()`);
     await sendKey('Escape', 'Escape', 27);
-    same(`at ${width}×${height} the Your tools card overlaps neither a pbox-* nor the status bar and opens ${expectedPlace} the panel`, clear, { open: true, hits: [], clearsStatus: true, place: expectedPlace });
+    same(`at ${width}×${height} the Your tools card overlaps neither a pbox-* nor the status bar and marketplace strip hidden is ${stripHidden}`,
+      clear, { open: true, hits: [], clearsStatus: true, clearPanel: true, hidden: stripHidden });
   }
+  await sizeTo(a, ...SMALLEST);
+  if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+  same('wrapped tool boxes use CSS grid with no data-layout and row 2 aligns under row 1 at 860',
+    await a.run(`(() => {
+      const rows = document.querySelector('.plugin-tool-rows');
+      const boxes = [...rows.querySelectorAll('.plugin-tool')].map(el => el.getBoundingClientRect());
+      const byRow = [...new Map(boxes.map(r => [Math.round(r.top), boxes.filter(b => Math.abs(b.top - r.top) < 2)])).values()];
+      return {
+        display: getComputedStyle(rows).display,
+        hasDataLayout: rows.hasAttribute('data-layout'),
+        rows: byRow.length,
+        aligned: byRow.length >= 2 && byRow[1].every((b, i) => Math.abs(b.left - byRow[0][i].left) <= 1),
+      };
+    })()`),
+    { display: 'grid', hasDataLayout: false, rows: 2, aligned: true });
+  await a.click('#plugin-back');
+  await until(() => a.exists('#popen-0-plain-kit'));
+  same('returning to the marketplace list at 860 restores the marketplace strip',
+    await a.run(`(() => { const strip = document.querySelector('.market-list'); return !!strip && getComputedStyle(strip).display !== 'none' && strip.getBoundingClientRect().height > 0; })()`), true);
+  await openPluginPage('plain-kit');
   await fullSize(a);
 
-  // 2. Absent kept-out boxes (Pi unticked earlier, OpenCode never installed) show Not installed (no Kept out: tick to put it back).
+  // 2. Absent kept-out boxes (Pi unticked earlier, OpenCode never installed) show Not installed (no Kept out: tick to put it back),
+  // and Uninstall… sits flush with the line above it in the link's own colour.
   same('Pi (unticked earlier) and OpenCode (never installed) read Not installed while Claude Code and Codex show Installed',
     [await stateUnder('claude-cli'), await stateUnder('codex-cli'), await stateUnder('pi-cli'), await stateUnder('opencode-cli')],
     ['Installed · 1.0.0', 'Installed · 1.0.0', 'Not installed', 'Not installed']);
+  same('Uninstall… aligns flush with the state line as a quiet 24 px link, distinct from blue jump links',
+    await a.run(`(() => {
+      const box = document.querySelector('.plugin-tool[data-tool="claude-cli"]');
+      const st = box.querySelector('.plugin-tool-state'), btn = box.querySelector('#puninstall-0-plain-kit-claude-cli');
+      const s = st.getBoundingClientRect(), b = btn.getBoundingClientRect();
+      const cs = getComputedStyle(btn);
+      return {
+        quiet: btn.classList.contains('text-danger-quiet') && !btn.classList.contains('link'),
+        flush: Math.abs(b.left - s.left) <= 1,
+        tall: b.height >= 24,
+        underlined: cs.textDecorationLine.includes('underline'),
+      };
+    })()`),
+    { quiet: true, flush: true, tall: true, underlined: true });
 
-  // 5. Folds on plain-kit (plain outcomes only): Readme closed and In each tool closed at open; keyboard opens/closes both; state survives redraws.
-  same('on a plain plugin, both In each tool and Readme start folded closed',
-    await a.run(`[document.getElementById('plugin-outcomes')?.open ?? null, document.getElementById('plugin-readme')?.open ?? null]`),
-    [false, false]);
+  // 5. Folds on plain-kit (plain outcomes only): Readme closed and In each tool closed at open without limits; keyboard opens/closes both; state survives redraws.
+  same('on a plain plugin, both In each tool (plain heading) and Readme start folded closed',
+    await a.run(`[document.getElementById('plugin-outcomes')?.open ?? null, document.getElementById('plugin-outcomes-toggle')?.textContent ?? null, document.getElementById('plugin-readme')?.open ?? null]`),
+    [false, 'In each tool', false]);
   await a.run(`document.getElementById('plugin-readme-toggle')?.focus()`);
   await sendKey('Enter', 'Enter', 13, '\r');
   await a.run(`document.getElementById('plugin-outcomes-toggle')?.focus()`);
@@ -25079,43 +25269,107 @@ async function pluginPageSaysLessFlow() {
     await a.run(`[document.getElementById('plugin-outcomes')?.open ?? null, document.getElementById('plugin-readme')?.open ?? null]`),
     [false, false]);
 
-  // Limited outcome: In each tool opens at once, Readme stays closed; ordinary absence reads Not installed; Skills has no (?) when not installed in Claude Code.
+  // Limited outcome installed in Codex (Sequence 3): In each tool starts shut naming Codex in its summary while Codex's installed box shows no limit; Readme stays closed; ordinary absence reads Not installed; Skills has no (?) when not installed in Claude Code.
   await openPluginPage('limited-kit');
-  same('limited-kit opens In each tool at once, keeps Readme closed, shows ordinary Not installed, and omits Skills (?) when not installed in Claude Code',
+  same('limited-kit keeps In each tool shut naming installed Codex in its summary (no limit under Codex’s installed box), keeps Readme closed, shows ordinary Not installed, and omits Skills (?) when not installed in Claude Code',
     [await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`),
+      await a.text('#plugin-outcomes-toggle'),
+      await stateUnder('codex-cli'),
       await a.run(`document.getElementById('plugin-readme')?.open ?? null`),
       await stateUnder('claude-cli'), await stateUnder('pi-cli'), await stateUnder('opencode-cli'),
       await a.exists('#plugin-skills-info')],
-    [true, false, 'Not installed', 'Not installed', 'Not installed', false]);
+    [false, 'In each tool · limits in Codex', 'Installed · 1.0.0', false, 'Not installed', 'Not installed', 'Not installed', false]);
   await a.run(`document.getElementById('plugin-outcomes-toggle')?.focus()`);
   await sendKey('Enter', 'Enter', 13, '\r');
   await a.click('#pfile-0-skills-helper');
-  same('closing an initially-open In each tool by keyboard survives a redraw',
+  same('opening In each tool by keyboard on limited-kit survives a redraw',
     await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`),
-    false);
+    true);
 
-  // Failed outcome: In each tool opens at once, Readme closed; closing it then leaving via the sidebar and returning reopens it.
+  // Failed outcome + MCP entry: In each tool starts shut naming Codex; opening then leaving via sidebar resets it to shut; MCP server opens its formatted JSON entry.
   await openPluginPage('failed-kit');
-  same('failed-kit opens In each tool at once and keeps Readme closed',
-    await a.run(`[document.getElementById('plugin-outcomes')?.open ?? null, document.getElementById('plugin-readme')?.open ?? null]`),
-    [true, false]);
+  same('failed-kit starts with In each tool shut naming Codex and Readme closed',
+    [await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), await a.text('#plugin-outcomes-toggle'), await a.run(`document.getElementById('plugin-readme')?.open ?? null`)],
+    [false, 'In each tool · limits in Codex', false]);
+  await a.click('#pfile-0-mcp-rooter');
+  same('clicking an MCP server row opens its formatted JSON entry under Entry · Marketplace',
+    [await a.run(`document.getElementById('pfile-0-mcp-rooter')?.getAttribute('aria-expanded')`),
+      await a.text('.plugin-file .content-owner'),
+      await a.text('#pfile-0-mcp-rooter-text-0')],
+    ['true', 'Entry · Marketplace (1.0.0)', JSON.stringify(rooterEntry, null, 2)]);
+  await a.click('#pfile-0-mcp-rooter');
+  same('clicking the MCP server row again closes its entry',
+    [await a.run(`document.getElementById('pfile-0-mcp-rooter')?.getAttribute('aria-expanded')`), await a.exists('#pfile-0-mcp-rooter-text-0')],
+    ['false', false]);
   await a.run(`document.getElementById('plugin-outcomes-toggle')?.focus()`);
   await sendKey('Enter', 'Enter', 13, '\r');
-  same('closing In each tool on failed-kit closes the fold while staying on the page',
+  same('opening In each tool on failed-kit opens the fold while staying on the page',
     await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`),
-    false);
+    true);
   await a.click('#nav-overview');
   await a.click('#nav-plugins');
   await until(() => a.run(`document.querySelector('.crumb-here')?.textContent === 'failed-kit' && !!document.getElementById('plugin-outcomes')`));
-  same('leaving failed-kit for Overview via the sidebar and returning clears fold state so In each tool opens again',
-    await a.run(`[document.getElementById('plugin-outcomes')?.open ?? null, document.getElementById('plugin-readme')?.open ?? null]`),
-    [true, false]);
-
-  // Ignored-only outcome (agent in Codex): In each tool stays closed (neither limited nor failed).
-  await openPluginPage('agent-kit');
-  same('agent-kit (ignored in Codex, neither limited nor failed) keeps In each tool closed at open',
+  same('leaving failed-kit for Overview via the sidebar and returning clears fold state so In each tool starts shut again',
     await a.run(`[document.getElementById('plugin-outcomes')?.open ?? null, document.getElementById('plugin-readme')?.open ?? null]`),
     [false, false]);
+
+  // Ignored-only outcome (agent in Codex): In each tool starts shut and names Codex from the same limitsIn predicate as Codex's box;
+  // Codex's limit note sits in .plugin-tool-parts (no orphan dot on wrap), opens In each tool (limited tools first), lands Codex in sight and flashes it, with the fold's toggle still working.
+  await openPluginPage('agent-kit');
+  same('agent-kit (ignored in Codex) keeps In each tool shut and names Codex in its summary matching Codex’s box parts',
+    [await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), await a.text('#plugin-outcomes-toggle'),
+      await a.run(`[...document.querySelectorAll('.plugin-tool[data-tool="codex-cli"] .plugin-tool-part')].map(el => el.textContent)`),
+      await a.run(`document.getElementById('plugin-readme')?.open ?? null`)],
+    [false, 'In each tool · limits in Codex', ['Not installed', 'Agents are ignored'], false]);
+  await sizeTo(a, ...SMALLEST);
+  if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+  await a.click('#plimit-0-agent-kit-codex-cli');
+  await a.settle();
+  same('clicking Codex’s limit note opens In each tool with Codex first, scrolled into sight and flashed',
+    await a.run(`(() => {
+      const sc = document.getElementById('plugins-scroll').getBoundingClientRect();
+      const row = document.querySelector('.plugin-outcome-row[data-outcome-tools~="codex-cli"]');
+      const r = row.getBoundingClientRect();
+      const order = [...document.querySelectorAll('.plugin-outcome-row .plugin-outcome-tools strong')].map(el => el.textContent);
+      return { open: document.getElementById('plugin-outcomes')?.open ?? null, order, inSight: r.top >= sc.top - 1 && r.bottom <= sc.bottom + 1, flashed: row.classList.contains('section-flash') };
+    })()`),
+    { open: true, order: ['Codex', 'Claude Code'], inSight: true, flashed: true });
+  await a.click('#plugin-outcomes-toggle');
+  same('the fold’s own toggle still closes In each tool after opening from a limit note',
+    await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), false);
+  await a.run(`document.getElementById('plimit-0-agent-kit-codex-cli')?.focus()`);
+  await sendKey('Enter', 'Enter', 13, '\r');
+  same('pressing Enter on Codex’s limit note opens In each tool, brings Codex into sight, flashes it and moves focus to its row',
+    await a.run(`(() => {
+      const sc = document.getElementById('plugins-scroll').getBoundingClientRect();
+      const row = document.querySelector('.plugin-outcome-row[data-outcome-tools~="codex-cli"]');
+      const r = row.getBoundingClientRect();
+      return { open: document.getElementById('plugin-outcomes')?.open ?? null, inSight: r.top >= sc.top - 1 && r.bottom <= sc.bottom + 1, flashed: row.classList.contains('section-flash'), focused: document.activeElement === row };
+    })()`),
+    { open: true, inSight: true, flashed: true, focused: true });
+  await a.click('#plugin-outcomes-toggle');
+  same('the fold’s own toggle closes In each tool again after keyboard activation',
+    await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`), false);
+  await fullSize(a);
+
+  // Can't be turned off here (Anthropic Directory copy): the state line's hover and (?) card beside it both carry the reason.
+  const dirCache = join(home, '.claude/plugins/cache/anthropic-plugin-directory/dir-kit/1.0.0');
+  put(join(dirCache, 'skills/dir-skill/SKILL.md'), skillMd('dir-skill', 'From directory.'));
+  const installedFile = join(home, '.claude/plugins/installed_plugins.json');
+  const installedData = JSON.parse(readFileSync(installedFile, 'utf8'));
+  installedData.plugins['dir-kit@anthropic-plugin-directory'] = [{ scope: 'user', installPath: dirCache, version: '1.0.0', directoryRepositoryKey: '127.0.0.1/example/dir-kit#plugins/dir-kit' }];
+  writeFileSync(installedFile, JSON.stringify(installedData, null, 2));
+  await a.click('#header-refresh');
+  await done();
+  await openPluginPage('dir-kit');
+  await until(() => a.run(`document.querySelector('.plugin-tool[data-tool="claude-cli"] .plugin-tool-state')?.textContent === 'Can’t be turned off here'`));
+  same('Can’t be turned off here puts the box’s reason on the line’s hover and on the (?) beside it',
+    [await a.run(`(() => {
+      const st = document.querySelector('.plugin-tool[data-tool="claude-cli"] .plugin-tool-state');
+      return [st?.textContent ?? null, st?.title ?? null];
+    })()`), await openCard('pwhy-0-dir-kit-claude-cli')],
+    [['Can’t be turned off here', 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).'],
+      [true, 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).']]);
 
   // Instructions-only plugin: concise advice with no jump to Instructions; file opens right here.
   await openPluginPage('only-notes');
@@ -25126,6 +25380,45 @@ async function pluginPageSaysLessFlow() {
     ['No tool reads these files by itself: copy the text into your own instructions.', false, false]);
   await a.click('#pfile-0-CLAUDE-md');
   check('its instruction file opens right here on the plugin page', (await a.text('.plugin-file') ?? '').includes('Copy these conventions into your own instructions.'), await a.text('.plugin-page'));
+
+  // One and two tools: boxes spread across the panel width without empty tracks at both 860 and 1316.
+  await openPluginPage('agent-kit');
+  rmSync(join(home, '.local/bin/pi'), { force: true });
+  rmSync(join(home, '.pi'), { recursive: true, force: true });
+  rmSync(join(home, '.local/bin/opencode'), { force: true });
+  rmSync(join(home, '.config/opencode'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  await until(() => a.run(`document.querySelectorAll('.plugin-tool').length === 2`));
+  for (const [width, height] of [[...SMALLEST], [1316, 819]]) {
+    await sizeTo(a, width, height);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    same(`with 2 tools at ${width}×${height}, Your tools uses 2 full-share tracks with no empty track`,
+      await a.run(`(() => {
+        const rows = document.querySelector('.plugin-tool-rows');
+        const cols = getComputedStyle(rows).gridTemplateColumns.split(' ').map(parseFloat);
+        const w = rows.getBoundingClientRect().width;
+        const expected = (w - 24) / 2;
+        return { dataTools: rows.dataset.tools, count: cols.length, fills: cols.every(c => Math.abs(c - expected) <= 2) };
+      })()`),
+      { dataTools: '2', count: 2, fills: true });
+  }
+  rmSync(join(home, '.local/bin/codex'), { force: true });
+  rmSync(join(home, '.codex'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  await until(() => a.run(`document.querySelectorAll('.plugin-tool').length === 1`));
+  for (const [width, height] of [[...SMALLEST], [1316, 819]]) {
+    await sizeTo(a, width, height);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    same(`with 1 tool at ${width}×${height}, Your tools uses 1 full-width track`,
+      await a.run(`(() => {
+        const rows = document.querySelector('.plugin-tool-rows');
+        const cols = getComputedStyle(rows).gridTemplateColumns.split(' ').map(parseFloat);
+        const w = rows.getBoundingClientRect().width;
+        return { dataTools: rows.dataset.tools, count: cols.length, fills: Math.abs(cols[0] - w) <= 2 };
+      })()`),
+      { dataTools: '1', count: 1, fills: true });
+  }
+  await fullSize(a);
 
   same('no page errors, plugin page says less', a.pageErrors, []);
   await a.quit();

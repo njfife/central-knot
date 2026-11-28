@@ -19,7 +19,7 @@ import { caughtUpBand, resetTablesForHarness, itemsTable, differingIn, emptyList
 import { kindSource } from './itemrow.ts';
 import { aboutInstructions, instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
 import { browse, lineBox, loadPlugins, market, pluginBusy, turnPlugin } from './pluginstate.ts';
-import { homeItems, inUseName, pluginLive } from './profileplan.ts';
+import { nowLead, profileNowIn } from './profileplan.ts';
 import { copyButton, fact, kindEmpty, noToolsState, notRead } from './pages.ts';
 
 const TABS: HarnessTab[] = ['skills', 'mcp', 'agents', 'instructions', 'plugins', 'about'];
@@ -259,14 +259,14 @@ function everyHarness(home: HomeView) {
     const looked = home.mode === 'actual' ? `Not found on ${thisMachine}: ${andList(home.snapshots.map(snapshot => names[snapshot.harness]))}. Central Knot looks for them again each time it reads this home.` : undefined;
     return h('div.page', {}, noToolsState('harnesses', looked));
   }
-  const locked = manageLocked(home);
+  const locked = manageLocked(home), now = profileNowIn(home);
   const notes: Child[][] = [
     // Where no Manage switch can be turned, said once here (each disabled switch's tooltip says it too).
     ...(locked ? [[locked]] : []),
     ...(home.mode === 'actual' ? [] : [[home.mode === 'fixture' ? 'Practice copy: installed apps aren’t checked; ' : 'A folder: installed apps aren’t checked; ',
       button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', disabled: acting(), onclick: () => void loadHome('actual') }), ' shows their versions.']]),
-    // A profile switches items in every tool at once, so the one in use is said once here, as Profiles names it.
-    ...(home.profiles.profiles.length ? [['Profile in use: ', button({ variant: 'link', size: 'micro', label: inUseName(home.profiles.profiles, homeItems(home), pluginLive(home)), id: 'harnesses-profile', onclick: () => showPage('profiles') }), '.']] : []),
+    // A profile switches items in every tool at once, so the one in use is said once here, as Profiles names it (profileplan.ts profileNow).
+    ...(home.profiles.profiles.length ? [[h('span.tools-note-profile', {}, `${nowLead(now)}: `, button({ variant: 'link', size: 'micro', label: now.name, id: 'harnesses-profile', onclick: () => showPage('profiles') }), '.')]] : []),
   ];
   const firstManaged = cards.find(snapshot => managed(home, snapshot.harness))?.harness;
   return h('div.page', {}, caught ? h('div.bands', {}, caught) : null,
@@ -349,7 +349,7 @@ function pluginRow({ entry, plugin, version }: InstalledMarketPlugin, tool: Harn
   return h('div.harness-plugin', { role: 'listitem', title: note || undefined },
     h('div.harness-plugin-text', {},
       h('strong', {}, pluginTitle(plugin), version ? h('span.harness-plugin-version', {}, ` ${version}`) : null),
-      stateText ? h('span.harness-plugin-state', {}, stateText) : null),
+      stateText ? h('span.harness-plugin-state', { title: own?.off }, stateText) : null),
     pageLink, uninstall, control, question);
 }
 
