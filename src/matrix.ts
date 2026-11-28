@@ -282,16 +282,30 @@ function foundSection(t: Table, rows: (ItemRow | PluginRow)[]) {
     rows.flatMap(each => (isPluginRow(each) ? pluginRowEl(t, each) : row(t, each, 'results'))));
 }
 
+/** One unread plugin's reason in the warning card, naming the plugin once and avoiding pronoun ambiguity. */
+function unreadReason(install: HomeView['pluginItems'][number], withTool: boolean): string {
+  const tool = names[install.tool];
+  const problem = install.problem!;
+  if (problem.startsWith(`${tool} lists it,`)) {
+    return problem
+      .replace(`${tool} lists it,`, `${tool} lists ${install.plugin},`)
+      .replace('where it records them', `where ${tool} records them`)
+      .replace('in its plugin cache', `in ${tool}’s plugin cache`);
+  }
+  return withTool ? `${install.plugin} (${tool}): ${problem}` : `${install.plugin}: ${problem}`;
+}
+
 /** Installed plugins whose copy couldn't be read in the tools this table is about: what they bring is missing, with the reason behind its mark. */
 function unreadBand(t: Table) {
   const list = plugged(t).unread.filter(install => !t.tool || install.tool === t.tool);
   if (!list.length) return null;
   const plugins = [...new Set(list.map(install => install.plugin))];
-  const shown = list.length === 1 ? `What the plugin ${list[0]!.plugin} brings in ${names[list[0]!.tool]} isn’t listed`
-    : plugins.length === 1 ? `What the plugin ${plugins[0]} brings in ${list.length} tools isn’t listed`
+  const tools = [...new Set(list.map(install => install.tool))];
+  const shown = plugins.length === 1
+    ? `What the plugin ${plugins[0]} brings in ${tools.length === 1 ? names[tools[0]!] : `${tools.length} tools`} isn’t listed`
     : plugins.length === 2 ? `What 2 plugins bring isn’t listed: ${plugins[0]} and ${plugins[1]}`
     : `What ${plugins.length} plugins bring isn’t listed: ${plugins[0]} and ${plugins.length - 1} more`;
-  const why = list.length === 1 ? list[0]!.problem! : list.map(install => `${install.plugin} (${names[install.tool]}): ${install.problem}`).join('\n');
+  const why = list.map(install => unreadReason(install, list.length > 1)).join('\n');
   return h('div.band', { role: 'status', 'data-info-block': true }, icon('triangle-alert', 14, 'tone-warning'),
     h('span.band-text', {}, shown), infoMark('unread-plugins-info', 'Unlisted plugin items', why));
 }
@@ -982,8 +996,7 @@ function openRow(t: Table, row: ItemRow | PluginRow) {
 function libraryTag(t: Table, skill: ItemRow, heading: Role) {
   const item = itemOf(skill), tools = toolsFor(t, skill.kind);
   const tag = showsPlaceTag(heading, skill, item, tools) ? libraryPages[skill.kind].say.placeTag(skill, item, tools, leftOutTools(), heading === 'off') : undefined;
-  const warn = libraryPlace(item) === 'found' && !canAdd(skill);
-  return tag ? h(`span.row-tag${warn ? '.row-tag-warn' : ''}`, { title: tag.title }, tag.text) : null;
+  return tag ? h(`span.row-tag${tag.warn ? '.row-tag-warn' : ''}`, { title: tag.title }, tag.text) : null;
 }
 /** The tag after an item's name while a version waits at the source it is linked to, or once its source removed it (libraryrow.ts fromSourceWords). */
 function sourceTag(skill: ItemRow) {
@@ -1017,7 +1030,7 @@ function nameCell(t: Table, skill: ItemRow, attention: boolean, heading: Role) {
   return h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: skill.description ? `${name}: ${skill.description}` : name },
     h('span.ov-name-main', {}, kindMark(t, skill.kind),
       h('span.ov-name-text', {}, name), fileButton(t, skill), kindWord(t, skill.kind, name),
-      attention ? h('span.row-tag.row-tag-differs', { id: elId('decide', skill) }, 'Copies differ') : null),
+      attention ? h('span.row-tag.row-tag-differs', { id: elId('decide', skill) }, 'copies differ') : null),
     libraryTag(t, skill, heading),
     sourceTag(skill),
     // While the row is open, its details show the description whole, except for differing copies (which show the chooser alone)

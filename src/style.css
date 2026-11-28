@@ -659,7 +659,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* Open file mark right after a skill's name (filepanel.ts fileButton). */
 .row-file-btn { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; margin-left: -4px; padding: 0; border: 1px solid var(--cell-line); border-radius: 5px; background: var(--surface); box-shadow: var(--lift); color: var(--ink-soft); cursor: pointer; }
 .row-file-btn[aria-pressed="true"] { background: color-mix(in oklab, var(--accent) 14%, var(--surface)); border-color: color-mix(in oklab, var(--accent) 42%, transparent); color: var(--accent-ink); }
-.row-tag { flex: none; font-size: 11.5px; color: var(--ink-soft); white-space: nowrap; }
+.row-tag { flex: none; font-size: 11.5px; color: var(--ink); white-space: nowrap; }
 .ov-managed { display: flex; justify-content: center; }
 .ov-cell { position: relative; display: flex; justify-content: center; align-items: center; gap: 6px; }
 .ov-tool-head { flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--ink); }
@@ -1855,7 +1855,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 
 .details-part .inline-link { white-space: nowrap; }
 .details .details-limits.details-part { margin-left: 0; }
-.row-tag.row-part { display: inline-flex; align-items: center; gap: 4px; }
+.row-tag.row-part { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-soft); }
 .plugin-panel-hint { margin: -4px 0 10px; font-size: 12px; color: var(--ink-soft); }
 .plugin-section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 28px; }
 .plugin-outcome-what code { font-family: var(--mono); font-size: 12px; white-space: nowrap; }

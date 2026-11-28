@@ -271,14 +271,20 @@ test('Off card names left-out tools and unreadBand folds plural plugin reasons i
   assert.equal(bandText(fourTree), 'What 4 plugins bring isn’t listed: p1 and 3 more');
   assert.equal(cardText(fourTree, 'unread-plugins-info'), 'p1 (Claude Code): p1 missing.\np2 (Claude Code): p2 missing.\np3 (Claude Code): p3 missing.\np4 (Claude Code): p4 missing.');
 
-  // 2 distinct plugins name both; the same plugin unread in 2 tools names the plugin once and counts the tools.
-  app.home = makeHome({ homePath: '/list-words-two', tools: ['claude-cli', 'codex-cli'], skills: [plainOff], library, pluginItems: unread([['claude-cli', 'p1'], ['claude-cli', 'p2']]) });
-  openKind('skills');
-  assert.equal(bandText(libraryTable()), 'What 2 plugins bring isn’t listed: p1 and p2');
-
+  // Same plugin unread in 2 distinct tools counts tools; same plugin from 2 marketplaces in 1 tool names that tool (never "2 tools").
   app.home = makeHome({ homePath: '/list-words-same', tools: ['claude-cli', 'codex-cli'], skills: [plainOff], library, pluginItems: unread([['claude-cli', 'p1'], ['codex-cli', 'p1']]) });
   openKind('skills');
   const sameTree = libraryTable();
   assert.equal(bandText(sameTree), 'What the plugin p1 brings in 2 tools isn’t listed');
   assert.equal(cardText(sameTree, 'unread-plugins-info'), 'p1 (Claude Code): p1 missing.\np1 (Codex): p1 missing.');
+
+  const twoMarketsOneTool: HomeView['pluginItems'] = ['m1', 'm2'].map(marketName => (
+    { tool: 'claude-cli', plugin: 'p1', source: `/${marketName}`, marketName, listed: true, problem: 'Claude Code lists it, but its files are not where it records them.', items: [] }
+  ));
+  app.home = makeHome({ homePath: '/list-words-same-tool', tools: ['claude-cli', 'codex-cli'], skills: [plainOff], library, pluginItems: twoMarketsOneTool });
+  openKind('skills');
+  const sameToolTree = libraryTable();
+  assert.equal(bandText(sameToolTree), 'What the plugin p1 brings in Claude Code isn’t listed');
+  assert.equal(cardText(sameToolTree, 'unread-plugins-info'),
+    'Claude Code lists p1, but its files are not where Claude Code records them.\nClaude Code lists p1, but its files are not where Claude Code records them.');
 });

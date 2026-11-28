@@ -787,7 +787,7 @@ test('showsPlaceTag hides routine Found and Off tags under their own headings, k
     showsPlaceTag('off', offSwitched, off, tools),
     showsPlaceTag('off', offOwed, offOwedItem, tools),
   ], [false, true, true, true, true, true]);
-  // Under Off, kept tags drop the leading "in Central Knot"; outside Off (Results, Not in <tool>, pinned), the whole tag stays.
+  // Under Off, kept tags drop "in Central Knot" and name own/other-reader copies as "another copy in …"; outside Off, the whole tag stays.
   assert.deepEqual([
     placeTag(offSwitched, off, tools, [], true)?.text,
     placeTag(offSwitched, off, tools, [], false)?.text,
@@ -796,14 +796,18 @@ test('showsPlaceTag hides routine Found and Off tags under their own headings, k
     placeTag(offReaders, off, tools, [], true)?.text,
     placeTag(offReaders, off, tools, [], false)?.text,
     placeTag(offPlugin, off, tools, [], true)?.text,
+    placeTag(cantAdd, undefined, tools)?.warn,
+    placeTag(plainFound, undefined, tools)?.warn,
   ], [
     'switched off in Codex',
     'in Central Knot · switched off in Codex',
-    'in Codex',
+    'another copy in Codex',
     'in Central Knot and Codex',
-    'in Codex',
+    'another copy in Codex',
     'in Central Knot and Codex',
     'on in Claude Code only, through its plugin',
+    true,
+    undefined,
   ]);
   // Under Results, Not in <tool> (away), and On: routine tags stay.
   for (const heading of ['results', 'away', 'on'] as const) {

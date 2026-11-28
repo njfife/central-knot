@@ -393,7 +393,7 @@ export const copiesDiffer = (names: readonly string[]) =>
  * What an Off row's tag says beyond its heading (undefined for a routine Off item held only in Central Knot): copies that can't
  * be seen (`stillIn`), removals owed until sync runs, tools still reading or holding their own copy (`otherReaders`, `ownNamed`),
  * tools with it on through a plugin (`onThrough`), or tools holding an outside copy switched off in their own settings (`outsideCopyIn`).
- * `underOff`: drops the leading "in Central Knot" / "Central Knot" that the Off heading already states.
+ * `underOff`: drops the leading "in Central Knot" and names an own/other-reader copy as "another copy in …" so it never contradicts Off.
  */
 function offExtra(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], underOff = false): string | undefined {
   const unseen = stillIn(row, item, [], tools);
@@ -406,10 +406,10 @@ function offExtra(row: LibraryRow, item: LibraryItem | undefined, tools: readonl
   const held = outsideCopyIn(row, tools, true);
   if (readers.length || (through.length && own.length)) {
     const rest = tools.filter(tool => readers.includes(tool) || own.includes(tool) || through.includes(tool)).map(toolName);
-    return `in ${andList(underOff ? rest : ['Central Knot', ...rest])}`;
+    return underOff ? `another copy in ${andList(rest)}` : `in ${andList(['Central Knot', ...rest])}`;
   }
   return through.length ? `on in ${andList(through.map(toolName))} only, through its plugin`
-    : own.length ? `in ${andList(underOff ? own.map(toolName) : ['Central Knot', ...own.map(toolName)])}`
+    : own.length ? (underOff ? `another copy in ${andList(own.map(toolName))}` : `in ${andList(['Central Knot', ...own.map(toolName)])}`)
     : held.length ? `${underOff ? '' : 'in Central Knot · '}switched off in ${andList(held.map(toolName))}` : undefined;
 }
 /**
@@ -424,11 +424,9 @@ function offPlace(row: LibraryRow, item: LibraryItem | undefined, tools: readonl
  * (`row.readBy`, from `skills.ts readers`: managed, writable, can take it, no copy or way of its own, not disabled).
  * For a found row, such a reader is routine (Add's hover and the tool marks already show it), so `showsPlaceTag` hides its tag.
  */
-function readsFolderOf(row: LibraryRow, tool: string, includePending = true): HarnessId | undefined {
-  const live = row.readsFrom?.[tool as HarnessId];
-  if (live) return live;
-  if (!includePending) return undefined;
-  return Object.entries(row.readBy ?? {}).find(([, list]) => list?.includes(tool as HarnessId))?.[0] as HarnessId | undefined;
+function readsFolderOf(row: LibraryRow, tool: string): HarnessId | undefined {
+  return row.readsFrom?.[tool as HarnessId]
+    ?? Object.entries(row.readBy ?? {}).find(([, list]) => list?.includes(tool as HarnessId))?.[0] as HarnessId | undefined;
 }
 /** Whether a row's placeTag is drawn under `heading` (matrix.ts Role): false when Found or Off already says a routine row's place. */
 export function showsPlaceTag(heading: 'on' | 'found' | 'off' | 'away' | 'results', row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]): boolean {
@@ -609,7 +607,7 @@ export function sentences(words: RowWords) {
   function detailLine(row: LibraryRow, item: LibraryItem | undefined, tool: string, where: string, own: readonly string[] = []): DetailPart[] {
     const inLib = inLibrary(item), has = row.hashes?.[tool] !== undefined, is = harnessIs(row, item, tool);
     const parts: DetailPart[] = [];
-    const reads = is === 'another-way' && !(inLib?.on && !wantedIn(inLib, tool as HarnessId)) ? readsFolderOf(row, tool, false) : undefined;
+    const reads = is === 'another-way' && !(inLib?.on && !wantedIn(inLib, tool as HarnessId)) ? row.readsFrom?.[tool as HarnessId] : undefined;
     if (reads) {
       const from = toolName(reads);
       parts.push({ text: `Reads ${from}’s copy`, card: `${where} reads this skill from ${from}’s folder; Central Knot writes nothing to ${where} meanwhile.` });
@@ -688,7 +686,7 @@ export function sentences(words: RowWords) {
    * (its tooltip) what that means. `tools`: the home's harnesses; `leftOut`: the installed tools left out (offPlace); `underOff`:
    * row sits under the Off heading, so a kept Off tag drops the leading "in Central Knot" (offExtra).
    */
-  function placeTag(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[] = [], underOff = false): { text: string; title: string } | undefined {
+  function placeTag(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[] = [], underOff = false): { text: string; title: string; warn?: boolean } | undefined {
     const place = placeOf(item);
     const unseen = stillIn(row, item, [], tools);
     const through = onThrough(row, tools), own = ownNamed(row, item, tools, through);
@@ -701,7 +699,7 @@ export function sentences(words: RowWords) {
     if (place === 'off') return { text: (underOff ? offExtra(row, item, tools, true) : undefined) ?? offPlace(row, item, tools, leftOut), title: unseen.length ? unseen.map(tool => row.unseen![tool]).join(' ')
       : owed ? `Off. Central Knot keeps this ${noun}; its ${copy} leaves ${owed} when sync runs.` : `Central Knot keeps this ${noun} and its versions. ${otherReadLines(row, tools).join(' ') || none}` };
     const found = `A tool has this ${noun}; Central Knot doesn’t yet. Add it to keep it in Central Knot${whereAdded(row, item, tools)}.`;
-    if (place === 'found' && !canAdd(row)) return { text: 'can’t be taken in', title: 'Its line in the opened row says why.' };
+    if (place === 'found' && !canAdd(row)) return { text: 'can’t be taken in', title: 'Its line in the opened row says why.', warn: true };
     if (place === 'found') return { text: 'not in Central Knot', title: found };
     const out = item!.except.filter(tool => tools.includes(tool)), keptOut = `Kept out of ${andList(out.map(toolName))}. Its switch there, in the opened row, puts it back.`;
     // A tool that can't take it and has no copy is as lasting as one it is kept out of: the tag names where it is.
