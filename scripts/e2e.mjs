@@ -941,7 +941,7 @@ async function harnessFlow() {
   await a.click('button#harness-copilot-cli.harness-card-head');
   await a.click('#harness-tab-skills');
   const firstMark = () => a.run(`document.querySelector('.ov-row[data-key] .tool-mark')?.dataset.tool ?? null`);
-  same('a harness’s skills put its own mark first on each row, and have no column heads', [await firstMark(), await a.exists('.ov-head')], ['copilot-cli', false]);
+  same('a harness’s skills put its own mark first on each row, with its Every tool switch head and no multi-tool .ov-head', [await firstMark(), await a.exists('.ov-head'), await a.exists('.ov-tab-head')], ['copilot-cli', false, true]);
   const away = await a.run(`[...document.querySelectorAll('[role="rowgroup"]')].find(group => group.querySelector('.ov-section-label strong')?.textContent === 'Not in Copilot CLI')?.querySelector('[data-key="${rowPart('', 'skills', 'release-notes')}"]') ? true : false`);
   check('a skill only other tools have is under "Not in Copilot CLI"', away);
   check('a harness’s page has no menus or Add from… to bring items in: a found row’s Add does', !(await a.exists('.tool-menu, #harness-add-from, .tool-head-button')));
@@ -1237,6 +1237,275 @@ async function harnessFlow() {
   } finally {
     chmodSync(hCodex, 0o755);
     await h.quit();
+  }
+
+  // Tool page navigation fit (named switcher only, single row or stacked across 5/6 tools and 860/1316/1728),
+  // switch column head, toolbar "What the marks mean" disclosure, plain "Jump to:" links with landing flash, and bar-settled jump height.
+  const tHome = join(scratch, 'tool-page-home'), tData = join(scratch, 'tool-page-data'), tReal = join(scratch, 'tool-page-real');
+  mkdirSync(tReal, { recursive: true });
+  mkdirSync(tData, { recursive: true });
+  toolClis(tHome);
+  for (const dir of ['.codex/skills', '.pi/agent/skills', '.config/opencode/skills', '.claude/agents']) mkdirSync(join(tHome, dir), { recursive: true });
+  for (const cli of ['pi', 'opencode']) {
+    writeFileSync(join(tHome, '.local/bin', cli), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.0.0" && exit 0\nexit 9\n');
+    chmodSync(join(tHome, '.local/bin', cli), 0o755);
+  }
+  const tClaude = join(tHome, '.claude/skills'), tCopilot = join(tHome, '.copilot/skills'), tAgents = join(tHome, '.claude/agents');
+  for (let i = 1; i <= 22; i++) skill(tClaude, `skill-${String(i).padStart(2, '0')}`, text(`skill-${String(i).padStart(2, '0')}`, `Description for skill ${i}.`));
+  skill(tClaude, 'found-local', text('found-local', 'Found in Claude Code.'));
+  skill(tClaude, 'found-extra', text('found-extra', 'Another found skill.'));
+  skill(tClaude, 'off-one', text('off-one', 'Will be turned off.'));
+  skill(tClaude, 'off-two', text('off-two', 'Also turned off.'));
+  skill(tCopilot, 'copilot-only', text('copilot-only', 'Only in Copilot CLI.'));
+  for (let i = 1; i <= 5; i++) writeFileSync(join(tAgents, `agent-${String(i).padStart(2, '0')}.md`), `---\nname: agent-${String(i).padStart(2, '0')}\ndescription: Agent ${i}.\n---\nRun agent ${i}.\n`);
+  for (const key of ['agent-off-1', 'agent-off-2']) writeFileSync(join(tAgents, `${key}.md`), `---\nname: ${key}\ndescription: Off agent.\n---\nRun ${key}.\n`);
+  writeFileSync(join(tHome, '.claude.json'), `${JSON.stringify({ mcpServers: { 'mcp-a': { command: 'node', args: ['-e', '0'] }, 'mcp-b': { command: 'node', args: ['-e', '1'] }, 'mcp-off': { command: 'node', args: ['-e', '2'] } } }, null, 2)}\n`);
+  writeClaudeInstall(tHome, 'tool-market', 'tool-kit', '1.0.0', { 'skills/plug-triage/SKILL.md': text('plug-triage', 'Plugin skill.') });
+  writeFileSync(join(tData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: tHome } }));
+  const t = await launch(tData, [], tReal, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
+  try {
+    await openKind(t, 'all');
+    for (let i = 1; i <= 22; i++) await t.click(`#${rowPart('add', 'skills', `skill-${String(i).padStart(2, '0')}`)}`);
+    for (const key of ['off-one', 'off-two']) { await t.click(`#${rowPart('add', 'skills', key)}`); await t.click(`#${rowPart('switch', 'skills', key)}`); }
+    for (const key of ['mcp-a', 'mcp-b', 'mcp-off']) await t.click(`#${rowPart('add', 'mcp', key)}`);
+    await t.click(`#${rowPart('switch', 'mcp', 'mcp-off')}`);
+    for (let i = 1; i <= 5; i++) await t.click(`#${rowPart('add', 'agents', `agent-${String(i).padStart(2, '0')}`)}`);
+    for (const key of ['agent-off-1', 'agent-off-2']) { await t.click(`#${rowPart('add', 'agents', key)}`); await t.click(`#${rowPart('switch', 'agents', key)}`); }
+    await t.click('#nav-harnesses');
+    await t.click('button#harness-claude-cli.harness-card-head');
+    await t.click('#harness-tab-skills');
+
+    const sidebarAs = async open => { if (await t.run(`document.body.classList.contains('rail')`) === open) await t.click('#sidebar-toggle'); };
+    const readBar = () => t.run(`(() => {
+      const b = document.querySelector('.harness-bar');
+      const tabs = [...document.querySelectorAll('.harness-tab')];
+      const sw = [...document.querySelectorAll('.harness-switch-item')];
+      const tabLines = new Set(tabs.map(el => Math.round(el.getBoundingClientRect().top))).size;
+      const swLines = new Set(sw.map(el => Math.round(el.getBoundingClientRect().top))).size;
+      const fullTabs = tabs.every(el => el.scrollWidth <= el.clientWidth + 1);
+      const allNamed = sw.every(el => { const n = el.querySelector('.harness-switch-name'); return n && n.offsetWidth > 0 && el.getAttribute('aria-label') === el.title; });
+      const tabsTop = Math.min(...tabs.map(el => el.getBoundingClientRect().top));
+      const swBottom = Math.max(...sw.map(el => el.getBoundingClientRect().bottom));
+      const stacked = b.classList.contains('harness-bar-stacked');
+      const marksOnly = b.classList.contains('harness-bar-marks');
+      return { count: sw.length, content: b.clientWidth, tabLines, swLines, fullTabs, allNamed, stacked, marksOnly, swAboveTabs: tabsTop >= swBottom - 1 };
+    })()`);
+    const checkNav = async (toolCount, label) => {
+      const states = {};
+      for (const [width, height] of [SMALLEST, [1316, 819], [1728, 1117]]) {
+        for (const open of [false, true]) {
+          await sizeTo(t, width, height);
+          await sidebarAs(open);
+          const bar = await readBar();
+          states[`${width}-${open ? 'open' : 'rail'}`] = bar.stacked ? 'stacked' : 'single';
+          const expectSingle = width === 1728 || (width === 1316 && (!open || toolCount === 5));
+          same(`${label} (${toolCount} tools) at ${width}×${height} ${open ? 'sidebar open' : 'rail'}: full tabs on one row, switcher always named and above tabs when stacked`,
+            [bar.count, bar.tabLines, bar.swLines, bar.fullTabs, bar.allNamed, bar.marksOnly, bar.stacked, !bar.stacked || bar.swAboveTabs],
+            [toolCount, 1, 1, true, true, false, !expectSingle, true]);
+          same(`${label} (${toolCount} tools) at ${width}×${height} ${open ? 'sidebar open' : 'rail'}: nothing cut off`, await t.run(CUT_OFF), []);
+        }
+      }
+      // Real redraw right across the single-row / stacked threshold with rail sidebar (56 px).
+      await sizeTo(t, 1728, 900);
+      await sidebarAs(false);
+      const needed = await t.run(`(() => {
+        const tabs = [...document.querySelectorAll('.harness-tab')], sw = document.querySelector('.harness-switch');
+        return Math.ceil(tabs.at(-1).getBoundingClientRect().right - document.querySelector('.harness-bar').getBoundingClientRect().left + 12 + sw.offsetWidth + 16);
+      })()`);
+      await sizeTo(t, needed + 56 - 16, 900);
+      await sidebarAs(false);
+      const below = await readBar();
+      await sizeTo(t, needed + 56 + 24, 900);
+      await sidebarAs(false);
+      const above = await readBar();
+      same(`${label} (${toolCount} tools) threshold redraw (${needed}px content): stacks below and shares one row above with all names shown`,
+        [below.stacked, below.allNamed, below.tabLines, above.stacked, above.allNamed, above.tabLines],
+        [true, true, 1, false, true, 1]);
+      await fullSize(t);
+    };
+    await checkNav(5, 'tool page nav');
+
+    // Add 6th tool (Antigravity) and check every width/sidebar combination and threshold again.
+    writeFileSync(join(tHome, '.local/bin/agy'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.0.0" && exit 0\nexit 9\n');
+    chmodSync(join(tHome, '.local/bin/agy'), 0o755);
+    mkdirSync(join(tHome, '.gemini/config/skills'), { recursive: true });
+    await t.click('#header-refresh');
+    for (let tries = 0; tries < 40 && (await t.run(`document.querySelectorAll('.harness-switch-item').length`)) !== 6; tries++) await wait(100);
+    await checkNav(6, 'tool page nav');
+
+    // Switch column head ("Every tool" + (?)), single tool mark on ordinary & plugin rows, global switch labels, 28×28 file icon, all 6 tools in opened details.
+    const tabHead = await t.run(`(() => {
+      const head = document.querySelector('.ov-tab-head');
+      const mark = document.getElementById('tab-switch-info');
+      const r = mark?.getBoundingClientRect();
+      return { exists: !!head, text: head?.querySelector('.ov-tab-head-switch')?.innerText?.trim() ?? null, markLabel: head?.querySelector('.ov-tab-head-mark')?.textContent?.trim() ?? null, markSized: !!(r && r.width > 0 && r.height > 0) };
+    })()`);
+    same('tool tab shows Every tool (?) above the switch column and the tool name above its mark column',
+      tabHead, { exists: true, text: 'Every tool', markLabel: 'Claude Code', markSized: true });
+    await t.click('#tab-switch-info');
+    same('clicking Every tool (?) opens its explanation card and Escape closes it',
+      await t.run(`(() => { const c = document.getElementById('tab-switch-info-card'); return [!!c?.matches(':popover-open'), c?.textContent?.trim() ?? null]; })()`),
+      [true, 'Each switch turns an item on or off in every tool that can take it. Open a row to change one tool alone.']);
+    await t.press('Escape');
+
+    const tabMarks = await t.run(`(() => {
+      const ord = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'skill-01')}"]');
+      const plug = document.querySelector('.ov-plugin-row');
+      const sw = ord?.querySelector('.switch');
+      const pSw = plug?.querySelector('.switch');
+      const fileBtn = ord?.querySelector('.row-file-btn')?.getBoundingClientRect();
+      return {
+        ordTools: [...(ord?.querySelectorAll('.tool-mark') ?? [])].map(el => el.dataset.tool),
+        plugTools: [...(plug?.querySelectorAll('.tool-mark') ?? [])].map(el => el.dataset.tool),
+        swLabel: sw?.getAttribute('aria-label') ?? null,
+        pSwGlobal: /every tool that can switch it/.test(pSw?.getAttribute('aria-label') ?? ''),
+        fileHit: !!(fileBtn && fileBtn.width >= 26 && fileBtn.height >= 26),
+      };
+    })()`);
+    same('Claude Code’s Skills tab shows only Claude Code’s mark on ordinary and plugin rows, keeps global switch labels, and sizes the file icon',
+      tabMarks,
+      { ordTools: ['claude-cli'], plugTools: ['claude-cli'], swLabel: 'skill-01: on. Click to take it out of every tool; Central Knot keeps it.', pSwGlobal: true, fileHit: true });
+
+    await t.click(`#${rowPart('open', 'skills', 'skill-01')}`);
+    same('opening a row on Claude Code’s tab still lists all 6 tools in its details (Claude Code first)',
+      await t.all('.details-tool-label', 'e.textContent.trim()'), ['Claude Code', 'Copilot CLI', 'Codex', 'Pi', 'OpenCode', 'Antigravity']);
+    await t.click(`#${rowPart('open', 'skills', 'skill-01')}`);
+
+    // "What the marks mean" disclosure sits in the toolbar, opens directly below it with one entry per visual look, and leaves no floating empty divider.
+    const legendClosed = await t.run(`(() => {
+      const d = document.getElementById('mark-legend'), s = document.getElementById('mark-legend-toggle');
+      const r = s?.getBoundingClientRect();
+      return { inToolbar: !!d?.closest('.toolbar'), open: !!d?.open, label: s?.textContent?.trim() ?? null, body: !!document.getElementById('mark-legend-body'), sized: !!(r && r.width >= 60 && r.height >= 18) };
+    })()`);
+    same('tool tab places What the marks mean in the toolbar behind a closed disclosure',
+      legendClosed, { inToolbar: true, open: false, label: 'What the marks mean', body: false, sized: true });
+    await t.click('#mark-legend-toggle');
+    const legendOpen = await t.run(`(() => {
+      const d = document.getElementById('mark-legend'), body = document.getElementById('mark-legend-body');
+      const items = [...(body?.querySelectorAll('.legend-item') ?? [])].map(el => el.textContent.trim());
+      const barBottom = document.querySelector('.toolbar').getBoundingClientRect().bottom;
+      const bodyTop = body?.getBoundingClientRect().top ?? 0;
+      return { open: !!d?.open, belowToolbar: !!body && Math.abs(bodyTop - barBottom) <= 2, items };
+    })()`);
+    same('opening What the marks mean groups keyWords by visual look right under the toolbar',
+      legendOpen, { open: true, belowToolbar: true, items: ['On there / Has the current version / Has it', 'No copy', 'Off: Central Knot keeps it'] });
+    await t.click('#mark-legend-toggle');
+
+    // Plain "Jump to:" links on a long tool list at 860×528: all section names without counts, sticky heads stay in sight, landing heading flashes with an accent bar and clears under reduced motion.
+    await sizeTo(t, ...SMALLEST);
+    await sidebarAs(false);
+    const jumpState = await t.run(`(() => {
+      const nav = document.querySelector('.harness-page .section-jump');
+      const lead = nav?.querySelector('.section-jump-lead')?.textContent?.trim() ?? null;
+      const links = [...(nav?.querySelectorAll('.section-jump-link') ?? [])];
+      const visible = links.filter(el => !el.hidden).map(el => el.textContent.trim());
+      const noPill = links.every(el => getComputedStyle(el).borderTopWidth === '0px');
+      return { shown: !!nav && !nav.hidden, lead, visible, noPill };
+    })()`);
+    same('long tool list shows plain Jump to: links with all section names and no counts', jumpState, {
+      shown: true,
+      lead: 'Jump to:',
+      visible: ['On', 'Found', 'Only through a plugin', 'Not in Claude Code', 'Off'],
+      noPill: true,
+    });
+    await t.click('#jump-off');
+    const jumpedOff = await t.run(`(() => {
+      const list = document.querySelector('.scroll.matrix').getBoundingClientRect();
+      const head = document.querySelector('.ov-tab-head').getBoundingClientRect();
+      const off = document.querySelector('.ov-section[data-section="off"]');
+      const r = off.getBoundingClientRect();
+      const links = [...document.querySelectorAll('.harness-page .section-jump-link')].filter(el => !el.hidden).map(el => el.textContent.trim());
+      return {
+        stickyInSight: Math.abs(head.top - list.top) <= 2,
+        inViewBelowHead: r.top >= head.bottom - 2 && r.bottom <= list.bottom + 2,
+        flashed: off.classList.contains('section-flash'),
+        accentBar: /inset 3px 0px 0px|3px 0px 0px 0px inset/.test(getComputedStyle(off).boxShadow),
+        sameLinks: links.length === 5,
+      };
+    })()`);
+    same('jumping to Off keeps sticky heads in sight, lands Off uncovered with an accent-bar flash, and keeps all Jump to: links', jumpedOff,
+      { stickyInSight: true, inViewBelowHead: true, flashed: true, accentBar: true, sameLinks: true });
+    // Under prefers-reduced-motion: reduce, the landing mark still clears on its timer instead of sticking until a redraw.
+    await t.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await t.click('#jump-found');
+    const reducedBefore = await t.run(`document.querySelector('.ov-section[data-section="found"]').classList.contains('section-flash')`);
+    await wait(2600);
+    const reducedAfter = await t.run(`document.querySelector('.ov-section[data-section="found"]').classList.contains('section-flash')`);
+    await t.send('Emulation.setEmulatedMedia', { features: [] });
+    same('under reduced motion, the landing mark appears on jump and clears after its timer', [reducedBefore, reducedAfter], [true, false]);
+    await t.click('#jump-on');
+    const jumpedOn = await t.run(`(() => {
+      const on = document.querySelector('.ov-section[data-section="on"]');
+      return { atTop: document.querySelector('.scroll.matrix').scrollTop <= 2, flashed: on.classList.contains('section-flash') };
+    })()`);
+    same('jumping back to On scrolls to top and marks On', jumpedOn, { atTop: true, flashed: true });
+
+    // Short MCP tab hides section jump even after opening an inline file panel (.details.details-file-only) that overflows the viewport.
+    await t.click('#harness-tab-mcp');
+    same('short MCP tab hides the section jump', await t.run(`(() => { const n = document.querySelector('.harness-page .section-jump'); return !n || n.hidden; })()`), true);
+    await t.click(`#${rowPart('file', 'mcp', 'mcp-a')}`);
+    for (let tries = 0; tries < 40 && !(await t.exists('.details.details-file-only')); tries++) await wait(100);
+    same('opening an inline file panel on a short tab keeps the section jump hidden',
+      await t.run(`(() => { const n = document.querySelector('.harness-page .section-jump'); return [!!document.querySelector('.details.details-file-only'), !n || n.hidden]; })()`),
+      [true, true]);
+    await t.click(`#${rowPart('file', 'mcp', 'mcp-a')}`);
+
+    // Borderline 7-row Agents tab at 860×548 sidebar open: overflows ONLY because harness-bar stacked, and shows section jump on initial tab draw without a resize.
+    await sizeTo(t, 860, 548);
+    await sidebarAs(true);
+    await t.click('#harness-tab-agents');
+    same('borderline 7-row tab shows section jump immediately on first draw after the stacked bar settles',
+      await t.run(`(() => { const b = document.querySelector('.harness-bar'), n = document.querySelector('.harness-page .section-jump'); return [b.classList.contains('harness-bar-stacked'), !!n && !n.hidden]; })()`),
+      [true, true]);
+    await t.click('#harness-tab-skills');
+
+    // Optional picture capture for the tool page (--shots with CK_SHOT_ONLY=tool-page or unrestricted).
+    const shotOnly = process.env.CK_SHOT_ONLY ? new Set(process.env.CK_SHOT_ONLY.split(',')) : null;
+    if (shots && (!shotOnly || shotOnly.has('tool-page'))) {
+      const take = async (name, [w, h], open, theme) => {
+        await sizeTo(t, w, h);
+        await sidebarAs(open);
+        await t.run(`document.activeElement?.blur(); window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+        await wait(120);
+        await t.shot(name);
+      };
+      await t.run(`const d = document.getElementById('mark-legend'); if (d?.open) document.getElementById('mark-legend-toggle')?.click();`);
+      await t.settle();
+      await take('tool-page-skills-860-open-light', [860, 560], true, 'light');
+      await take('tool-page-skills-1316-dark', [1316, 819], true, 'dark');
+      await sizeTo(t, 860, 560);
+      await sidebarAs(false);
+      await t.run(`window.centralKnot.setAppearance('light')`);
+      await wait(100);
+      await t.click('#mark-legend-toggle');
+      await t.run(`document.activeElement?.blur()`);
+      await wait(80);
+      await t.shot('tool-page-legend-open-860-light');
+      await t.click('#mark-legend-toggle');
+      await t.click('#jump-off');
+      await t.run(`document.activeElement?.blur()`);
+      await wait(40);
+      await t.shot('tool-page-jump-860-light');
+      // Open Every tool (?) card while plugin row is visible beneath the sticky head.
+      await t.click('#jump-plugins');
+      await t.click('#tab-switch-info');
+      await wait(80);
+      await t.shot('tool-page-card-open-860-light');
+      await t.press('Escape');
+      await t.run(`window.centralKnot.setAppearance('system')`);
+      await wait(80);
+    }
+
+    // Library still shows all 6 tool marks and open key with no toolbar disclosure.
+    await openKind(t, 'skills');
+    same('Library still shows all 6 tool marks per row and an open legend', [
+      await t.run(`document.querySelectorAll('.ov-row[data-key="${rowPart('', 'skills', 'skill-01')}"] .tool-mark').length`),
+      await t.exists('#mark-legend'),
+      await t.exists('.legend .legend-item'),
+    ], [6, false, true]);
+    same('no page errors, tool page fit', t.pageErrors, []);
+  } finally {
+    await t.quit();
   }
 }
 
@@ -7374,6 +7643,37 @@ async function dockedListFlow() {
   const under = await place();
   await sidebarOpen(false);
   same('across the dock’s breakpoint and back, the opened row stays open, where it was in its table', [under, await place()], [['under its row', top, offset], ['docked', top, offset]]);
+  // Long filename + hittable file icon win over description when docked on both the tool tab and Library.
+  const longDocked = 'quarterly-platform-engineering-release-doc';
+  skill(claude, longDocked, text(longDocked, 'Summarises quarterly platform engineering changes and release milestones.'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !(await a.exists(`#${rowPart('add', 'skills', longDocked)}`)); tries++) await wait(100);
+  await a.click(`#${rowPart('add', 'skills', longDocked)}`);
+  const shortDocked = names.filter(name => name !== 'research').sort((first, second) => first.length - second.length)[0];
+  const checkDockedLong = async (where, minBtn, expectLongHidden) => {
+    await sizeTo(a, 1316, 787); await sidebarOpen(false);
+    const got = await a.run(`(() => {
+      const row = document.querySelector('.dock-main .ov-row[data-key="${rowPart('', 'skills', longDocked)}"]');
+      const other = document.querySelector('.dock-main .ov-row[data-key="${rowPart('', 'skills', shortDocked)}"]');
+      const cell = row?.querySelector('.ov-name'), text = row?.querySelector('.ov-name-text'), btn = row?.querySelector('.row-file-btn');
+      const cr = cell?.getBoundingClientRect(), br = btn?.getBoundingClientRect();
+      return {
+        nameWhole: !!(text && text.scrollWidth <= text.clientWidth + 1),
+        nameCut: !!cell?.classList.contains('name-cut'),
+        longAboutHidden: !row?.querySelector('.ov-name-about')?.offsetWidth,
+        otherAboutShown: !!(other?.querySelector('.ov-name-about')?.offsetWidth),
+        btnHit: !!(br && cr && br.width >= ${minBtn} && br.height >= ${minBtn} && br.right <= cr.right + 1 && br.bottom <= cr.bottom + 1),
+      };
+    })()`);
+    same(`${where} docked at 1260 px prioritizes the 42-letter filename and hittable file icon over its own description while other rows keep theirs`,
+      got, { nameWhole: true, nameCut: false, longAboutHidden: expectLongHidden, otherAboutShown: true, btnHit: true });
+  };
+  await checkDockedLong('Claude Code’s Skills tab', 26, false);
+  for (const selector of ['#nav-library', '#library-kind-all']) await a.click(selector);
+  if (!(await a.exists('.dock-main'))) await a.click(`#${rowPart('open', 'skills', 'research')}`);
+  await a.run(`(() => { const sort = document.querySelector('#item-order'); sort.value = 'name'; sort.dispatchEvent(new Event('change')); })()`);
+  await a.settle();
+  await checkDockedLong('Library by Name', 20, true);
   same('no page errors, the docked list', a.pageErrors, []);
   await a.quit();
 }
@@ -23105,6 +23405,12 @@ async function skillFileFlow() {
     await a.click('#nav-harnesses');
     await a.click('button#harness-claude-cli.harness-card-head');
     await a.click('#harness-tab-skills');
+    const tabFileHit = await a.run(`(() => {
+      const row = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]');
+      const br = row?.querySelector('.row-file-btn')?.getBoundingClientRect(), rr = row?.getBoundingClientRect();
+      return { hit: !!(br && br.width >= 26 && br.height >= 26), rowHeight: Math.round(rr?.height ?? 0) };
+    })()`);
+    same('on Claude Code’s Skills tab, Open file icon has a hittable target on its 40px row', tabFileHit, { hit: true, rowHeight: 40 });
     await a.click(reviewBtn);
     await until(() => a.exists('.file-open-box pre.content'));
     same('on Claude Code’s Skills tab, Open file opens in 1 click with Claude Code’s path and details closed', [
