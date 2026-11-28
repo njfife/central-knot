@@ -8,13 +8,18 @@ import { test } from 'node:test';
 import type { HarnessId, HomeView } from '../src/types.ts';
 import { findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
-// Central Knot's store keeps gone's last version (h2), and no longer keeps old's (h3: let go at History's days); a tool's found copy of gone reads otherwise.
+// Central Knot's store keeps notes's (h1), guide's (a2) and docs's (s2) current versions, gone's last version (h2), and no longer keeps old's (h3: let go at History's days); a tool's copy reads otherwise.
 // It keeps scout's (an agent's: a1) and tracker's (a server's: s1) last versions too: each read by its key and hash.
 const { dispatch } = installDom({
-  skillVersionFile: async (key: string, hash: string) => (key === 'gone' && hash === 'h2' ? { files: ['SKILL.md'], text: 'gone, as Central Knot kept it' } : null),
+  skillVersionFile: async (key: string, hash: string) => (key === 'notes' && hash === 'h1' ? { files: ['SKILL.md'], text: 'notes, as Central Knot stores it' }
+    : key === 'gone' && hash === 'h2' ? { files: ['SKILL.md'], text: 'gone, as Central Knot kept it' } : null),
   skillFoundFile: async () => ({ files: ['SKILL.md'], text: 'a tool’s copy of gone' }),
-  agentVersion: async (key: string, hash: string) => (key === 'scout' && hash === 'a1' ? { name: 'scout', description: 'Scouts.', prompt: 'Look around first.' } : null),
-  serverStored: async (key: string, hash: string) => (key === 'tracker' && hash === 's1' ? { files: [], text: '{ "command": "tracker" }' } : null),
+  agentVersion: async (key: string, hash: string) => (key === 'guide' && hash === 'a2' ? { name: 'guide', description: 'Guides.', prompt: 'Stored agent prompt.' }
+    : key === 'scout' && hash === 'a1' ? { name: 'scout', description: 'Scouts.', prompt: 'Look around first.' } : null),
+  agentFile: async () => ({ files: ['guide.md'], directory: '/home/.claude/agents', text: 'Edited agent in Claude Code.' }),
+  serverStored: async (key: string, hash: string) => (key === 'docs' && hash === 's2' ? { files: [], text: '{ "command": "stored-docs" }' }
+    : key === 'tracker' && hash === 's1' ? { files: [], text: '{ "command": "tracker" }' } : null),
+  serverEntry: async () => ({ files: ['.claude.json'], directory: '/home', holder: 'mcpServers', text: '{ "command": "claude-edit" }' }),
 });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
@@ -29,11 +34,14 @@ const homeAt = (home: string): HomeView => ({
   home, label: 'Test', syncOn: true, mode: 'fixture', readId: 1,
   snapshots: [{ harness: 'claude-cli', skills: [{ folder: 'gone', directory: '/found/gone', realDirectory: '/found/gone', rootLabel: '~/.claude/skills' }] }],
   sync: { managed: tools, present: tools, caughtUp: [], gate: { state: 'open' }, access: { allowed: true } },
-  skills: { ...kind, items: [{ key: 'notes', name: 'notes', on: true, copies: {}, except: [] }, { key: 'gone', name: 'gone', copies: {}, except: [] }],
+  skills: { ...kind, items: [{ key: 'notes', name: 'notes', on: true, copies: { 'claude-cli': 'current' }, paths: { 'claude-cli': '/home/.claude/skills/notes' }, hashes: { 'claude-cli': 'h1' }, except: [] },
+    { key: 'gone', name: 'gone', copies: {}, except: [] }],
     library: { notes: { key: 'notes', name: 'notes', on: true, hash: 'h1', ...stored }, gone: { key: 'gone', name: 'gone', on: false, deleted: true, hash: 'h2', ...stored },
       old: { key: 'old', name: 'old', on: false, deleted: true, hash: 'h3', ...stored } } },
-  agents: { ...kind, library: { scout: { key: 'scout', name: 'scout', on: false, deleted: true, hash: 'a1', ...stored } } },
-  mcp: { ...kind, library: { tracker: { key: 'tracker', name: 'tracker', on: false, deleted: true, hash: 's1', ...stored } } }, pluginItems: [],
+  agents: { ...kind, items: [{ key: 'guide', name: 'guide', on: true, copies: { 'claude-cli': 'current' }, paths: { 'claude-cli': '/home/.claude/agents/guide.md' }, except: [] }],
+    library: { guide: { key: 'guide', name: 'guide', on: true, hash: 'a2', ...stored }, scout: { key: 'scout', name: 'scout', on: false, deleted: true, hash: 'a1', ...stored } } },
+  mcp: { ...kind, items: [{ key: 'docs', name: 'docs', on: true, copies: { 'claude-cli': 'current' }, paths: { 'claude-cli': '/home/.claude.json' }, except: [] }],
+    library: { docs: { key: 'docs', name: 'docs', on: true, hash: 's2', ...stored }, tracker: { key: 'tracker', name: 'tracker', on: false, deleted: true, hash: 's1', ...stored } } }, pluginItems: [],
 } as unknown as HomeView);
 
 setRenderer(() => {});
@@ -118,6 +126,46 @@ test('a deleted agent’s and a deleted server’s last version kept is its defi
       ['Central Knot’s definition', false, text], key);
     draw().mark.click();
   }
+});
+
+test('a storedOnly place opens Central Knot’s stored version for skills, agents and servers with no tool’s copy, chooser or path; another place keeps current version and copies', async () => {
+  state.home = homeAt('/tmp/filepanel-stored-only');
+  const storedPlace = pagePlace('harnesses', { storedOnly: true });
+  for (const [kind, key, label, text] of [
+    ['skills', 'notes', 'SKILL.md', 'notes, as Central Knot stores it'],
+    ['agents', 'guide', 'Central Knot’s definition', 'Stored agent prompt.'],
+    ['mcp', 'docs', 'Central Knot’s definition', '{ "command": "stored-docs" }'],
+  ] as const) {
+    const drawHere = () => {
+      const mark = itemFile(storedPlace, kind, key);
+      return { mark: mark?.mark as unknown as FakeNode, panel: placePanel(storedPlace, [mark])?.panel as unknown as FakeNode | undefined };
+    };
+    const before = drawHere();
+    assert.equal(before.mark.attrs.title, 'Open Central Knot’s version', kind);
+    before.mark.click();
+    await new Promise(resolve => setTimeout(resolve));
+    const panel = drawHere().panel;
+    const shown = kind === 'skills' ? findNode(panel, el => el.classList.contains('file-tab') && el.classList.contains('is-active')) : findNode(panel, el => el.classList.contains('file-open-name'));
+    assert.deepEqual([
+      allOf(panel, el => el.classList.contains('file-open-now')).map(textOf), textOf(shown), allOf(panel, el => el.tag === 'pre').map(textOf).at(-1),
+      !!findNode(panel, el => el.tag === 'select'), !!findNode(panel, el => el.classList.contains('file-open-foot')),
+    ], [['Central Knot’s version'], label, text, false, false], kind);
+    drawHere().mark.click();
+  }
+  const drawRegular = () => {
+    const mark = itemFile(place, 'mcp', 'docs', 'regular');
+    return { mark: mark?.mark as unknown as FakeNode, panel: placePanel(place, [mark])?.panel as unknown as FakeNode | undefined };
+  };
+  const regular = drawRegular();
+  assert.equal(regular.mark.attrs.title, 'Open the current version');
+  regular.mark.click();
+  await new Promise(resolve => setTimeout(resolve));
+  const regularPanel = drawRegular().panel;
+  assert.deepEqual([
+    allOf(regularPanel, el => el.classList.contains('file-open-now')).map(textOf), textOf(findNode(regularPanel, el => el.tag === 'pre')),
+    !!findNode(regularPanel, el => el.tag === 'select'), !!findNode(regularPanel, el => el.classList.contains('file-open-foot')),
+  ], [['current version'], '{ "command": "claude-edit" }', true, true]);
+  drawRegular().mark.click();
 });
 
 test('the file open on a page is forgotten on another visit and on another home', () => {
