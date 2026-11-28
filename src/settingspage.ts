@@ -2,13 +2,15 @@
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time. History's
 // time control (historyWindowControl, openHistoryWindow) is shared with historypage.ts. Under "This
 // home" sit two per-home switches: Synchronize everything, kept in the home's sync record (share.ts SyncRecord syncEverything)
-// and switched through app.ts switchSyncEverything, and Keep session costs, kept per canonical home in app-settings.json
+// and switched through app.ts switchSyncEverything (each added item Central Knot holds gets its file mark, opening its text
+// under that line: settingsFiles → filepanel.ts), and Keep session costs, kept per canonical home in app-settings.json
 // (sessionkeep.ts). Help's Log row also shows Central Knot's own log under it (Show log: its
 // last lines, read by main.ts readLog, never stored); the log is written by main.ts log. A settings file that couldn't be read at
 // launch is said in a note at the top (keptNote) until it is closed, and first on the Overview (overview.ts needsYou).
 import { acting, announce, keepingBusy, loadHistory, machine, rerender, switchSessionCosts, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
 import { outcomeBand } from './matrix.ts';
 import { button, h, icon, infoCardId, infoMark, toggle, type Child } from './dom.ts';
+import { itemFile, pagePlace, placePanel } from './filepanel.ts';
 import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import { openWalkthrough } from './firstsetup.ts';
@@ -21,6 +23,9 @@ import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
 import { checkNow, settingUpdateButton, unsavedWork, updates } from './updateview.ts';
 import { checkPluginsNow, checkedWords, pluginUpdates } from './pluginupdateview.ts';
 import { pageNames } from './words.ts';
+
+/** Settings as a file panel's place (filepanel.ts pagePlace): an added item's file opens under its line. */
+const settingsFiles = pagePlace('settings');
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
@@ -383,9 +388,9 @@ const messageLook: Record<RowMessage['tone'], { glyph: IconName; role: 'status' 
  * One line beneath a row, its action after the text. `id` (from the row) also names the action, so focus on it survives a
  * redraw. `announce` false for a line that describes the row's state rather than news to announce.
  */
-function messageLine({ text, detail, tone, action }: RowMessage, { id, announce = true }: { id: string; announce?: boolean }): HTMLElement {
+function messageLine({ text, detail, tone, action }: Omit<RowMessage, 'text'> & { text: Child | Child[] }, { id, announce = true, anchored = false }: { id: string; announce?: boolean; anchored?: boolean }): HTMLElement {
   const { glyph, role } = messageLook[tone];
-  return h(`p.setting-message.setting-${tone}`, { id, role: announce ? role : undefined }, icon(glyph, 14),
+  return h(`p.setting-message.setting-${tone}${anchored ? '.file-anchored' : ''}`, { id, role: announce ? role : undefined }, icon(glyph, 14),
     h('span.setting-message-body', {}, h('span.setting-message-text', {}, text, detail && [' ', h('span.setting-message-detail', {}, detail)]),
       action && h('button.text-action', { type: 'button', id: `${id}-action`, onclick: action.run }, action.label)));
 }
@@ -550,12 +555,36 @@ function syncEverythingRow(): HTMLElement | null {
   const switchOn = undoEvent ? state.history.data?.find(entry => entry.id === undoEvent) : undefined;
   const takenBack = switchOn && state.history.data ? new Set(everythingPlan(switchOn, state.history.data, entriesNow(home)).takeBack.map(entry => entry.id)) : undefined;
   // What it added comes first; History stays off only on lines the standing band's Undo actually takes back as items stand now.
-  const added = (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => {
+  // Each held item's name gets its file mark (filepanel.ts itemFile), keyed by the notice's id so two lines naming one item keep their own.
+  const LEADING_PUNCT = /^[,.;:]/;
+  const entries = (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => {
     if (told.kind !== 'taken-in' || state.dismissed.has(told.history)) return [];
     const ids = told.histories?.length ? told.histories : [told.history];
     const covered = !!takenBack && ids.every(id => takenBack.has(id));
-    return [messageLine({ text: sentences(libraryWords[kind]).takenInWords(told, { history: !covered, lead: false }), tone: 'done', action: covered ? undefined : { label: 'History', run: () => showPage('history') } }, { id: `setting-sync-everything-added-${kind}` })];
+    const marks = told.keys.map(key => itemFile(settingsFiles, kind, key, told.history));
+    const parts = sentences(libraryWords[kind]).takenInParts(told, { history: !covered, lead: false });
+    // takenInParts appends " History can undo it/each." as the last string when history is true.
+    const historyTail = !covered ? parts.pop() : undefined;
+    // Keep each name with its mark and trailing punctuation, and the History link with its sentence, so wrapping leaves none alone.
+    const text = parts.map<Child>((part, at) => {
+      if (typeof part !== 'string') {
+        const next = parts[at + 1], punct = typeof next === 'string' && LEADING_PUNCT.test(next) ? next[0] : '';
+        const mark = marks[part.index]?.mark;
+        return mark ? h('span.setting-added-name', {}, part.name, mark, punct) : `${part.name}${punct}`;
+      }
+      const prev = parts[at - 1];
+      return prev && typeof prev !== 'string' && LEADING_PUNCT.test(part) ? part.slice(1) : part;
+    });
+    if (typeof historyTail === 'string') text.push(' ', h('span.setting-added-tail', {}, historyTail.trimStart(),
+      h('button.text-action', { type: 'button', id: `setting-sync-everything-added-${kind}-action`, onclick: () => showPage('history') }, 'History')));
+    return [{ kind, marks, text }];
   }));
+  const file = placePanel(settingsFiles, entries.flatMap(entry => entry.marks));
+  const added = entries.flatMap(({ kind, marks, text }) => {
+    const panel = file && marks.includes(file.mark) ? file.panel : null;
+    const line = messageLine({ text, tone: 'done' }, { id: `setting-sync-everything-added-${kind}`, anchored: !!panel });
+    return panel ? [line, panel] : [line];
+  });
   const hint = cannot ?? 'Also adds what turns up in a tool; Automatic sync in the status bar keeps what’s already in Central Knot in step.';
   const described = [cannot ? null : infoCardId('setting-sync-everything-info'), 'setting-sync-everything-hint', notice && 'setting-sync-everything-notice'].filter(Boolean).join(' ');
   return settingRow('sync-everything', 'Synchronize everything', hint,
@@ -613,6 +642,7 @@ export function settingsPage(): HTMLElement {
   const signInDescribed = cannot ? 'setting-sign-in-hint' : infoCardId('setting-sign-in-info');
   const systemSays: RowMessage | undefined = signIn?.reason && signIn.place ? { text: signIn.reason.text, tone: 'system', action: openSignInPlace(signIn.place) } : undefined;
   const done = state.outcome?.page === 'settings' && (!!state.outcome.reloads?.length || !!state.outcome.settingsBand) ? outcomeBand() : null;
+  if (!state.home) placePanel(settingsFiles, []);
   return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.settings-scroll', { id: 'settings-scroll' },
     state.home?.settingsUnread ? keptNote(state.home.settingsUnread) : null,
     settingsSection('general', 'General',

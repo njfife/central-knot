@@ -28,7 +28,6 @@ import { installedCopies, type InstalledCopyOf } from './plugins.ts';
 import { loadsKind } from './pluginstatus.ts';
 import { bringForward } from './pluginrecord.ts';
 import { takesPlugins } from './presence.ts';
-import { itemKey } from './library.ts';
 import { reloadsFor, type ReloadChange } from './reload.ts';
 import type { DestinationResult, HarnessId, PassResult, Reason } from './types.ts';
 
@@ -142,7 +141,7 @@ export function passTells(synced: NonNullable<HomePass['synced']>): { copies: De
 /** Confirmed changes made for the items Synchronize everything itself took in during these passes (never unrelated catch-up). */
 export const takenInReloads = (passes: NonNullable<HomePass['synced']>[]): ReloadChange[] =>
   passes.flatMap(pass => (['skills', 'servers', 'agents'] as const).flatMap(key => {
-    const run = pass[key], taken = new Set((run?.notices ?? []).flatMap(notice => (notice.kind === 'taken-in' ? notice.items.map(itemKey) : [])));
+    const run = pass[key], taken = new Set((run?.notices ?? []).flatMap(notice => (notice.kind === 'taken-in' ? notice.keys : [])));
     return run && taken.size ? reloadsFor(run.reloads, taken) : [];
   }));
 
