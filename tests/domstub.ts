@@ -13,6 +13,7 @@ export interface FakeNode {
   focused: number;
   scrollTop: number;
   rect: { top: number; bottom: number; height: number };
+  childElementCount: number;
   textContent: string;
   setAttribute: (key: string, value: string) => void;
   addEventListener: () => void;
@@ -69,6 +70,9 @@ export const makeElement = (tag = 'div'): FakeNode => {
     focused: 0,
     scrollTop: 0,
     rect: { top: 0, bottom: 0, height: 0 },
+    get childElementCount() {
+      return node.children.filter(child => typeof child === 'object' && child !== null).length;
+    },
     get textContent() {
       return textOf(node);
     },
@@ -77,6 +81,7 @@ export const makeElement = (tag = 'div'): FakeNode => {
     },
     setAttribute(key: string, value: string) {
       this.attrs[key] = value;
+      if (key.startsWith('data-')) this.dataset[key.slice(5).replace(/-([a-z])/g, (_, ch: string) => ch.toUpperCase())] = value;
     },
     addEventListener() {},
     replaceChildren(...kids: unknown[]) {

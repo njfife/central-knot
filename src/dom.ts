@@ -323,6 +323,13 @@ export function fitBars(): void {
       else if (!iconsOnly && 'tipShown' in button.dataset) { button.removeAttribute('title'); delete button.dataset.tipShown; }
     }
   }
+  // A harness's tab-and-switcher bar stacks the whole switcher onto row 2 rather than collapsing labels inside .fit-bar.
+  const harnessBar = document.querySelector<HTMLElement>('.harness-bar');
+  const tabList = harnessBar?.querySelector<HTMLElement>('.harness-tabs');
+  if (harnessBar && tabList && harnessBar.querySelector('.harness-switch') && harnessBar.clientWidth) {
+    harnessBar.classList.remove('harness-bar-stacked');
+    if (harnessBar.scrollWidth > harnessBar.clientWidth + 1 || tabList.scrollWidth > tabList.clientWidth + 1) harnessBar.classList.add('harness-bar-stacked');
+  }
 }
 
 /**
@@ -506,7 +513,7 @@ if (typeof document !== 'undefined') {
  *   New native `title` attributes only name an icon, a mark, a "—", a label cut short, or a command's hint (older disabled
  *   reasons in whyOff/lockAttrs and checkbox's help still use `title`).
  */
-export function infoMark(id: string, label: string, text: string, { face = icon('circle-question-mark', 14), look = '' }: { face?: Child | Child[]; look?: string } = {}): HTMLElement {
+export function infoMark(id: string, label: string, text: Child | Child[], { face = icon('circle-question-mark', 14), look = '' }: { face?: Child | Child[]; look?: string } = {}): HTMLElement {
   const enter = hoverInfo(id, true), leave = hoverInfo(id, false);
   const mark = h(`button.info-mark${look ? `.${look}` : ''}`, {
     type: 'button', id, 'aria-label': `About ${label}`, 'aria-describedby': infoCardId(id),
