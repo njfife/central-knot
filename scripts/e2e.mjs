@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer as tcpServer } from 'node:net';
 import { dirname, join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
+import { inflateSync } from 'node:zlib';
 import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
 import { packagedApp } from './package-app.mjs';
@@ -1168,11 +1169,11 @@ async function harnessFlow() {
     const OFF_CARD = 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so.';
     const rowTags = (kind, key) => h.all(`.ov-row[data-key="${rowPart('', kind, key)}"] .row-tag`);
 
-    // Routine tags hidden under Found and Off; non-routine tags kept (shortened under Off, warning tone on can't be taken in, dot before description); Find restores full tags under Results; Off heading omits generic elsewhere note.
-    same('Found and Off drop routine tags while keeping can’t be taken in, copies differ, and shortened switched off in a tool; Off heading has no generic elsewhere note',
+    // Routine tags hidden under Found and Off; non-routine tags kept (shortened under Off, warning tone on can't be added, dot before description); Find restores full tags under Results; Off heading stays quiet without a live note.
+    same('Found and Off drop routine tags while keeping can’t be added, copies differ, and shortened switched off in a tool; Off heading has no live note',
       [await rowTags('skills', 'found-only'), await rowTags('skills', 'bad-found'), await rowTags('skills', 'clash'),
         await rowTags('skills', 'off-a'), await rowTags('skills', 'off-switched'), await headingSays(h, 'off')],
-      [[], ['can’t be taken in'], ['copies differ'], [], ['switched off in Codex'], 'Off3']);
+      [[], ['can’t be added'], ['copies differ'], [], ['switched off in Codex'], 'Off3']);
     const tagVisuals = await h.run(`(() => {
       const dot = key => { const el = document.querySelector('.ov-row[data-key="' + key + '"] .ov-name-about'); return el ? getComputedStyle(el, '::before').content : null; };
       const bad = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'bad-found')}"] .row-tag');
@@ -1188,8 +1189,13 @@ async function harnessFlow() {
         offStrong: !!offColor && offColor === getComputedStyle(offName).color && offColor !== getComputedStyle(offAbout).color && offColor !== getComputedStyle(differs).color,
       };
     })()`);
-    same('kept tags (copies differ too) separate from descriptions with ·, plain rows have no ·, neutral tags take stronger text tone, and can’t be taken in shares copies differ’s warning tone',
+    same('kept tags (copies differ too) separate from descriptions with ·, plain rows have no ·, neutral tags take stronger text tone, and can’t be added shares copies differ’s warning tone',
       tagVisuals, { clashDot: '"·"', offDot: '"·"', plainDot: 'none', badWarn: true, offStrong: true });
+    await h.click(`#${rowPart('open', 'skills', 'bad-found')}`);
+    same('opening a row that can’t be added omits the repeating status line and shows the tool reason directly',
+      [await h.exists('.details-status'), (await h.text('.details') ?? '').includes('can’t be copied as it is')],
+      [false, true]);
+    await h.click(`#${rowPart('open', 'skills', 'bad-found')}`);
     const waitForEl = async sel => { for (let tries = 0; tries < 40 && !(await h.exists(sel)); tries++) await wait(100); };
     const findText = async typed => { await h.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`); await h.settle(); };
     for (const [query, key, wantTag] of [['found-only', 'found-only', 'not in Central Knot'], ['off-a', 'off-a', 'in Central Knot only'], ['off-switched', 'off-switched', 'in Central Knot · switched off in Codex']]) {
@@ -1245,34 +1251,34 @@ async function harnessFlow() {
       [await rowTags('skills', 'off-c'), await rowTags('skills', 'found-only')],
       [['still in Codex until sync runs'], ['not in Central Knot']]);
 
-    // Library Skills: 4 Off rows with 1 pending Codex removal, card closed; keyboard-focusable marks on Found, Only through a plugin and Off; stable heading heights.
-    same('Library Skills: no heading says Synchronize everything in Settings, On has no mark, and Off 4 shows 1 still in Codex until sync runs with card closed',
+    // Library Skills: 4 Off rows with 1 pending Codex removal (tagged on its row), Off heading stays quiet with card closed; keyboard-focusable marks on Found, Only through a plugin and Off; stable heading heights.
+    same('Library Skills: no heading says Synchronize everything in Settings, On has no mark, and Off 4 stays quiet with card closed',
       [(await h.all('.ov-section', 'e.textContent')).some(text => /Synchronize everything, in Settings/.test(text)),
         await h.exists('.ov-section[data-section="on"] .info-mark'),
         await h.run(`!document.getElementById('section-off-info-card')?.matches(':popover-open')`),
         await headingSays(h, 'found'),
         await headingSays(h, 'off')],
-      [false, false, true, 'Found4', 'Off4·1 still in Codex until sync runs']);
+      [false, false, true, 'Found4', 'Off4']);
     const onH = await heightOf('.ov-section[data-section="on"]');
     const foundNoLiveH = await heightOf('.ov-section[data-section="found"]');
     const pluginH = await heightOf('.ov-section-plugins');
-    const offWithLiveH = await heightOf('.ov-section[data-section="off"]');
-    same('heading heights match across On, Found without live line, Only through a plugin, and Off with a live line',
-      [foundNoLiveH, pluginH, offWithLiveH], [onH, onH, onH]);
+    const offH = await heightOf('.ov-section[data-section="off"]');
+    same('heading heights match across On, Found without live line, Only through a plugin, and Off',
+      [foundNoLiveH, pluginH, offH], [onH, onH, onH]);
     for (const [id, wantText] of [['section-found-info', FOUND_OFF_CARD], ['section-plugins-info', PLUGIN_CARD], ['section-off-info', OFF_CARD]]) {
       same(`Library: ${id} opens its card by keyboard and closes on Escape`, await keyboardCard(id),
         { focused: id, opened: true, cardText: wantText, closed: true, keptFocus: id });
     }
-    // Pin a changed Off row: count drops to 3, misleading live note hides while height stays unchanged.
+    // Pin a changed Off row: count drops to 3 while heading height and card stay unchanged.
     await h.click(`#${rowPart('switch', 'skills', 'off-a')}`);
-    same('Library: pinning a row turned On under Off drops the count to 3, hides the live line, and keeps heading height',
+    same('Library: pinning a row turned On under Off drops the count to 3 and keeps heading height and card',
       [await headingSays(h, 'off'), await heightOf('.ov-section[data-section="off"]'), await h.text('#section-off-info-card')],
-      ['Off3', offWithLiveH, OFF_CARD]);
+      ['Off3', offH, OFF_CARD]);
     await h.click(`#${rowPart('switch', 'skills', 'off-a')}`);
     await h.click('#header-refresh');
 
     // Tool tabs (Skills, MCP servers, Agents) while Synchronize everything is Off: keyboard marks on all three headings,
-    // Not in <tool> has no note or mark, Off 4 live line on Skills, and pinned Found 0 on Agents.
+    // Not in <tool> has no note or mark, Off 4 stays quiet on Skills (rows carry their own tags), and pinned Found 0 on Agents.
     await h.click('#nav-harnesses');
     await h.click('button#harness-claude-cli.harness-card-head');
     for (const tab of ['skills', 'mcp', 'agents']) {
@@ -1286,9 +1292,9 @@ async function harnessFlow() {
           { focused: id, opened: true, cardText: wantText, closed: true, keptFocus: id });
       }
       if (tab === 'skills') {
-        same('Claude Code’s Skills tab: Off 4 shows 1 still in Codex until sync runs with card closed',
-          [await headingSays(h, 'off'), await h.run(`!document.getElementById('section-off-info-card')?.matches(':popover-open')`)],
-          ['Off4·1 still in Codex until sync runs', true]);
+        same('Claude Code’s Skills tab: Off 4 stays quiet with card closed and the row carries its pending-removal tag',
+          [await headingSays(h, 'off'), await h.run(`!document.getElementById('section-off-info-card')?.matches(':popover-open')`), await rowTags('skills', 'off-c')],
+          ['Off4', true, ['still in Codex until sync runs']]);
       }
       if (tab === 'agents') {
         const beforeH = await heightOf('.ov-section[data-section="found"]');
@@ -1466,10 +1472,12 @@ async function harnessFlow() {
       const items = [...(body?.querySelectorAll('.legend-item') ?? [])].map(el => el.textContent.trim());
       const barBottom = document.querySelector('.toolbar').getBoundingClientRect().bottom;
       const bodyTop = body?.getBoundingClientRect().top ?? 0;
-      return { open: !!d?.open, belowToolbar: !!body && Math.abs(bodyTop - barBottom) <= 2, items };
+      const chev = d?.querySelector('.fold-chevron');
+      const m = chev ? new DOMMatrixReadOnly(getComputedStyle(chev).transform) : null;
+      return { open: !!d?.open, belowToolbar: !!body && Math.abs(bodyTop - barBottom) <= 2, chevronDown: !!m && m.b > 0.9, items };
     })()`);
-    same('opening What the marks mean groups keyWords by visual look right under the toolbar',
-      legendOpen, { open: true, belowToolbar: true, items: ['On there / Has the current version / Has it', 'No copy', 'Off: Central Knot keeps it'] });
+    same('opening What the marks mean uses Has a copy right under the toolbar with a downward chevron',
+      legendOpen, { open: true, belowToolbar: true, chevronDown: true, items: ['Has a copy', 'No copy', 'Off: Central Knot keeps it'] });
     await t.click('#mark-legend-toggle');
 
     // Plain "Jump to:" links on a long tool list at 860×528: all section names without counts, sticky heads stay in sight, landing heading flashes with an accent bar and clears under reduced motion.
@@ -1577,13 +1585,126 @@ async function harnessFlow() {
       await wait(80);
     }
 
-    // Library still shows all 6 tool marks and open key with no toolbar disclosure.
+    // Library keeps all 6 tool marks and pins grouped What the marks mean outside the scroll area (in reach on a long list at 860×528 without scrolling, opens above toggle, both bounds, last row reachable, forgotten on re-entry).
+    await sizeTo(t, 860, 528);
     await openKind(t, 'skills');
-    same('Library still shows all 6 tool marks per row and an open legend', [
-      await t.run(`document.querySelectorAll('.ov-row[data-key="${rowPart('', 'skills', 'skill-01')}"] .tool-mark').length`),
-      await t.exists('#mark-legend'),
-      await t.exists('.legend .legend-item'),
-    ], [6, false, true]);
+    const libShut = await t.run(`(() => {
+      const scroller = document.querySelector('.scroll.matrix'), foot = document.querySelector('.legend-foot');
+      const d = document.getElementById('mark-legend'), s = document.getElementById('mark-legend-toggle');
+      const scr = scroller?.getBoundingClientRect(), fr = foot?.getBoundingClientRect(), sr = s?.getBoundingClientRect();
+      const gap = fr && scr ? fr.top - scr.bottom : -99;
+      return {
+        marks: document.querySelectorAll('.ov-row[data-key="${rowPart('', 'skills', 'skill-01')}"] .tool-mark').length,
+        longList: !!scroller && scroller.scrollHeight > scroller.clientHeight && scroller.scrollTop === 0,
+        pinnedFoot: !!foot && !!d && foot.contains(d) && !d.closest('.scroll') && !d.closest('.toolbar'),
+        open: !!d?.open,
+        label: s?.textContent?.trim() ?? null,
+        body: !!document.getElementById('mark-legend-body'),
+        items: document.querySelectorAll('.legend-item').length,
+        shutBounds: !!fr && !!sr && !!scr && sr.height >= 24 && fr.height >= 24 && fr.height <= 30 && gap >= -1 && gap <= 1
+          && sr.top >= fr.top - 1 && sr.bottom <= fr.bottom + 1 && sr.bottom <= window.innerHeight && sr.left >= fr.left - 1 && sr.right <= fr.right + 1 && !foot.querySelector('.legend-band, .legend'),
+      };
+    })()`);
+    same('Library keeps 6 tool marks and pins shut What the marks mean in reach at the foot of a long list at 860×528 without scrolling',
+      libShut, { marks: 6, longList: true, pinnedFoot: true, open: false, label: 'What the marks mean', body: false, items: 0, shutBounds: true });
+    await t.click('#mark-legend-toggle');
+    const libOpen = await t.run(`(() => {
+      const scroller = document.querySelector('.scroll.matrix'), foot = document.querySelector('.legend-foot');
+      const d = document.getElementById('mark-legend'), s = document.getElementById('mark-legend-toggle'), body = document.getElementById('mark-legend-body');
+      const scr = scroller?.getBoundingClientRect(), fr = foot?.getBoundingClientRect(), sr = s?.getBoundingClientRect(), br = body?.getBoundingClientRect();
+      const items = [...(body?.querySelectorAll('.legend-item') ?? [])];
+      const labels = items.map(el => el.textContent.trim());
+      const chev = d?.querySelector('.fold-chevron');
+      const m = chev ? new DOMMatrixReadOnly(getComputedStyle(chev).transform) : null;
+      const rows = [...document.querySelectorAll('.ov-row[data-key]')];
+      const visibleRows = rows.filter(el => { const r = el.getBoundingClientRect(); return r.height > 0 && r.bottom > scr.top + 1 && r.top < scr.bottom - 1; }).length;
+      scroller.scrollTop = scroller.scrollHeight;
+      const last = rows[rows.length - 1]?.getBoundingClientRect();
+      return {
+        open: !!d?.open,
+        chevronUp: !!m && m.b < -0.9,
+        meetsFoot: !!scr && !!fr && Math.abs(fr.top - scr.bottom) <= 1,
+        aboveToggle: !!foot && !!body && !!br && !!sr && !!fr && foot.contains(body) && br.top >= fr.top - 1 && br.bottom <= sr.top + 1,
+        grouped: labels[0] === 'Has a copy' && !labels.some(l => l.includes(' / ')) && items.length <= 5,
+        inViewBounds: !!fr && !!br && foot.scrollWidth <= foot.clientWidth + 1 && br.top >= 0 && br.bottom <= window.innerHeight
+          && items.every(el => { const r = el.getBoundingClientRect(); return r.left >= fr.left - 1 && r.right <= fr.right + 1 && r.top >= br.top - 1 && r.bottom <= br.bottom + 1 && r.bottom <= window.innerHeight; }),
+        showsRows: !!scr && scr.height >= 120 && visibleRows >= 2,
+        lastRowScrollable: !!last && !!scr && last.top >= scr.top - 1 && last.bottom <= scr.bottom + 1,
+      };
+    })()`);
+    same('pressing What the marks mean on Library opens key above toggle (scroller meets foot, upward chevron, plain Has a copy) in view at 860×528 while list keeps rows and scrolls to the last row',
+      libOpen, { open: true, chevronUp: true, meetsFoot: true, aboveToggle: true, grouped: true, inViewBounds: true, showsRows: true, lastRowScrollable: true });
+
+    // Key samples match row marks of the same look in computed styles and rendered pixel strength, in both light and dark themes.
+    const decodePng = buf => {
+      let pos = 8, w = 0, h = 0, ct = 0;
+      const chunks = [];
+      while (pos < buf.length) {
+        const len = buf.readUInt32BE(pos), type = buf.toString('ascii', pos + 4, pos + 8);
+        if (type === 'IHDR') { w = buf.readUInt32BE(pos + 8); h = buf.readUInt32BE(pos + 12); ct = buf[pos + 17]; }
+        if (type === 'IDAT') chunks.push(buf.subarray(pos + 8, pos + 8 + len));
+        pos += 12 + len;
+      }
+      const bpp = ct === 6 ? 4 : 3, raw = inflateSync(Buffer.concat(chunks)), stride = w * bpp + 1, out = Buffer.alloc(w * h * bpp);
+      for (let y = 0; y < h; y++) {
+        const f = raw[y * stride], rOff = y * stride + 1, dOff = y * w * bpp;
+        for (let x = 0; x < w * bpp; x++) {
+          const a = x >= bpp ? out[dOff + x - bpp] : 0, b2 = y > 0 ? out[dOff - w * bpp + x] : 0, c = (x >= bpp && y > 0) ? out[dOff - w * bpp + x - bpp] : 0;
+          let v = raw[rOff + x];
+          if (f === 1) v = (v + a) & 255;
+          else if (f === 2) v = (v + b2) & 255;
+          else if (f === 3) v = (v + ((a + b2) >> 1)) & 255;
+          else if (f === 4) { const p = a + b2 - c, pa = Math.abs(p - a), pb = Math.abs(p - b2), pc = Math.abs(p - c); v = (v + (pa <= pb && pa <= pc ? a : pb <= pc ? b2 : c)) & 255; }
+          out[dOff + x] = v;
+        }
+      }
+      return { w, h, bpp, data: out };
+    };
+    const strongestLum = (png, rect, scale, light) => {
+      const x0 = Math.max(0, Math.floor(rect.left * scale)), y0 = Math.max(0, Math.floor(rect.top * scale));
+      const x1 = Math.min(png.w, Math.ceil(rect.right * scale)), y1 = Math.min(png.h, Math.ceil(rect.bottom * scale));
+      let best = light ? 255 : 0;
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+        const i = (y * png.w + x) * png.bpp;
+        const lum = Math.round(0.299 * png.data[i] + 0.587 * png.data[i + 1] + 0.114 * png.data[i + 2]);
+        if (light ? lum < best : lum > best) best = lum;
+      }
+      return best;
+    };
+    for (const theme of ['light', 'dark']) {
+      await t.run(`document.activeElement?.blur(); window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+      await wait(120);
+      for (const [look, skillKey] of [['on', 'skill-01'], ['none', 'found-local'], ['off', 'off-one']]) {
+        const pair = await t.run(`(() => {
+          const rowMark = document.querySelector('.ov-row[data-key=${JSON.stringify(rowPart('', 'skills', skillKey))}] .tool-mark.mark-${look}[data-tool="codex-cli"]');
+          const keyMark = document.querySelector('#mark-legend-body .tool-mark.mark-${look}');
+          rowMark?.scrollIntoView({ block: 'center' });
+          const read = el => {
+            const svg = el?.querySelector('svg'), sr = svg?.getBoundingClientRect();
+            const cs = el ? getComputedStyle(el) : null, scs = svg ? getComputedStyle(svg) : null, aft = el ? getComputedStyle(el, '::after') : null;
+            return { color: cs?.color, opacity: scs?.opacity, filter: scs?.filter, strokeWidth: scs?.strokeWidth, w: sr ? Math.round(sr.width) : 0, slashW: aft ? parseFloat(aft.width) : 0, rect: sr ? { left: sr.left, top: sr.top, right: sr.right, bottom: sr.bottom } : null };
+          };
+          return { viewW: window.innerWidth, row: read(rowMark), key: read(keyMark) };
+        })()`);
+        await wait(60);
+        const png = decodePng(Buffer.from((await t.send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
+        const scale = png.w / pair.viewW;
+        const rowLum = strongestLum(png, pair.row.rect, scale, theme === 'light');
+        const keyLum = strongestLum(png, pair.key.rect, scale, theme === 'light');
+        const lumGap = Math.abs(rowLum - keyLum);
+        check(`Library key ${look} sample matches row mark colour, size, stroke, and rendered pixel strength in ${theme}`,
+          pair.key.color === pair.row.color && pair.key.opacity === pair.row.opacity && pair.key.filter === pair.row.filter
+            && pair.key.w === pair.row.w && pair.key.strokeWidth === pair.row.strokeWidth
+            && (look !== 'off' || Math.abs(pair.key.slashW - pair.row.slashW) <= 1) && lumGap <= 15,
+          { rowLum, keyLum, lumGap, row: pair.row, key: pair.key });
+      }
+    }
+    await t.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
+    await t.click('#nav-overview');
+    await t.click('#nav-library');
+    same('re-entering Library forgets open What the marks mean state',
+      [await t.run(`!!document.getElementById('mark-legend')?.open`), await t.exists('#mark-legend-body')], [false, false]);
     same('no page errors, tool page fit', t.pageErrors, []);
   } finally {
     await t.quit();
@@ -7570,8 +7691,8 @@ async function openCodeFlow() {
   await p.click(`#${rowPart('add', 'skills', 'oc-only')}`);
   check('adding OpenCode’s own skill copies it to the other tools', readNow(join(practice, '.claude/skills/oc-only/SKILL.md')) === text('oc-only') && readNow(join(practice, '.copilot/skills/oc-only/SKILL.md')) === text('oc-only'), await p.text('.bands'));
   // Turned Off, it leaves the other tools; OpenCode keeps the copy it was found with (left alone as its own while the skill is
-  // off). Its tag says OpenCode has it, as OpenCode's mark does, and so does the Off heading once the list is read again (its
-  // row stays where it was until then). Undo turns it back on.
+  // off). Its tag says OpenCode has it, as OpenCode's mark does, and under Off after a refresh its tag says "another copy in OpenCode"
+  // while the Off heading stays quiet (its row stays where it was until then). Undo turns it back on.
   await p.click(`#${rowPart('switch', 'skills', 'oc-only')}`);
   same('Off, OpenCode keeps the copy it was found with, and the result and the tag say so, as its mark does',
     [existsSync(join(practice, '.claude/skills/oc-only')), existsSync(join(mine, 'skills/oc-only/SKILL.md')), await cellState(p, 'skills', 'oc-only', 'opencode-cli'),
@@ -7581,8 +7702,11 @@ async function openCodeFlow() {
   await p.click('#outcome-undo');
   check('Undo turns it back on', await switchOn(p, 'skills', 'oc-only') && readNow(join(practice, '.claude/skills/oc-only/SKILL.md')) === text('oc-only'), await p.text('.bands'));
   await p.click(`#${rowPart('switch', 'skills', 'oc-only')}`); await p.click('#header-refresh');
-  same('read again while Off, it is under Off, whose heading says OpenCode has a copy of its own', [(await sectionsNow(p, 'skills')).at(-1)?.[1].includes('oc-only'), (await p.text('.ov-section[data-section="off"] .ov-section-after'))?.replace(/^·\s*/, '')],
-    [true, '1 own copy in OpenCode']);
+  same('read again while Off, it is under Off, its row tag says OpenCode has another copy, and the Off heading stays quiet',
+    [(await sectionsNow(p, 'skills')).at(-1)?.[1].includes('oc-only'),
+      await p.text(`.ov-row[data-key="${rowPart('', 'skills', 'oc-only')}"] .row-tag`),
+      await p.exists('.ov-section[data-section="off"] .ov-section-after')],
+    [true, 'another copy in OpenCode', false]);
   await p.click(`#${rowPart('switch', 'skills', 'oc-only')}`);
   // Taken in, notes goes to every tool but OpenCode, which reads Claude Code's copy: OpenCode's line says so, with no switch
   // of Central Knot's (nothing of it goes there), and its settings are untouched.
@@ -8675,8 +8799,10 @@ async function sharedCopiesFlow() {
   await a.click('#harness-tab-skills');
   await opened();
   const elsewhere = `Pi ${reads} Copilot CLI ${reads}`;
-  check('the Off heading names the copies still read', (await headingSays(a, 'off')).includes(elsewhere), await headingSays(a, 'off'));
+  same('the Off heading stays quiet without a live note', await headingSays(a, 'off'), 'Off1');
   same('the Off row names the tools that still have it', await a.text(`${row} .row-tag`), 'another copy in Pi and Copilot CLI');
+  const tagTitle = await a.run(`document.querySelector(${JSON.stringify(`${row} .row-tag`)})?.title ?? ''`);
+  check('the Off row tag hover names the copies still read', tagTitle.includes(elsewhere), tagTitle);
   check('the Off status says where the tools read it', (await a.text('.details-status') ?? '').includes(elsewhere), await a.text('.details-status'));
   if (shots) { await sizeTo(a, 1280, 800); await a.shot('pi-skills-off'); await fullSize(a); }
   await openKind(a, 'skills');
@@ -13130,7 +13256,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   /** The page as drawn: the tools' columns, and each row's name, plugin and cells' words (a mark and a Copy's label aside). */
   const page = async () => {
     const tools = await a.all('.signin-head', 'e.dataset.tool');
-    const rows = await a.run(`[...document.querySelectorAll('.signin-table tbody tr')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', ...[...row.querySelectorAll('td')].map(cell => [...(cell.querySelector('.signin-words')?.childNodes ?? [])].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''))])`);
+    const rows = await a.run(`[...document.querySelectorAll('.signin-table tbody tr[data-row]')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', ...[...row.querySelectorAll('td')].map(cell => [...(cell.querySelector('.signin-words')?.childNodes ?? [])].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''))])`);
     return { tools, rows };
   };
   /** A row by its name, and a plugin's by its name and the plugin's: "issues (tracker)". */
@@ -13140,7 +13266,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   /** Each row's words in one tool's column, by the row's name (and plugin). */
   const column = async tool => { const { tools, rows } = await page(); return Object.fromEntries(rows.map(row => [rowName(row), row[2 + tools.indexOf(tool)]])); };
   /** A row's id on the page, by its name (and plugin): what its cells' and Copy's ids end with. */
-  const rowIdOf = async name => (await a.run(`[...document.querySelectorAll('.signin-table tbody tr')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', row.dataset.row])`)).find(row => rowName(row) === name)?.[2];
+  const rowIdOf = async name => (await a.run(`[...document.querySelectorAll('.signin-table tbody tr[data-row]')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', row.dataset.row])`)).find(row => rowName(row) === name)?.[2];
   const cellId = async (tool, name) => `signin-cell-${tool}-${await rowIdOf(name)}`;
   /** A column's head as it reads (a no-break space read as a space, the ends trimmed). */
   const head = async tool => (await a.run(`document.querySelector('.signin-head[data-tool="${tool}"]')?.innerText ?? null`))?.replace(/\u00a0/g, ' ').trim() ?? null;
@@ -13236,6 +13362,64 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
     [['copilot-cli'], 'Sign-in shows only inside a session of that tool. • means the tool has the server; blank means it doesn’t.']);
   same('Local’s card says where the server runs and nothing more', await card('signin-local-mark', 'local-card'), 'Runs on this computer.');
   await fits('not-checked');
+  const fileShot = async (name, theme) => { if (!shots) return; await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] }); await wait(300); await a.shot(`mcp-signin-file-${name}-${theme}`); await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); };
+  const markMetrics = () => a.run(`(() => {
+    const ths = [...document.querySelectorAll('.signin-table thead th')].map(e => Math.round(e.getBoundingClientRect().width));
+    const rows = [...document.querySelectorAll('.signin-table tbody tr[data-row]')].filter(r => !r.querySelector('.signin-plugin')).map(r => {
+      const s = r.querySelector('.signin-server'), m = r.querySelector('.row-file-btn'), walk = document.createTreeWalker(s, NodeFilter.SHOW_TEXT);
+      const rects = [];
+      for (let n; (n = walk.nextNode()); ) { const range = document.createRange(); range.selectNodeContents(n); rects.push(...range.getClientRects()); }
+      const last = rects.at(-1), mr = m?.getBoundingClientRect();
+      const onLast = !!mr && !!last && Math.abs((mr.top + mr.bottom) / 2 - (last.top + last.bottom) / 2) <= 4 && mr.left >= last.right - 1;
+      return { name: s.textContent, lines: new Set(rects.map(rect => Math.round(rect.top))).size, onLast };
+    });
+    return { ths, rows };
+  })()`);
+  await sizeTo(a, 1316, 819); await shape(false);
+  const at1316 = await markMetrics();
+  same('at 1316 the long hyphenated name keeps its file mark on its last line',
+    at1316.rows.find(r => r.name === longName)?.onLast, true);
+  await sizeTo(a, ...SMALLEST); await shape(false);
+  const colsBefore = (await markMetrics()).ths;
+  write('.claude.json', claudeFile({ Filesystem: { type: 'http', url: P(47215) } }));
+  await a.click('#header-refresh');
+  const at860 = await markMetrics();
+  same('at 860 every own server (including a ten-letter capitalised name) keeps its mark on its last line, single-word names on one line, and no column width moves',
+    [at860.ths, at860.rows.every(r => r.onLast && (r.name.includes('-') || r.lines === 1))], [colsBefore, true]);
+  if (shots) { await a.run(`document.querySelector('tr[data-row="filesystem"]').scrollIntoView({ block: 'center' })`); await fileShot('ten-letter-860', 'light'); }
+  const unbroken = ['elasticsearch', 'observabilityservice'];
+  write('.claude.json', claudeFile({ Filesystem: { type: 'http', url: P(47215) }, elasticsearch: { type: 'http', url: P(47216) }, observabilityservice: { type: 'http', url: P(47217) } }));
+  await a.click('#header-refresh');
+  const withUnbroken = await markMetrics();
+  same('at 860 unbroken names (elasticsearch and a twenty-letter name) keep every column width unchanged and each mark on its last line',
+    [withUnbroken.ths, unbroken.every(name => withUnbroken.rows.find(r => r.name === name)?.onLast)], [colsBefore, true]);
+  if (shots) { await a.run(`document.querySelector('tr[data-row="observabilityservice"]').scrollIntoView({ block: 'end' })`); await fileShot('unbroken-name-860', 'light'); }
+  const openEntry = async (name, expect) => {
+    const id = await rowIdOf(name);
+    await a.click(`tr[data-row="${id}"] .row-file-btn`);
+    await until(async () => (await a.text('#file-panel-mcpsignin pre.content'))?.includes(expect), `${name}’s entry`);
+    return a.run(`(() => { const row = document.querySelector('tr[data-row="${id}"]'), next = row?.nextElementSibling, td = next?.querySelector('td');
+      return { anchored: !!row?.classList.contains('file-anchored'), colspan: td?.getAttribute('colspan'), boxes: document.querySelectorAll('.file-open-box').length, text: next?.querySelector('pre.content')?.textContent ?? '' }; })()`);
+  };
+  const oauthEntry = await openEntry('oauth', 'http://127.0.0.1:47202/mcp');
+  same('at 860 pressing a server’s mark opens its entry in a full-width row under it, nothing cut off',
+    [oauthEntry.anchored, oauthEntry.colspan, oauthEntry.boxes, oauthEntry.text.includes('http://127.0.0.1:47202/mcp'), ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)],
+    [true, '7', 1, true]);
+  const fsEntry = await openEntry('Filesystem', 'http://127.0.0.1:47215/mcp');
+  same('at 860 pressing a second capitalised server’s mark moves the panel under it with that server’s entry',
+    [fsEntry.anchored, fsEntry.colspan, fsEntry.boxes, fsEntry.text.includes('http://127.0.0.1:47215/mcp')], [true, '7', 1, true]);
+  await a.click('#signin-session-mark');
+  const cardOpened = await a.run(`!!document.getElementById('signin-session-mark-card')?.matches(':popover-open')`);
+  await a.press('Escape');
+  const cardFirst = [cardOpened, await a.run(`!!document.getElementById('signin-session-mark-card')?.matches(':popover-open')`), await a.exists('#file-panel-mcpsignin')];
+  await a.press('Escape');
+  same('Escape closes an open (?) card first, then closes the entry panel and returns focus to its mark',
+    [cardFirst, await a.exists('#file-panel-mcpsignin'), await a.run(`document.activeElement === document.querySelector('tr[data-row="filesystem"] .row-file-btn')`)],
+    [[true, false, true], false, true]);
+  write('.claude.json', claudeFile());
+  await a.click('#header-refresh');
+  await fullSize(a);
+  await a.run(`document.querySelector('#mcpsignin-scroll').scrollTop = 0`);
   // A server that arrives on disk while he is on the page (Pi's file, read again by itself) takes a place after the rows already
   // there, though by its name it would come first; on Refresh it goes where its name puts it.
   write('.pi/agent/mcp.json', piFile({ 'aaa-new': { url: P(47213) } }));
@@ -13435,7 +13619,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   const [wordsLines, buttonLines, heights] = await a.run(`(() => {
     const cell = document.getElementById(${JSON.stringify(await cellId('codex-cli', 'oauth'))}), words = cell.querySelector('.signin-words');
     const lines = element => Math.round(element.getBoundingClientRect().height / parseFloat(getComputedStyle(element).lineHeight));
-    const row = name => [...document.querySelectorAll('.signin-table tbody tr')].find(each => each.querySelector('.signin-server').textContent === name && !each.querySelector('.signin-plugin'));
+    const row = name => [...document.querySelectorAll('.signin-table tbody tr[data-row]')].find(each => each.querySelector('.signin-server').textContent === name && !each.querySelector('.signin-plugin'));
     return [lines(words), Math.max(...[...cell.querySelectorAll('.signin-acts .btn .btn-label')].map(lines)), [row('oauth'), row('plain')].map(each => Math.round(each.getBoundingClientRect().height))]; })()`);
   console.log(`(mcpSigninFlow: at 860 the refused row is ${heights[0]} px high, its neighbour plain ${heights[1]} px)`);
   same('at 860 the refused cell is bounded: its words at most three lines, each of its two buttons at most two', [wordsLines <= 3, buttonLines <= 2], [true, true]);
@@ -13855,7 +14039,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   await preview.click('#nav-mcpsignin');
   await preview.click('#signin-check-codex-cli');
   await until(async () => !(await preview.run(`document.querySelector('.signin-head[data-tool="codex-cli"]')?.innerText ?? 'Checking…'`)).includes('Checking…'), 'Codex’s check in the preview-only home');
-  const previewRow = await preview.run(`[...document.querySelectorAll('.signin-table tbody tr')].find(row => row.querySelector('.signin-server').textContent === 'oauth' && !row.querySelector('.signin-plugin'))?.dataset.row`);
+  const previewRow = await preview.run(`[...document.querySelectorAll('.signin-table tbody tr[data-row]')].find(row => row.querySelector('.signin-server').textContent === 'oauth' && !row.querySelector('.signin-plugin'))?.dataset.row`);
   const previewFrom = started().length;
   same('a home it may only preview: Codex’s cell keeps its Copy, and main refuses a sign-in sent all the same, running nothing',
     [await preview.exists(byId(`signin-act-codex-cli-${previewRow}`)), await preview.text(byId(`signin-copy-codex-cli-${previewRow}`)),
@@ -13943,7 +14127,7 @@ const probe = net.connect(port, '127.0.0.1').once('connect', () => { probe.destr
   const env = { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), CK_SIGNIN_START_LIMIT_MS: '6000', PATH: `${opener}:${join(scratch, 'bin')}:/usr/bin:/bin`, BROWSER: join(opener, 'xdg-open') };
   let a = await launch(join(scratch, 'pio-data'), [], home, env);
   const until = async (ready, what) => { for (let tries = 0; tries < 200; tries++) { if (await ready()) return; await wait(100); } check(`in time: ${what}`, false); };
-  const rowId = name => a.run(`[...document.querySelectorAll('.signin-table tbody tr')].find(row => row.querySelector('.signin-server').textContent === ${JSON.stringify(name)})?.dataset.row`);
+  const rowId = name => a.run(`[...document.querySelectorAll('.signin-table tbody tr[data-row]')].find(row => row.querySelector('.signin-server').textContent === ${JSON.stringify(name)})?.dataset.row`);
   const id = async (part, tool, name) => byId(`signin-${part}-${tool}-${await rowId(name)}`);
   /** A cell as drawn: its words (a mark aside), then each of its buttons' labels and the line under it. */
   const cell = async (tool, name) => a.run(`(cell => [[...cell.querySelector('.signin-words').childNodes].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''),
