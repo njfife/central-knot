@@ -662,7 +662,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .row-tag { flex: none; font-size: 11.5px; color: var(--ink); white-space: nowrap; }
 .ov-managed { display: flex; justify-content: center; }
 .ov-cell { position: relative; display: flex; justify-content: center; align-items: center; gap: 6px; }
-.ov-tool-head { flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--ink); }
 
 .switch { position: relative; flex: none; width: 32px; height: 18px; border-radius: 999px; border: 0; padding: 0; background: var(--switch-off); cursor: pointer; transition: background 140ms var(--ease); }
 .switch-knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 30%); transition: transform 140ms var(--ease); }
@@ -1427,11 +1426,10 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .market-in-tools p { margin: 0; min-width: 0; }
 .market-in-tools p:has(> svg) { display: flex; align-items: flex-start; gap: 6px; }
 .market-in-tools p > svg { flex: none; margin-top: 2px; }
-/* The dot between "can't be installed" and its link stays where the rows drop their other dots (narrow). */
-/* Its words give way only once the description beside them has given all it can. */
+/* "Can't be installed" with its link beside it: a long app name wraps cleanly, never clipping the link. */
 .plugin-row-left { display: flex; align-items: baseline; flex: 0 0 auto; max-width: 100%; min-width: 0; font-size: 11.5px; }
 .plugin-row-left .plugin-row-holds { flex: 0 1 auto; min-width: 0; }
-.plugin-row-left .plugin-row-sep { display: inline; margin: 0 6px; }
+.plugin-row-left .plugin-row-sep { flex: none; margin: 0 6px; color: var(--ink-faint); }
 .plugin-row-left .text-action { flex: none; padding: 0; font-size: inherit; white-space: nowrap; }
 .market-not-carried { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 12.5px; line-height: 18px; color: var(--ink-soft); }
 .market-not-carried p { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--ink); }
@@ -1459,7 +1457,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .market-suggestion-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 /* A name wraps in the list's narrow column rather than being cut short; in the strip and on the empty page it has the room. */
 .market-suggestion-name { font-size: 13px; font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
-.market-suggestion-meta { font-size: 11.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market-suggestion-meta { font-size: 11.5px; line-height: 15px; color: var(--ink-soft); white-space: normal; overflow-wrap: break-word; }
 .market-suggested-first { width: 360px; max-width: 100%; margin: 4px 0 10px; text-align: left; }
 .market-empty { color: var(--ink-soft); font-size: 13px; }
 .empty-aside { margin: 10px 0 0; font-size: 12px; color: var(--ink-soft); }
@@ -1472,6 +1470,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
  */
 .market-main { padding-right: max(0px, calc(var(--market-gutter) - var(--scrollbar))); padding-bottom: 32px; padding-left: var(--market-gutter); }
 .market-page, .plugin-page { padding-top: 18px; }
+.market-page { container: market / inline-size; }
 /*
  * The toolbar's left on a marketplace's page: its name, then its facts, on one line. What doesn't fit wraps onto a line
  * below, out of sight, so facts drop whole, the last first; the name, first, only shortens (with its tooltip) once alone.
@@ -1515,32 +1514,51 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .result-link { all: unset; cursor: pointer; color: var(--ink); font-weight: 600; text-decoration: underline; text-decoration-color: transparent; }
 .result-link:hover { text-decoration-color: currentColor; }
 .result-link:focus-visible { outline: 2px solid var(--focus); border-radius: 3px; }
-/* The plugin table: the switch, the plugin, a column per tool (each tool's mark over its name), and the way into the plugin. */
+/* The plugin table: the switch, the plugin, a column per tool (mark over short name; icon-only when narrow for the tool count), and the way into the plugin. */
 .plugin-table { container: table / inline-size; }
 /* It stripes sooner than the skills table: its taller rows sit further apart, and beside the marketplaces it is narrower. */
 @container table (width >= 700px) {
   .plugin-table > .plugin-row:nth-child(even of .plugin-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
 /*
- * A row's name, version and chips show at any width and with any number of tools: nothing in them hides or is cut. When room
- * is short, in this order: the tool columns narrow, from 120px to 76px at the least, before the plugin's column goes under
- * 360px (a title of about 45 characters on one line); then the version and each chip move whole under what is before them;
- * then the title wraps. A piece breaks inside a word only when that word alone is wider than the open button may be (the
- * column; half of it in a wide table, below): a long title can be, and rarely a version or chip (a build identifier with no
- * break in it). A row is as tall as that makes it. The line under the name is the one thing that shortens (.plugin-row-line,
- * below): it stays one line, so a click never changes a row's height.
+ * A row's name, version and chips show at any width and with any number of tools: nothing in them hides or breaks mid-token.
+ * When room is short, in this order: tool columns narrow from 72px to 63px before the plugin's column goes under 360px (with
+ * six tools and sidebar open: 360px at 1316×819, 334px at 1280×800); below a per-tool-count threshold (keeping ~290–330px for
+ * names: 2–4 tools stay named at 860, while 6 tools drop to 40px icon-only below 780px so 860–1190 windows keep 304–444px),
+ * short labels hide; then a long build-ID version caps once with ellipsis (keeping the category chip on its line); then version
+ * and chips move whole under the title; then the title wraps. Under the name, 1–2 line descriptions sit inline with counts so
+ * counts never orphan on a line of their own; longer descriptions clamp to two lines before cutting, and the Library link never clips.
  */
 .plugin-table .ov-row {
   --switch-width: 48px; --chevron-width: 28px;
-  /* The row, less the switch, the chevron and the plugin's 360px, shared by the tools. */
-  --tool-width: clamp(76px, (100% - var(--switch-width) - var(--chevron-width) - 360px) / var(--tool-count, 3), 120px);
+  /* The row, less the switch, the chevron and the plugin's 360px, shared by the tools (short labels under marks). */
+  --tool-width: clamp(63px, (100% - var(--switch-width) - var(--chevron-width) - 360px) / var(--tool-count, 3), 72px);
   grid-template-columns: var(--switch-width) minmax(0, 1fr) repeat(var(--tool-count, 3), var(--tool-width)) var(--chevron-width);
   height: auto; min-height: 40px;
 }
-.plugin-table .plugin-row-open { flex-wrap: wrap; row-gap: 2px; overflow-wrap: anywhere; }
-/* Room above the tool icons, so the pinned header doesn't touch the toolbar's rule */
+.plugin-table .plugin-row-open { max-width: 100%; flex-wrap: wrap; row-gap: 2px; overflow-wrap: anywhere; }
+.plugin-row-tags { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; max-width: 100%; }
+.plugin-table .plugin-row-version { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@container table (width < 1000px) {
+  .plugin-table .plugin-row-version { max-width: min(100%, 15ch); }
+}
+/* Room for 16px tool marks over their short names (40px icon-only when --icons-only is active). */
 .plugin-table .ov-head { min-height: 48px; }
-.plugin-table .ov-head .ov-name { padding: 6px 0; font-size: 12px; font-weight: 400; color: var(--ink-soft); }
+.plugin-table .ov-head .ov-name { padding: 6px 0; gap: 4px; font-size: 12px; font-weight: 500; color: var(--ink-soft); }
+.plugin-table .ov-head .plugin-head-every { grid-column: 1 / 3; padding-left: 8px; }
+.plugin-table .ov-tool-head { align-self: stretch; flex-direction: column; gap: 3px; padding: 6px 0; color: var(--ink); }
+.plugin-table .ov-tool-head:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
+.plugin-table .ov-tool-head:focus-visible::after {
+  content: attr(data-tool-name); position: absolute; top: calc(100% + 2px); right: -2px; z-index: 10;
+  padding: 3px 7px; border: 1px solid var(--control-line); border-radius: 6px;
+  background: var(--surface); box-shadow: var(--overlay); color: var(--ink);
+  font-size: 11.5px; font-weight: 500; line-height: 15px; white-space: nowrap; pointer-events: none;
+}
+@media (prefers-color-scheme: dark) {
+  .plugin-table .ov-tool-head:focus-visible::after { background: color-mix(in oklab, var(--surface) 84%, white); border-color: var(--cell-line); }
+}
+.plugin-tool-short { font-size: 10px; line-height: 12px; font-weight: 500; color: var(--ink-soft); white-space: nowrap; }
+.plugin-icons-only-note, .plugin-columns-only-icons { display: none; }
 .market-hint > span { max-width: 110ch; }
 .plugin-row { cursor: pointer; }
 /* A plugin's one switch heads its row; each tool's mark only says what it has, drawn plain, with no box and no hover look (no
@@ -1552,56 +1570,53 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .cell-button.cell-box:disabled { border-color: var(--cell-line); opacity: .6; }
 .plugin-panel-switch { display: inline-flex; align-items: center; gap: 10px; }
 .plugin-head-label { display: inline-flex; align-items: center; gap: 4px; }
-.plugin-row-name { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 8px 12px 8px 0; text-align: left; }
+.plugin-row-name { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 8px 10px 8px 0; text-align: left; }
 .plugin-row-name > span { max-width: 100%; }
 .plugin-row-open { all: unset; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .plugin-row-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .plugin-chip { padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; color: var(--ink-faint); }
 /*
- * Under the name, one line: the description, then what it holds. When room runs out the description shortens, then steps
- * aside with its "·" (below 700px of table); the facts keep their words. A wide table puts the line beside the name.
+ * Under the name: 1–2 line descriptions sit inline with counts/Library link so counts stay beside the description's end instead
+ * of orphaning on their own line; descriptions past two lines clamp via .clamped (afterLayout) while meta stays unclamped below.
  */
-.plugin-row-line { display: flex; align-items: center; min-width: 0; max-width: 100%; }
-/* That one line, or a click's note in its place (pluginspage.ts pluginRow), is one line high, an empty one too: a click never
-   changes the row's height. */
-.plugin-row-name > .plugin-row-line, .plugin-row-name > .plugin-click { height: 20px; white-space: nowrap; }
-.plugin-row-about { flex: 0 1 auto; min-width: 0; font-size: 12.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plugin-row-sep { flex: none; margin: 0 8px; color: var(--ink-faint); }
-.plugin-row-holds { flex: 0 0 auto; max-width: 100%; font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Its items in the Library (pluginparts.ts libraryLink), last on the line. Short of room, the description gives way first, then
-   what it holds, each ending in "…"; the link keeps its words until the line is narrower than they are, then it too ends in
-   "…", keeping the room of the two "·" before it (its whole words are its title). In a narrow table its "·" stays. */
-.plugin-row-line:has(> .plugin-row-library) > .plugin-row-about { flex-shrink: 100; }
-.plugin-row-line:has(> .plugin-row-library) > :is(.plugin-row-holds, .plugin-row-left) { flex-shrink: 1; min-width: 0; }
-.plugin-row-library { flex: none; max-width: calc(100% - 40px); padding: 0 4px; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
+.plugin-row-line { display: block; width: 100%; min-width: 0; min-height: 20px; line-height: 18px; }
+.plugin-row-about { display: inline; font-size: 12.5px; line-height: 18px; color: var(--ink-soft); white-space: normal; }
+.plugin-row-about:not(:last-child) { padding-right: 10px; }
+.plugin-row-about.clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; padding-right: 0; margin-bottom: 2px; }
+.plugin-row-meta { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; max-width: 100%; }
+.plugin-row-holds { flex: 0 1 auto; max-width: 100%; font-size: 11.5px; line-height: 18px; color: var(--ink-faint); white-space: normal; overflow-wrap: anywhere; }
+.plugin-row-library { flex: none; padding: 0; font-size: 11.5px; line-height: 18px; white-space: nowrap; }
+/* While a click note stands in for the row's line, keep the line hidden in the same grid cell so no row changes height. */
+.plugin-row-slot { display: grid; width: 100%; min-width: 0; }
+.plugin-row-slot > * { grid-area: 1 / 1; }
+.plugin-row-slot > .plugin-row-line { visibility: hidden; pointer-events: none; }
+.plugin-row-slot > .plugin-click { align-self: start; align-items: center; min-height: 20px; line-height: 20px; }
+.plugin-row-slot > .plugin-click > .icon { align-self: center; margin-top: 0; }
 .plugin-row-go { display: grid; place-items: center; }
 /* A tool behind the marketplace: the note, then Update for every such tool, wrapping under it when the name column is narrow. */
 .plugin-row-update { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; min-width: 0; }
 .plugin-row-update > .btn { padding-inline: 0; }
-@container table (width >= 1100px) {
-  .plugin-row-name { flex-direction: row; flex-wrap: wrap; align-items: baseline; }
-  /* The line takes the room left beside the name and never a line of its own: its description shortens instead. */
-  .plugin-row-name > .plugin-row-line { flex: 1 1 0; max-width: max-content; }
-  .plugin-row-open { flex: none; max-width: 50%; margin-right: 14px; }
-  /* A long note (a copy that differs, several versions) wraps beside the line rather than pushing what it holds out of view. */
-  .plugin-row-update { flex: 0 1 auto; margin-left: 14px; }
-  /* A click's state takes the line's place beside the name, as the line does. */
-  .plugin-row-name > .plugin-click { flex: 1 1 0; max-width: max-content; }
+/* Icon-only tool columns only where names would squeeze the name column: one threshold per tool count (dom.ts data-tools). */
+@container market (width < 480px) { .plugin-table { --icons-only: 1; } }
+@container market (width < 540px) { .plugin-table[data-tools="3"] { --icons-only: 1; } }
+@container market (width < 600px) { .plugin-table[data-tools="4"] { --icons-only: 1; } }
+@container market (width < 700px) { .plugin-table[data-tools="5"] { --icons-only: 1; } }
+@container market (width < 780px) { .plugin-table[data-tools="6"] { --icons-only: 1; } }
+@container style(--icons-only: 1) {
+  .plugin-table .ov-row { --tool-width: 40px; }
+  .plugin-table .ov-head { min-height: 40px; }
+  .plugin-tool-short { display: none; }
+  .plugin-icons-only-note { display: inline; }
+  .plugin-columns-only-icons { display: inline-flex; align-items: center; }
 }
-/* The header's hint keeps to whole lines: a narrow table says it shorter. */
-.hint-short { display: none; }
-@container table (width < 700px) {
-  .plugin-row-about, .plugin-row-sep, .hint-long { display: none; }
-  .plugin-row-sep:has(+ .plugin-row-library) { display: inline; }
-  .hint-short { display: inline; }
-}
-.cannot-dash { font-weight: 700; color: var(--ink-soft); }
+.cannot-dash { font-weight: 700; line-height: 1; color: var(--ink-soft); }
 .plugin-add { border-color: color-mix(in oklab, var(--ink) 42%, transparent); color: var(--ink); }
 .plugin-legend { padding: 10px 16px 0; }
 /* The description repeated under About is for narrow content only, where the Plugins tab leaves it out. */
 .about-only-narrow { display: none; margin: 0 0 10px; }
 /* The key draws each mark as the list does: plain, with no box. */
 .plugin-legend .legend-cell { border-color: transparent; background: transparent; }
+.plugin-legend .legend-cell .cannot-dash { transform: translateY(-1px); }
 /* A plugin's own page */
 .plugin-head h2 { display: inline; margin: 0 8px 0 0; font-size: 18px; font-weight: 650; }
 .plugin-id { font-size: 12px; color: var(--ink-soft); }
@@ -1762,8 +1777,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
   .plugin-row-name { padding: 7px 12px 7px 0; }
   /* The strip above names the marketplace: the toolbar keeps only a result or the way back, and isn't drawn without one. */
   .market-title-line, .toolbar-title-only { display: none; }
-  /* The plugins get the height: the hint wraps within the header's name column, the description moves under About. */
-  .plugin-table .ov-head .plugin-hint { white-space: normal; line-height: 15px; padding-right: 12px; }
+  /* The plugins get the height: the description moves under About. */
   .market-page > .market-page-about { display: none; }
   .about-only-narrow { display: block; }
   .market-fact-narrow { display: inline; }
