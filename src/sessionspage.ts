@@ -136,21 +136,26 @@ function noPriceWords({ noRow, speedOrTier, other }: UnpricedBy, detail = false)
   const why = [...(noRow ? [`${plural(noRow, 'request')} with no matching rate`] : []),
     ...speedOrTier.map(each => (each.requests === 1 ? `a ${each.saved} reply` : `${each.requests} ${each.saved} replies`)),
     ...(other ? [`${plural(other, 'request')} for another reason`] : [])];
-  return noRow && why.length === 1 ? (detail ? 'no matching rate in the price list' : 'no price known') : `no price known for ${andList(why)}`;
+  return noRow && why.length === 1 ? (detail ? 'no matching rate in Central Knot’s price list' : 'no price known') : `no price known for ${andList(why)}`;
 }
 
 /**
- * A column cell's sum (day, session, nested agent): the dollar amount alone flush right, with any "or more" and unpriced count
- * stacked on a quiet line beneath so amounts themselves share one right edge; an unpriced-only cell sits on one line.
+ * A column cell's sum (day, session, nested agent, or model line): the dollar amount alone flush right, with any "or more" and
+ * unpriced count stacked beneath so amounts share one right edge; an unpriced-only cell sits on one line.
  */
-function costCell(cost: CostSum, requests = false): (Node | string | null)[] {
-  const estimateTitle = cost.oneHourLow ? ONE_HOUR : '';
+function costCell(cost: CostSum, kind: 'row' | 'day' | 'model' = 'row'): (Node | string | null)[] {
+  const whyLow = cost.oneHourLow ? ONE_HOUR : '';
   const unpricedTitle = cost.unpriced ? sentence(noPriceWords(cost.unpricedBy, true)) : '';
-  const unpriced = cost.unpriced ? h('span.sessions-unpriced', { title: unpricedTitle }, `${requests ? plural(cost.unpriced, 'request') : cost.unpriced} unpriced`) : null;
-  if (cost.dollars === undefined) return [unpriced];
-  const more = cost.atLeast ? h('span.sessions-more', estimateTitle ? { title: estimateTitle } : {}, 'or more') : null;
+  if (cost.dollars === undefined) {
+    if (!cost.unpriced) return [];
+    return [kind === 'model' ? h('span.sessions-unpriced', {}, noPriceWords(cost.unpricedBy))
+      : h('span.sessions-unpriced', { title: unpricedTitle }, `${kind === 'day' ? plural(cost.unpriced, 'request') : cost.unpriced} unpriced`)];
+  }
+  const more = cost.atLeast ? h('span.sessions-more', whyLow ? { title: whyLow } : {}, 'or more') : null;
+  const unpriced = cost.unpriced ? h('span.sessions-unpriced', { title: unpricedTitle }, `${kind === 'day' ? plural(cost.unpriced, 'request') : cost.unpriced} unpriced`) : null;
   const notes = [more, unpriced].filter((node): node is HTMLElement => node !== null);
-  return [h('strong.sessions-estimate', estimateTitle ? { title: estimateTitle } : {}, amount(cost)),
+  const amountTag = kind === 'model' ? 'span.sessions-amount' : 'strong.sessions-estimate';
+  return [h(amountTag, !more && whyLow ? { title: whyLow } : {}, amount(cost)),
     notes.length ? ' ' : null, notes.length ? h('span.sessions-cost-note', {}, ...(notes.length === 2 ? [notes[0]!, ' ', notes[1]!] : notes)) : null];
 }
 
@@ -165,16 +170,11 @@ function modelLines(models: ModelCost[], prefix: string) {
   ...models.map(model => {
     const aliasId = model.cost.pricedAs.length ? `sessions-alias-${safeId(prefix)}-${safeId(model.model)}` : undefined;
     const aliasText = model.cost.pricedAs.length ? `Priced as ${andList(model.cost.pricedAs.map(as => as.as))}.` : '';
-    const unpriced = model.cost.unpriced ? h('span.sessions-unpriced', {}, noPriceWords(model.cost.unpricedBy)) : null;
-    const notes = [model.cost.atLeast ? h('span.sessions-more', {}, 'or more') : null, unpriced].filter((node): node is HTMLElement => node !== null);
-    const costNodes = model.cost.dollars === undefined ? [unpriced]
-      : [h('span.sessions-amount', {}, amount(model.cost)), notes.length ? ' ' : null,
-        notes.length ? h('span.sessions-cost-note', {}, ...(notes.length === 2 ? [notes[0]!, ' ', notes[1]!] : notes)) : null];
     return h('div.sessions-line', { 'data-model': model.model },
       h('span.sessions-span', aliasId ? { 'data-info-block': true } : {},
         h('span.sessions-model', aliasId ? { 'aria-describedby': infoCardId(aliasId) } : {}, model.model),
         aliasId ? infoMark(aliasId, model.model, aliasText) : null),
-      h('span.sessions-line-cost', {}, ...costNodes),
+      h('span.sessions-line-cost', {}, ...costCell(model.cost, 'model')),
       h('span.sessions-counts', {}, ...counts(model).map((count, index) => h('span', { 'data-label': TOKEN_HEADS[index]!.toLowerCase() }, count.toLocaleString()))));
   })];
 }
@@ -235,7 +235,7 @@ function dayFold(day: PeriodDay, home: string): HTMLElement {
   const rows = () => h('ul.sessions-rows', {}, ...day.rows.map(row => sessionRow(row, false, `${key}\0`)));
   const label = h('span.sessions-day-label', {}, h('span.sessions-day-name', {}, dayLineName(day.period.start)),
     h('span.sessions-day-count', {}, plural(day.total.sessions, 'session')));
-  const summary = h('summary', {}, icon('chevron-right', 12, 'tone-faint sessions-chevron'), label, h('span.sessions-cost', {}, ...costCell(day.total.cost, true)));
+  const summary = h('summary', {}, icon('chevron-right', 12, 'tone-faint sessions-chevron'), label, h('span.sessions-cost', {}, ...costCell(day.total.cost, 'day')));
   return h('li.sessions-day', { 'data-day': String(day.period.start) }, keptLater(key, summary, rows));
 }
 

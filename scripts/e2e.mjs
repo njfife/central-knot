@@ -13308,7 +13308,7 @@ async function sessionsFlow() {
     [await a.exists('#sessions-total-info'), await a.exists('#sessions-unpriced-info'), await a.text('.sessions-head .sessions-unpriced'),
       await a.text('#sessions-unpriced-info-card'),
       await a.run(`document.querySelector('.sessions-tool-total[data-tool="codex-cli"] .sessions-unpriced')?.title ?? ''`)],
-    [false, true, '1 request unpriced', '1 session. No matching rate in the price list.', '1 session. No matching rate in the price list.']);
+    [false, true, '1 request unpriced', '1 session. No matching rate in Central Knot’s price list.', '1 session. No matching rate in Central Knot’s price list.']);
   rmSync(join(home, unpricedFile));
   ours.delete(unpricedFile);
 
@@ -13334,16 +13334,17 @@ async function sessionsFlow() {
   same('Refresh reads the day again: a row a session, newest first, the Codex agents’ sessions inside their parent’s', await nesting(), [['x1', null], ['x2', 'x1'], ['x3', 'x1'], ['beta', null], ['alpha', null]]);
   const masked = text => text.replace(/≈ \$[\d,]*\.\d+/, '≈ $…');
   const ONE_HOUR = 'One-hour cache writes are priced at the shorter cache or input rate; higher rate unknown.';
+  const NO_RATE = 'No matching rate in Central Knot’s price list.';
   /** A closed row as it reads: when, the tool, the project, its agent cue, its amount, qualifiers and their hovers. */
   const rowSays = session => a.run(`(row => { const cell = name => row.querySelector(':scope > details > summary > .sessions-' + name), cost = cell('cost'), proj = cell('project');
     const part = name => cost.querySelector('.sessions-' + name);
     return [cell('when').textContent, cell('tool').textContent, proj.querySelector('.sessions-project-name')?.textContent ?? proj.textContent, proj.querySelector('.sessions-agents')?.textContent ?? '',
-      part('estimate')?.textContent ?? '', part('more')?.textContent ?? '', part('unpriced')?.textContent ?? '', part('estimate')?.title ?? '', part('unpriced')?.title ?? '']; })(document.querySelector('.sessions-row[data-session="${session}"]'))`);
+      part('estimate')?.textContent ?? '', part('more')?.textContent ?? '', part('unpriced')?.textContent ?? '', part('estimate')?.title ?? '', part('more')?.title ?? '', part('unpriced')?.title ?? '']; })(document.querySelector('.sessions-row[data-session="${session}"]'))`);
   const [alphaRow, betaRow, x1Row, x2Row] = [await rowSays('alpha'), await rowSays('beta'), await rowSays('x1'), await rowSays('x2')];
-  same('a closed row: when, tool, project, agent count, amount alone with qualifiers below and hover reasons; an agent marked Agent; no order cue',
+  same('a closed row: when, tool, project, agent count, amount alone with qualifiers below and single hover reasons; an agent marked Agent; no order cue',
     [/^\S.*\S$/.test(alphaRow[0]), await a.exists('.sessions-order'), ...[alphaRow, betaRow, x1Row, x2Row].map(says => [says[1], says[2], says[3], masked(says[4]), ...says.slice(5)])],
-    [true, false, ['Claude Code', longFolder, '', '≈ $…', '', '1 unpriced', '', 'No price known for a fast reply.'], ['Claude Code', 'notes', '', '≈ $…', 'or more', '', ONE_HOUR, ''],
-      ['Codex', 'codex-app', '+2 agents', '≈ $…', '', '2 unpriced', '', 'No matching rate in the price list.'], ['Agent', 'codex-app', '', '', '', '1 unpriced', '', 'No matching rate in the price list.']]);
+    [true, false, ['Claude Code', longFolder, '', '≈ $…', '', '1 unpriced', '', '', 'No price known for a fast reply.'], ['Claude Code', 'notes', '', '≈ $…', 'or more', '', '', ONE_HOUR, ''],
+      ['Codex', 'codex-app', '+2 agents', '≈ $…', '', '2 unpriced', '', '', NO_RATE], ['Agent', 'codex-app', '', '', '', '1 unpriced', '', '', NO_RATE]]);
   const ratesDate = JSON.parse(readFileSync(join(root, 'assets/model-rates.json'), 'utf8')).date.split('-').map(Number);
   const pricesDate = await a.run(`new Date(${ratesDate[0]}, ${ratesDate[1] - 1}, ${ratesDate[2]}).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })`);
   const head = await a.run(`(() => { const h = document.querySelector('.sessions-head');
@@ -13406,12 +13407,14 @@ async function sessionsFlow() {
   await a.click('#sessions-by-model summary');
   const byModelAliasId = await a.run(`document.querySelector('#sessions-by-model .sessions-line[data-model="claude-haiku-4-5-20251001"] .info-mark')?.id ?? null`);
   await a.click(`#${byModelAliasId}`);
-  same('By model, opened: every model of the day once, with its own distinct alias help card',
+  same('By model, opened: every model of the day once, mixed models show N unpriced with hover, model "or more" has hover, distinct alias card',
     [(await models('#sessions-by-model > details')).map(row => row.slice(0, 2)).sort(), byModelAliasId !== alphaAliasId,
       await a.run(`document.getElementById(${JSON.stringify(`${byModelAliasId}-card`)})?.matches(':popover-open') ?? false`),
-      await a.text(`#${byModelAliasId}-card`)],
+      await a.text(`#${byModelAliasId}-card`),
+      await a.run(`document.querySelector('#sessions-by-model .sessions-line[data-model="claude-2"] .sessions-more')?.title ?? ''`),
+      await a.run(`document.querySelector('#sessions-by-model .sessions-line[data-model="gpt-6-astra"] .sessions-unpriced')?.title ?? ''`)],
     [[['claude-2', '≈ $… / or more'], ['claude-fable-5', '≈ $…'], ['claude-haiku-4-5', 'no price known for a fast reply'], ['claude-haiku-4-5-20251001', '≈ $…'],
-      ['claude-opus-5-5', '≈ $…'], ['codex-auto-review', 'no price known'], ['gpt-6-astra', '≈ $… / no price known']], true, true, 'Priced as claude-haiku-4-5.']);
+      ['claude-opus-5-5', '≈ $…'], ['codex-auto-review', 'no price known'], ['gpt-6-astra', '≈ $… / 1 unpriced']], true, true, 'Priced as claude-haiku-4-5.', ONE_HOUR, NO_RATE]);
   await a.click(`#${byModelAliasId}`);
   await a.click('#sessions-by-model summary');
 
@@ -13494,6 +13497,8 @@ async function sessionsFlow() {
     await a.run(`(() => {
       const seps = [...document.querySelectorAll('.sessions-sep')];
       const clipOk = seps.every(b => getComputedStyle(b).overflowX === 'clip' && getComputedStyle(b).overflowY === 'visible')
+        && parseFloat(getComputedStyle(document.querySelector('.sessions-head')).paddingRight) >= 4
+        && [...document.querySelectorAll('.sessions-cost-note')].every(n => getComputedStyle(n).overflowX === 'clip' && getComputedStyle(n).overflowY === 'visible')
         && [...document.querySelectorAll('.sessions-sep > *, .sessions-tool-total > .sessions-estimate')].every(e => getComputedStyle(e, '::after').content === 'none');
       const wrappedClipped = seps.every(box => {
         const left = box.getBoundingClientRect().left;
@@ -13665,7 +13670,7 @@ async function keepSessionCostsFlow() {
     await a.click('#nav-sessions');
     for (let tries = 0; tries < 100 && !(await a.exists('#sessions-heading')); tries++) await wait(100);
     await wait(2000);
-    const keptTail = 'each session’s project, request times, models, token counts and estimated prices in this home’s Central Knot folder. No message text is kept; Stop keeping hides the 7-day view and leaves the saved figures in that folder.';
+    const keptTail = 'each session’s project, request times, models, token counts and costs in this home’s Central Knot folder. No message text is kept; Stop keeping saves nothing more, hides the 7-day view and leaves the saved costs in that folder.';
     const startCard = await a.text('#sessions-keep-info-card');
     same('before the click: Keep button and its two-sentence info card match verbatim with no Stop button or Settings redirect',
       [await a.text('#sessions-keep-start'), startCard, (startCard?.match(/[.!?](?:\s|$)/g) ?? []).length, /Settings/.test(startCard ?? ''), await a.exists('#sessions-collecting'), await a.exists('#sessions-keep-stop')],

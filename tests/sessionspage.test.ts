@@ -207,8 +207,9 @@ test('keep control updates its button and card opening between off and on, shari
   assert.equal(findById(on, 'sessions-keep-stop')!.attrs['aria-describedby'], 'sessions-keep-info-card');
   assert.ok(findById(on, 'sessions-keep-info'));
   assert.equal(textOf(findById(on, 'sessions-keep-info-card')), `Keeps ${SESSION_COSTS_KEPT}`);
-  assert.match(SESSION_COSTS_KEPT, /Stop keeping hides the 7-day view/);
-  assert.doesNotMatch(SESSION_COSTS_KEPT, /collection/i);
+  assert.match(SESSION_COSTS_KEPT, /token counts and costs in this home’s Central Knot folder\./);
+  assert.match(SESSION_COSTS_KEPT, /Stop keeping saves nothing more, hides the 7-day view and leaves the saved costs in that folder\./);
+  assert.doesNotMatch(SESSION_COSTS_KEPT, /collection|estimated prices|saved figures/i);
 });
 
 test('all-unpriced heading and tool totals state why, keep count and price dates, and do not repeat unread history', () => {
@@ -223,20 +224,21 @@ test('all-unpriced heading and tool totals state why, keep count and price dates
   };
   const noRowPage = renderDay(fakeHome(false, 8), reading({ noRow: 2, speedOrTier: [], other: 0 }, 2, ['2026-11-24'], true));
   assert.equal(findById(noRowPage, 'sessions-total-info'), undefined);
-  assert.equal(textOf(findById(noRowPage, 'sessions-unpriced-info-card')), '2 sessions. Prices as of Nov 24, 2026. No matching rate in the price list.');
-  assert.equal(findNode(findById(noRowPage, 'sessions-by-tool'), el => hasClass(el, 'sessions-unpriced'))!.attrs.title, '2 sessions. No matching rate in the price list.');
+  assert.equal(textOf(findById(noRowPage, 'sessions-unpriced-info-card')), '2 sessions. Prices as of Nov 24, 2026. No matching rate in Central Knot’s price list.');
+  assert.equal(findNode(findById(noRowPage, 'sessions-by-tool'), el => hasClass(el, 'sessions-unpriced'))!.attrs.title, '2 sessions. No matching rate in Central Knot’s price list.');
 
   const mixedPage = renderDay(fakeHome(false, 8), reading({ noRow: 2, speedOrTier: [{ which: 'speed', saved: 'fast', requests: 1 }], other: 0 }, 3, [], false), 'today', 4);
   assert.equal(textOf(findById(mixedPage, 'sessions-unpriced-info-card')), '2 sessions. No price known for 2 requests with no matching rate and a fast reply.');
 });
 
-test('column cells keep dollar amounts separate from qualifiers, one-hour fallback mentions shorter cache or input rate, and no order cue renders', () => {
+test('column cells keep dollar amounts separate from qualifiers with one hover on "or more", mixed models show N unpriced, and no order cue renders', () => {
   const start = todayStart();
   const lowMixed = makeCost({
     dollars: 0.42, unpriced: 1, unpricedBy: { noRow: 1, speedOrTier: [], other: 0 },
     oneHourLow: true, atLeast: true, providers: [{ provider: 'anthropic', from: 'tool' }],
   });
-  const row = makeRow('beta', { cost: lowMixed, models: [{ model: 'claude-2', tokens: blankTokens, cost: lowMixed }] });
+  const unpricedOnly = makeCost({ dollars: undefined, unpriced: 1, unpricedBy: { noRow: 1, speedOrTier: [], other: 0 } });
+  const row = makeRow('beta', { cost: lowMixed, models: [{ model: 'claude-2', tokens: blankTokens, cost: lowMixed }, { model: 'codex-auto-review', tokens: blankTokens, cost: unpricedOnly }] });
   const page = renderDay(fakeHome(true, 9), {
     period: { start: start - 6 * 86_400_000, end: start + 86_400_000 }, ratesDates: ['2026-11-24'],
     total: { sessions: 2, tokens: blankTokens, cost: lowMixed },
@@ -247,22 +249,30 @@ test('column cells keep dollar amounts separate from qualifiers, one-hour fallba
     ],
   }, 'week', 5);
   const expectedOneHour = 'One-hour cache writes are priced at the shorter cache or input rate; higher rate unknown.';
+  const expectedNoRate = 'No matching rate in Central Knot’s price list.';
   assert.equal(findNode(page, el => hasClass(el, 'sessions-order')), undefined);
   assert.match(textOf(findById(page, 'sessions-total-info-card')), new RegExp(expectedOneHour));
   assert.equal(textOf(findNode(page, el => hasClass(el, 'sessions-aside'))), expectedOneHour);
 
   const dayCost = findNode(findNode(page, el => hasClass(el, 'sessions-day')), el => hasClass(el, 'sessions-cost'))!;
   assert.equal(textOf(findNode(dayCost, el => hasClass(el, 'sessions-estimate'))), '≈ $0.42');
+  assert.equal(findNode(dayCost, el => hasClass(el, 'sessions-estimate'))!.attrs.title, undefined);
+  assert.equal(findNode(dayCost, el => hasClass(el, 'sessions-more'))!.attrs.title, expectedOneHour);
   assert.equal(textOf(findNode(dayCost, el => hasClass(el, 'sessions-cost-note'))), 'or more 1 request unpriced');
 
   const rowCost = findNode(findNode(page, el => hasClass(el, 'sessions-row')), el => hasClass(el, 'sessions-cost'))!;
   assert.equal(textOf(findNode(rowCost, el => hasClass(el, 'sessions-estimate'))), '≈ $0.42');
-  assert.equal(findNode(rowCost, el => hasClass(el, 'sessions-more'))?.attrs.title, expectedOneHour);
+  assert.equal(findNode(rowCost, el => hasClass(el, 'sessions-estimate'))!.attrs.title, undefined);
+  assert.equal(findNode(rowCost, el => hasClass(el, 'sessions-more'))!.attrs.title, expectedOneHour);
   assert.equal(textOf(findNode(rowCost, el => hasClass(el, 'sessions-cost-note'))), 'or more 1 unpriced');
 
-  const modelCost = findNode(findById(page, 'sessions-by-model'), el => hasClass(el, 'sessions-line') && !hasClass(el, 'sessions-line-head'))!;
-  assert.equal(textOf(findNode(modelCost, el => hasClass(el, 'sessions-amount'))), '≈ $0.42');
-  assert.equal(textOf(findNode(modelCost, el => hasClass(el, 'sessions-cost-note'))), 'or more no price known');
+  const modelLines = findAll(findById(page, 'sessions-by-model'), el => hasClass(el, 'sessions-line') && !hasClass(el, 'sessions-line-head'));
+  assert.equal(textOf(findNode(modelLines[0]!, el => hasClass(el, 'sessions-amount'))), '≈ $0.42');
+  assert.equal(findNode(modelLines[0]!, el => hasClass(el, 'sessions-amount'))!.attrs.title, undefined);
+  assert.equal(findNode(modelLines[0]!, el => hasClass(el, 'sessions-more'))!.attrs.title, expectedOneHour);
+  assert.equal(findNode(modelLines[0]!, el => hasClass(el, 'sessions-unpriced'))!.attrs.title, expectedNoRate);
+  assert.equal(textOf(findNode(modelLines[0]!, el => hasClass(el, 'sessions-cost-note'))), 'or more 1 unpriced');
+  assert.equal(textOf(findNode(modelLines[1]!, el => hasClass(el, 'sessions-unpriced'))), 'no price known');
 });
 
 test('rows derive nested agent counts (+2 agents / +1 agent) and open-row reported figure drops "for this session"', () => {
