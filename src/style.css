@@ -2212,7 +2212,8 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .pf-main { flex: 1 1 0; min-width: 0; min-height: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
 .pf-title { flex: 0 1 auto; min-width: 0; max-width: 100%; line-height: 22px; overflow-wrap: break-word; }
 .pf-name-text { font-weight: 500; }
-.pf-title > .row-file-btn { margin-left: 6px; vertical-align: middle; }
+.pf-mark-keep { white-space: nowrap; }
+.pf-mark-keep > .row-file-btn { margin-left: 6px; vertical-align: middle; }
 .pf-main > .row-tag { flex: 0 1 auto; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: break-word; align-items: flex-start; }
 .pf-main > .row-tag > svg { flex: none; margin-top: 2px; }
 /* A skill that comes on in Claude Code with the ticked row above it, its plugin being whole there (profilespage.ts withBrought). */

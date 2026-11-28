@@ -131,6 +131,20 @@ const kindWords: Record<ItemKind, { one: string; many: string; title: string }> 
 const cellWords = (said: string, inChanges: boolean) => (inChanges && (said === 'Turns on' || said === 'Turns off') ? '' : said);
 /** Kind icon for a row in the Changes view, carrying its kind on hover. */
 const kindMark = (kind: ItemKind) => h('span.kind-mark', { role: 'img', 'aria-label': kindWords[kind].one, title: kindWords[kind].one }, icon(kindGlyph[pageOfPart[kind]], 13));
+/** Keeps the file mark with the name's (or Changes kind tag's) last few letters so the mark never wraps alone while a long last word still breaks. */
+function nameTitle(label: string, title: string, mark?: HTMLElement, kindWord?: string) {
+  const split = (text: string) => {
+    const tail = text.match(/[^\s-]{1,4}$/)?.[0] ?? text.match(/\S{1,4}$/)?.[0] ?? text;
+    return [text.slice(0, text.length - tail.length), tail] as const;
+  };
+  if (!mark) return h('span.pf-title', {}, h('span.pf-name-text', { title }, label, kindWord ? h('span.tone-muted', {}, ` · ${kindWord}`) : null));
+  if (kindWord) {
+    const [head, tail] = split(kindWord);
+    return h('span.pf-title', {}, h('span.pf-name-text', { title }, label, h('span.tone-muted', {}, ` · ${head}`, h('span.pf-mark-keep', {}, tail, mark))));
+  }
+  const [head, tail] = split(label);
+  return h('span.pf-title', {}, h('span.pf-name-text', { title }, head, h('span.pf-mark-keep', {}, tail, mark)));
+}
 
 /**
  * One item's row: its tick box, name (with its description on hover), and what a switch does to it; on a row the profile leaves
@@ -147,10 +161,7 @@ function itemRow(profile: Profile, item: LiveItem, plan: Plan, file: { mark?: HT
       tick(profile, { id: `pf-${item.id}`, checked: included, label: `${item.name} (${kindWords[item.kind].one}) in ${profile.name}`, help,
         itemsAfterClick: included ? profile.items.filter(entry => entry !== item.id) : [...profile.items, item.id] }),
       inChanges ? kindMark(item.kind) : null,
-      h('span.pf-main', {},
-        h('span.pf-title', {},
-          h('span.pf-name-text', { title: description || item.name }, item.name, showKindWord ? h('span.tone-muted', {}, ` · ${kindWords[item.kind].one}`) : null),
-          file.mark)),
+      h('span.pf-main', {}, nameTitle(item.name, description || item.name, file.mark, showKindWord ? kindWords[item.kind].one : undefined)),
       kept.tools.length ? h('span.pf-notes', {}, h('span.pf-note', {}, `${toolList(kept.tools)} still ${many ? 'load' : 'loads'} it ${loadWords([kept])}.`)) : null),
     // Words that count tools name each behind their (?), reached by click and keyboard.
     h(`span.pf-state${said ? '.pf-state-moves' : ''}`, { role: 'cell', 'data-state': said }, said, change?.full ? infoMark(`pf-full-${item.id}`, item.name, change.full) : null),
@@ -263,9 +274,7 @@ function pluginRow(profile: Profile, item: PluginLive, plan: Plan, file: { mark?
         itemsAfterClick: included ? profile.items.filter(entry => entry !== item.id) : [...profile.items, item.id] }),
       inChanges ? kindMark(item.kind) : null,
       h('span.pf-main', {},
-        h('span.pf-title', {},
-          h('span.pf-name-text', { title: item.name }, item.name, showKindWord ? h('span.tone-muted', {}, ` · ${kindWords[item.kind].one}`) : null),
-          file.mark),
+        nameTitle(item.name, item.name, file.mark, showKindWord ? kindWords[item.kind].one : undefined),
         pluginTag(item.plugin, `From the plugin ${item.plugin}, in the marketplace ${item.marketName}`)),
       notes.length ? h('span.pf-notes', {}, notes) : null),
     h(`span.pf-state${moves ? '.pf-state-moves' : ''}`, { role: 'cell', 'data-state': said }, said),
@@ -585,9 +594,10 @@ export function profileStatus(): HTMLElement | null {
 }
 // A click anywhere else closes the profile menu.
 document.addEventListener('click', event => { if (menuOpen && !(event.target as Element).closest?.('.status-profile-wrap')) { menuOpen = false; rerender(); } });
-// Escape cancels an armed Delete confirmation before pagePlace's window listener closes an open file panel.
+// Escape cancels an armed Delete confirmation only while it is drawn on the page, before pagePlace's window listener closes an open file panel.
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && !event.defaultPrevented && state.page === 'profiles' && profileState.confirmDelete) { event.preventDefault(); cancelDelete(); }
+  if (event.key === 'Escape' && !event.defaultPrevented && state.page === 'profiles' && profileState.confirmDelete
+    && document.getElementById('profile-delete-confirm')) { event.preventDefault(); cancelDelete(); }
 });
 /** Under 880 px .profiles-split scrolls while .pf-scroll expands to its content, so cap the open file box against #profiles-split. */
 function settleNarrowFileBox(): void {

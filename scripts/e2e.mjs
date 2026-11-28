@@ -3021,7 +3021,7 @@ async function practiceFlow() {
     await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Focus')).click()`); await a.settle();
     await a.click('#profile-changes');
   } else check('Changes N button exists while previewing', false);
-  const pfMark = id => `.pf-row[data-item="${id}"] .pf-name-text + .row-file-btn`;
+  const pfMark = id => `.pf-row[data-item="${id}"] .pf-title .row-file-btn`;
   const pfFile = () => a.run(`(() => { const box = document.querySelector('.file-open-box'), row = box?.closest('.pf-row'); return { item: row?.dataset.item ?? null, anchored: !!row?.classList.contains('file-anchored'), text: box?.querySelector('pre.content')?.textContent ?? '', boxes: document.querySelectorAll('.file-open-box').length }; })()`);
   const openPf = async (id, line) => {
     await a.click(pfMark(id));
@@ -3052,7 +3052,8 @@ async function practiceFlow() {
     }
     same('nothing cut off on Profiles at 860×528 with sidebar open', [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
     // File mark after each item's name: one press opens its text under its row, a second moves it, menu/Find/Delete confirm claim Escape, next Escape closes it.
-    same('at 860, every listed item has a file mark right after its name', await a.all('.pf-row[data-item]', `!!e.querySelector('.pf-name-text + .row-file-btn')`), [true, true, true, true]);
+    if (shots) { await a.run(`document.activeElement?.blur?.()`); await a.run(`window.centralKnot.setAppearance('light')`); await wait(80); await a.shot('profiles-file-marks-860-light'); await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); }
+    same('at 860, every listed item has a file mark right after its name', await a.all('.pf-row[data-item]', `!!e.querySelector('.pf-title .row-file-btn')`), [true, true, true, true]);
     const notesFile = await openPf('skill:notes', 'Keep the facts and the writer’s intent.');
     same('at 860, pressing notes’s mark opens its text under its row, nothing cut off', [notesFile.item, notesFile.anchored, notesFile.text.includes('Keep the facts and the writer’s intent.'), notesFile.boxes, ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], ['skill:notes', true, true, 1]);
     const standupFile = await openPf('skill:standup', 'Read the commits.');
@@ -3073,6 +3074,7 @@ async function practiceFlow() {
       [[false, 1], ['', 1], [false, 1, 'profile-delete'], 0, true]);
   });
   await withSidebarOpen(a, 1316, 819, async () => {
+    if (shots) { await a.run(`document.activeElement?.blur?.()`); await a.run(`window.centralKnot.setAppearance('dark')`); await wait(80); await a.shot('profiles-file-marks-1316-dark'); await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); }
     await openPf('skill:notes', 'Keep the facts and the writer’s intent.');
     same('at 1316×819 the list column shows, the picker hides, and nothing is cut off with a file open',
       [await a.run(`(() => { const p = document.querySelector('.pf-picker'); return p ? getComputedStyle(p).display : null; })()`), await a.run(`getComputedStyle(document.querySelector('.profiles-list .list-scroll')).display !== 'none'`),
@@ -4997,6 +4999,13 @@ async function practiceFlow() {
             [longFit.width >= 150, longFit.lines >= 2, longFit.markOnLast, longFit.stateWidth >= 200, longFit.noOverlap, ...await a.run(CUT_OFF)],
             [true, true, true, true, true]);
           if (shots) { await a.run(`document.activeElement?.blur?.()`); await a.shot('profiles-long-name-860-light'); }
+          if (shots) {
+            await a.run(`document.querySelector('.pf-row[data-item="plugin:mcp:${longPlug}@ck-test-market/issues"]')?.scrollIntoView({ block: 'end' })`);
+            await wait(80);
+            await a.shot('profiles-plugin-and-own-860-light');
+            await a.run(`document.querySelector('.pf-row[data-item="${longRowId}"]')?.scrollIntoView({ block: 'center' })`);
+            await a.settle();
+          }
           await openPf(longRowId, 'Step 1 of the release checklist.');
           await wait(80);
           const longBox = await a.run(`(() => { const split = document.getElementById('profiles-split').getBoundingClientRect(), box = document.querySelector('.file-open-box').getBoundingClientRect(), row = document.querySelector('.pf-row.file-anchored'), head = document.querySelector('.pf-section')?.getBoundingClientRect(), next = row?.nextElementSibling?.getBoundingClientRect(); return { boxH: Math.round(box.height), splitH: Math.round(split.height), capped: box.height < split.height - 60, rowInSight: !!row && row.getBoundingClientRect().top >= (head?.bottom ?? split.top) - 2, nextInSight: !!next && next.top < split.bottom - 8 }; })()`);
@@ -5005,6 +5014,30 @@ async function practiceFlow() {
           await a.press('Escape');
         } finally { if (shots) { await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); } }
       });
+      // Narrow to the exact width where the last word fits on one line and the mark does not: the mark stays with the last word, never alone on a line.
+      await sizeTo(a, 1360, 819);
+      const fullW = await a.run(`(() => { const r = document.querySelector('.pf-row[data-item="${longRowId}"]'), n = r.querySelector('.pf-name-text'), w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT); let textW = 0; for (let t; (t = w.nextNode()); ) { const rg = document.createRange(); rg.selectNodeContents(t); textW += rg.getBoundingClientRect().width; } return { textW, mainW: r.querySelector('.pf-main').getBoundingClientRect().width }; })()`);
+      let tightW = 1360 - Math.round((fullW.mainW - fullW.textW - 8) / 0.74);
+      await sizeTo(a, tightW, 819);
+      const adj = await a.run(`document.querySelector('.pf-row[data-item="${longRowId}"] .pf-main').getBoundingClientRect().width`);
+      if (adj < fullW.textW + 2 || adj > fullW.textW + 18) { tightW += Math.round((fullW.textW + 8 - adj) / 0.74); await sizeTo(a, tightW, 819); }
+      const markCheck = await a.run(`(() => {
+        const r = document.querySelector('.pf-row[data-item="${longRowId}"]'), n = r.querySelector('.pf-name-text'), m = r.querySelector('.row-file-btn').getBoundingClientRect();
+        const w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT), nodes = [];
+        for (let t; (t = w.nextNode()); ) if (t.nodeValue.trim()) nodes.push(t);
+        const last = nodes.at(-1), rg = document.createRange(), mid = b => (b.top + b.bottom) / 2;
+        rg.setStart(last, last.nodeValue.length - 1); rg.setEnd(last, last.nodeValue.length);
+        const ch = rg.getBoundingClientRect();
+        const full = nodes.map(t => t.nodeValue).join(''), wordAt = full.lastIndexOf(' ') + 1;
+        let seen = 0, firstNode = nodes[0], firstOff = 0;
+        for (const t of nodes) { if (seen + t.nodeValue.length > wordAt) { firstNode = t; firstOff = wordAt - seen; break; } seen += t.nodeValue.length; }
+        rg.setStart(firstNode, firstOff); rg.setEnd(firstNode, firstOff + 1);
+        const wordStart = rg.getBoundingClientRect();
+        return { tightW: window.innerWidth, mainW: Math.round(r.querySelector('.pf-main').getBoundingClientRect().width), textW: Math.round(${fullW.textW}),
+          markWithLastChar: Math.abs(mid(m) - mid(ch)) <= 6 && m.left >= ch.right - 2, wholeLastWord: Math.abs(mid(wordStart) - mid(ch)) <= 6 };
+      })()`);
+      same('at the width where the name’s last word fits and the mark does not, the mark never wraps alone and the last word stays whole',
+        [markCheck.markWithLastChar, markCheck.wholeLastWord], [true, true]);
       await fullSize(a);
     } finally {
       if (installsBefore === undefined) rmSync(installRecord); else writeFileSync(installRecord, installsBefore);
