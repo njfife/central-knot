@@ -1233,7 +1233,7 @@ async function harnessFlow() {
       const head = document.querySelector('.ov-tab-head');
       const mark = document.getElementById('tab-switch-info');
       const r = mark?.getBoundingClientRect();
-      return { exists: !!head, text: head?.querySelector('.ov-tab-head-switch')?.textContent?.trim() ?? null, markLabel: head?.querySelector('.ov-tab-head-mark')?.textContent?.trim() ?? null, markSized: !!(r && r.width > 0 && r.height > 0) };
+      return { exists: !!head, text: head?.querySelector('.ov-tab-head-switch')?.innerText?.trim() ?? null, markLabel: head?.querySelector('.ov-tab-head-mark')?.textContent?.trim() ?? null, markSized: !!(r && r.width > 0 && r.height > 0) };
     })()`);
     same('tool tab shows Every tool (?) above the switch column and the tool name above its mark column',
       tabHead, { exists: true, text: 'Every tool', markLabel: 'Claude Code', markSized: true });
