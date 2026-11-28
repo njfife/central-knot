@@ -138,7 +138,8 @@ test('Rows Central Knot holds and plugin skills get a file mark after the name; 
   findNode(rowOfItem('plugin:skill:alpha@team/triage'), el => el.classList.contains('row-file-btn'))!.click();
   assert.deepEqual([has('skill:notes', 'details-file-only'), has('plugin:skill:alpha@team/triage', 'details-file-only'), rowOfItem('plugin:skill:alpha@team/triage')?.classList.contains('file-anchored')], [false, true, true]);
   // Rename's Escape claims the event so an open file stays open.
-  findById(rendered, 'profile-rename')!.click();
+  profileState.renaming = 'work';
+  draw();
   const renameEsc = { key: 'Escape', defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
   (findById(rendered, 'profile-name') as FakeNode & { onkeydown?: (e: unknown) => void }).onkeydown?.(renameEsc);
   assert.deepEqual([renameEsc.defaultPrevented, has('plugin:skill:alpha@team/triage', 'details-file-only')], [true, true]);
