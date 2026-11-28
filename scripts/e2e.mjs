@@ -500,7 +500,7 @@ async function backFlow() {
   await thumb();
   same('one Back skips left-out tool entries that now show the current list', await page(), 'nav-history');
   await a.click(byId('nav-harnesses'));
-  await a.click(byId('manage-codex-cli'));
+  await manageAgain(a, 'codex-cli');
   await a.click(byId('harness-codex-cli'));
   await a.click(byId('nav-settings'));
   await a.click(byId('nav-harnesses'));
@@ -893,7 +893,7 @@ async function harnessFlow() {
   })()`);
   same('a managed card’s main part is a div and its heading is the link button, first in keyboard order, with the arrow beside the name in its ink, no nested buttons, and Managed (?) on the first managed card',
     [cardShape.mainTag, cardShape.headTag, cardShape.headClass, cardShape.label, cardShape.arrowGap, cardShape.sameInk, cardShape.inMain, cardShape.nestedButtons, cardShape.buttons],
-    ['DIV', 'BUTTON', true, 'Claude Code. Open its page.', 8, true, true, 0, ['harness-claude-cli', 'harness-claude-cli-differ-skills', 'manage-claude-cli', 'manage-info']]);
+    ['DIV', 'BUTTON', true, 'Claude Code. Open its page.', 8, true, true, 0, ['harness-claude-cli', 'harness-claude-cli-instructions', 'harness-claude-cli-differ-skills', 'manage-claude-cli', 'manage-info']]);
   // Clicking the card's body outside its heading does nothing (both DOM click on counts and real pointer click on the body).
   await a.click('.harness-card:has(#harness-claude-cli) .harness-counts');
   const bodyPoint = await a.run(`(() => {
@@ -924,9 +924,9 @@ async function harnessFlow() {
     [openedByKey, returnedFocus], ['Claude Code', { id: 'harness-claude-cli', tag: 'BUTTON', head: true, visible: true }]);
   // Manage switch never navigates, and an unmanaged card's heading and body never navigate.
   await a.click('#manage-codex-cli');
-  const codexOut = await a.exists('.harness-cards') && !(await a.exists('#harness-back')) && !(await a.exists('button#harness-codex-cli'));
-  await a.click('#harness-codex-cli .harness-card-head');
-  await a.click('#harness-codex-cli .harness-card-main');
+  const codexOut = await a.exists('.harness-cards') && !(await a.exists('#harness-back')) && !(await a.exists('#harness-codex-cli')) && await a.exists('#harness-card-codex-cli.harness-card-out');
+  await a.click('#harness-card-codex-cli .harness-card-head');
+  await a.click('#harness-card-codex-cli .harness-card-main');
   const outStayed = await a.exists('.harness-cards') && !(await a.exists('#harness-back'));
   await manageAgain(a, 'codex-cli');
   const managedBack = await a.exists('.harness-cards') && !(await a.exists('#harness-back')) && await a.exists('button#harness-codex-cli.harness-card-head');
@@ -986,16 +986,121 @@ async function harnessFlow() {
   // Another home: the instruction file shown is that home's, not the practice copy's.
   await a.click('#home-actual');
   await a.click('#nav-harnesses');
-  // A missing tool's card has no heading button and clicking its heading or body never navigates.
-  const piMissing = await a.exists('#harness-pi-cli.harness-card-missing') && !(await a.exists('button#harness-pi-cli'));
-  await a.click('#harness-pi-cli .harness-card-head');
-  await a.click('#harness-pi-cli .harness-card-main');
+  // A missing tool's card has a distinct wrapper id, no heading button, and clicking its heading or body never navigates.
+  const piMissing = await a.exists('#harness-card-pi-cli.harness-card-missing') && !(await a.exists('#harness-pi-cli'));
+  await a.click('#harness-card-pi-cli .harness-card-head');
+  await a.click('#harness-card-pi-cli .harness-card-main');
   same('a missing tool’s card has no heading button and clicking it never navigates', [piMissing, await a.exists('.harness-cards') && !(await a.exists('#harness-back'))], [true, true]);
   await a.click('button#harness-claude-cli.harness-card-head');
   await a.click('#harness-tab-instructions');
   check('after a home switch, instructions are that home’s', (await a.text('#harness-body') ?? '').includes('~/.claude/CLAUDE.md'), await a.text('#harness-body'));
   same('no page errors, harnesses', a.pageErrors, []);
   await a.quit();
+
+  // Six-tool Harnesses cards: compact footer brings all six Manage switches above the fold at 1316×822, wide sits 3 × 2,
+  // capability dashes carry the (?) mark and keyboard-accessible cards, filenames span value+note on one line and open
+  // that tool's Instructions tab, and clicking beside the heading never navigates.
+  const sHome = join(scratch, 'harness-six-home'), sData = join(scratch, 'harness-six-data');
+  const sCli = (name, version) => { const p = join(sHome, '.local/bin', name); mkdirSync(join(p, '..'), { recursive: true }); writeFileSync(p, `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(p, 0o755); };
+  for (const [name, version] of [['claude', '2.1.330 (Claude Code)'], ['copilot', '1.0.114'], ['codex', 'codex-cli 0.171.0'], ['pi', 'pi 1.6.0'], ['opencode', '1.19.6'], ['agy', '1.5.14']]) sCli(name, version);
+  for (const dir of ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills', '.config/opencode/skills', '.gemini/config/skills']) {
+    skill(join(sHome, dir), 'notes', text('notes', 'Notes.'));
+    skill(join(sHome, dir), 'review', text('review', 'Review.'));
+  }
+  for (const dir of ['.claude/skills', '.copilot/skills', '.codex/skills']) skill(join(sHome, dir), 'local-draft', text('local-draft', 'Draft.'));
+  skill(join(sHome, '.claude/skills'), 'clash', text('clash', 'Claude copy.'));
+  skill(join(sHome, '.copilot/skills'), 'clash', text('clash', 'Copilot copy.'));
+  skill(join(sHome, '.config/opencode/skills'), 'clash', text('clash', 'OpenCode copy.'));
+  const sMcp = `${JSON.stringify({ mcpServers: { docs: { command: 'npx', args: ['-y', 'docs'] } } }, null, 2)}\n`;
+  writeFileSync(join(sHome, '.claude.json'), sMcp);
+  writeFileSync(join(sHome, '.copilot/mcp-config.json'), sMcp);
+  writeFileSync(join(sHome, '.codex/config.toml'), '[mcp_servers.docs]\ncommand = "npx"\nargs = ["-y", "docs"]\n');
+  writeFileSync(join(sHome, '.pi/agent/mcp.json'), sMcp);
+  writeFileSync(join(sHome, '.config/opencode/opencode.json'), `${JSON.stringify({ mcp: { docs: { type: 'local', command: ['npx', '-y', 'docs'] } } }, null, 2)}\n`);
+  writeFileSync(join(sHome, '.gemini/config/mcp_config.json'), sMcp);
+  const sAgent = name => `---\nname: ${name}\ndescription: The ${name} agent.\n---\n\nPrompt.\n`;
+  for (const [dir, ext] of [['.claude/agents', '.md'], ['.copilot/agents', '.agent.md'], ['.codex/agents', '.md'], ['.config/opencode/agents', '.md']]) {
+    mkdirSync(join(sHome, dir), { recursive: true });
+    writeFileSync(join(sHome, dir, `helper${ext}`), sAgent('helper'));
+  }
+  writeFileSync(join(sHome, '.claude/CLAUDE.md'), '# Claude\n');
+  writeFileSync(join(sHome, '.copilot/copilot-instructions.md'), '# Copilot\n');
+  for (const rel of ['.codex/AGENTS.md', '.config/opencode/AGENTS.md', '.gemini/config/AGENTS.md']) writeFileSync(join(sHome, rel), '# Agents\n');
+  mkdirSync(sData, { recursive: true });
+  const s = await launch(sData, flag('--electron') ? ['--as-released'] : [], sHome, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
+  try {
+    await s.run(`window.centralKnot.applySkills([{ key: 'notes', on: true, except: [] }, { key: 'review', on: true, except: [] }], false, ${JSON.stringify(sHome)})`);
+    await s.run(`window.centralKnot.applyServers([{ key: 'docs', on: true, except: [] }], false, ${JSON.stringify(sHome)})`);
+    await s.run(`window.centralKnot.applyAgents([{ key: 'helper', on: true, except: [] }], false, ${JSON.stringify(sHome)})`);
+    await s.click('#header-refresh');
+    await s.click('#nav-harnesses');
+    // Clicking blank space beside the heading button inside .harness-card-main does not navigate; keyboard Enter + Back returns focus cleanly clear of the version line.
+    const besideHead = await s.run(`(() => { const main = document.querySelector('#harness-card-claude-cli .harness-card-main').getBoundingClientRect(), head = document.getElementById('harness-claude-cli').getBoundingClientRect(); return { x: Math.round(main.right - 12), y: Math.round(head.top + head.height / 2), wider: main.right - head.right > 20 }; })()`);
+    check('the heading button hugs its title rather than spanning the full card', besideHead.wider, besideHead);
+    for (const type of ['mousePressed', 'mouseReleased']) await s.send('Input.dispatchMouseEvent', { type, x: besideHead.x, y: besideHead.y, button: 'left', clickCount: 1 });
+    await s.settle();
+    check('clicking empty space beside the heading does not navigate', await s.exists('.harness-cards') && !(await s.exists('#harness-back')));
+    const pressKeySix = async (key, code, keyCode, extra = {}) => {
+      for (const type of ['keyDown', 'keyUp']) await s.send('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: keyCode, ...(type === 'keyDown' ? extra : {}) });
+      await s.settle();
+    };
+    await s.run(`document.getElementById('harness-claude-cli')?.focus()`);
+    await pressKeySix('Enter', 'Enter', 13, { text: '\r' });
+    await s.run(`document.getElementById('harness-back')?.focus()`);
+    await pressKeySix('Enter', 'Enter', 13, { text: '\r' });
+    const ringClear = await s.run(`(() => { const head = document.getElementById('harness-claude-cli'), st = document.querySelector('#harness-card-claude-cli .harness-card-status'); return { focused: document.activeElement?.id, visible: !!head?.matches(':focus-visible'), gap: Math.round(st.getBoundingClientRect().top - head.getBoundingClientRect().bottom) }; })()`);
+    check('keyboard return focuses the heading with room clear of the version line', ringClear.focused === 'harness-claude-cli' && ringClear.visible && ringClear.gap >= 6, ringClear);
+    // Capability dashes show the page's (?) mark in the same ink and measurable hit targets.
+    const dashLook = await s.run(`(() => {
+      const manageInk = getComputedStyle(document.getElementById('manage-info')).color;
+      return ['harness-antigravity-cli-agents-reason', 'harness-pi-cli-plugins-reason'].map(id => {
+        const el = document.getElementById(id), r = el?.getBoundingClientRect(), svg = el?.querySelector('svg');
+        return el && r ? [Math.round(r.width) >= 20, Math.round(r.height) >= 20, !!svg, getComputedStyle(el).color === manageInk] : null;
+      });
+    })()`);
+    same('capability dashes carry the (?) mark in Managed (?) ink with measurable targets', dashLook, [[true, true, true, true], [true, true, true, true]]);
+    // Existing instruction filename opens that tool's Instructions tab by click and keyboard; no file yet stays plain.
+    same('copilot-instructions.md link names its destination on hover and Pi’s no file yet has no button',
+      [await s.run(`document.getElementById('harness-copilot-cli-instructions')?.title ?? null`), await s.exists('#harness-pi-cli-instructions')],
+      ['Open Copilot CLI’s Instructions tab', false]);
+    await s.click('#harness-copilot-cli-instructions');
+    same('clicking an instruction filename opens that tool’s Instructions tab',
+      [await s.text('.title-harness'), await s.exists('#harness-tab-instructions[aria-selected="true"]')], ['Copilot CLI', true]);
+    await s.click('#harness-back');
+    await s.run(`document.getElementById('harness-claude-cli-instructions')?.focus()`);
+    await pressKeySix('Enter', 'Enter', 13, { text: '\r' });
+    same('keyboard Enter on an instruction filename opens that tool’s Instructions tab',
+      [await s.text('.title-harness'), await s.exists('#harness-tab-instructions[aria-selected="true"]')], ['Claude Code', true]);
+    await s.click('#harness-back');
+    // Check 860×528, 1316×822 (all six Manage switches above fold), and wide window (1728×1117 in 3 × 2), plus copilot-instructions.md on one line.
+    for (const [w, h] of [SMALLEST, [1316, 822], [1728, 1117]]) {
+      await sizeTo(s, w, h);
+      same(`six-tool Harnesses has nothing cut off at ${w}×${h}`, await s.run(CUT_OFF), []);
+      const copLines = await s.run(`(() => { const note = [...document.querySelectorAll('#harness-card-copilot-cli .harness-count-note')].find(n => n.textContent === 'copilot-instructions.md'); const btn = note?.querySelector('#harness-copilot-cli-instructions'); if (!note || !note.classList.contains('harness-count-span') || !btn?.firstChild) return -1; const r = document.createRange(); r.selectNodeContents(btn.firstChild); return new Set([...r.getClientRects()].map(box => Math.round(box.top))).size; })()`);
+      same(`copilot-instructions.md spans value+note on one line at ${w}×${h}`, copLines, 1);
+      if (w === 1316) {
+        const fold = await s.run(`(() => { const top = document.getElementById('status').getBoundingClientRect().top; const sw = [...document.querySelectorAll('[id^="manage-"][role="switch"]')]; const partsWhole = [...document.querySelectorAll('.harness-count-part')].every(el => { const r = document.createRange(); r.selectNodeContents(el); return new Set([...r.getClientRects()].map(b => Math.round(b.top))).size <= 1; }); return { count: sw.length, allAboveFold: sw.every(el => el.getBoundingClientRect().bottom <= top + 1), inFoot: sw.every(el => !!el.closest('.harness-card-foot')), partsWhole }; })()`);
+        same('at 1316×822 all six Manage switches sit in compact footers above the fold and no note phrase splits across lines', fold, { count: 6, allAboveFold: true, inFoot: true, partsWhole: true });
+      }
+      if (w === 1728) {
+        const rows = await s.run(`(() => { const byTop = new Map(); for (const card of document.querySelectorAll('.harness-card')) { const y = Math.round(card.getBoundingClientRect().top); byTop.set(y, (byTop.get(y) ?? 0) + 1); } return [...byTop.values()]; })()`);
+        same('at 1728×1117 six cards sit three and three', rows, [3, 3]);
+      }
+    }
+    await sizeTo(s, ...SMALLEST);
+    await s.run(`document.getElementById('harness-antigravity-cli-agents-reason').scrollIntoView({ block: 'center' })`);
+    await checkCard(s, 'harness-antigravity-cli-agents-reason', 'Central Knot doesn’t handle agents for Antigravity.', 'Antigravity Agents capability dash card at 860×528');
+    await checkCard(s, 'harness-pi-cli-plugins-reason', 'Pi takes a plugin’s items, not the plugin', 'Pi Plugins capability dash card at 860×528');
+    check('clicking capability dashes never navigated away from Harnesses', await s.exists('.harness-cards') && !(await s.exists('#harness-back')));
+    // Keyboard Enter opens the dash card and Escape closes it, keeping focus on the dash.
+    await s.run(`document.getElementById('harness-antigravity-cli-agents-reason').focus()`);
+    await pressKeySix('Enter', 'Enter', 13, { text: '\r' });
+    const dashKeyOpen = await s.run(`!!document.getElementById('harness-antigravity-cli-agents-reason-card')?.matches(':popover-open')`);
+    await pressKeySix('Escape', 'Escape', 27);
+    const dashKeyClose = await s.run(`[!document.getElementById('harness-antigravity-cli-agents-reason-card')?.matches(':popover-open'), document.activeElement?.id]`);
+    same('keyboard Enter opens the capability dash card and Escape closes it keeping focus', [dashKeyOpen, dashKeyClose], [true, [true, 'harness-antigravity-cli-agents-reason']]);
+    same('no page errors, six-tool harnesses', s.pageErrors, []);
+  } finally { await s.quit(); }
 
   // Heading info marks, cards, live lines, keyboard access, pinned rows and stable heading heights on Library and each tool tab.
   const hHome = join(scratch, 'heading-notes-home'), hData = join(scratch, 'heading-notes-data'), hReal = join(scratch, 'heading-notes-real');
@@ -1182,6 +1287,15 @@ async function manageFlow() {
   await a.click(`#${rowPart('add', 'skills', 'standup')}`);
   await a.click('#nav-harnesses');
   same('every installed tool’s card has its Manage switch, on', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
+  await sizeTo(a, 1316, 822);
+  const footLayout = await a.run(`(() => {
+    const cards = [...document.querySelectorAll('.harness-card')];
+    const feet = cards.map(c => c.querySelector('.harness-card-foot'));
+    const tops = feet.map(f => Math.round(f?.querySelector('[role="switch"]')?.getBoundingClientRect().top ?? -1));
+    return { allFoot: feet.every(f => f && f.querySelector('.harness-manage') && f.querySelector('.harness-card-path')), aligned: new Set(tops).size === 1 };
+  })()`);
+  same('Manage switches sit in compact footers aligned across the row at 1316×822', footLayout, { allFoot: true, aligned: true });
+  await fullSize(a);
   same('only the first managed card carries Managed (?) with its card text, and no managed card keeps a question or dangling aria-describedby',
     await a.run(`(() => {
       const marks = [...document.querySelectorAll('.harness-manage .info-mark')].map(el => [el.id, el.closest('.harness-manage')?.querySelector('[role="switch"]')?.id]);
@@ -1191,11 +1305,14 @@ async function manageFlow() {
       return [marks, card, lines, dangling];
     })()`),
     [[['manage-info', 'manage-claude-cli']], 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.', [], []]);
-  // Turning Claude Code off moves the single Managed (?) to Copilot CLI (first managed card after an unmanaged one).
+  // Turning Claude Code off moves the single Managed (?) to Copilot CLI and gives left-out Claude Code its own (?) card.
   await a.click('#manage-claude-cli');
-  same('first managed card after an unmanaged one carries the one Managed (?)',
-    await a.run(`[...document.querySelectorAll('.harness-manage .info-mark')].map(el => [el.id, el.closest('.harness-manage')?.querySelector('[role="switch"]')?.id, document.getElementById('manage-info-card')?.textContent ?? ''])`),
-    [['manage-info', 'manage-copilot-cli', 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.']]);
+  same('first managed card after an unmanaged one carries the one Managed (?), and the left-out card carries its own (?)',
+    await a.run(`[...document.querySelectorAll('.harness-manage .info-mark')].map(el => [el.id, el.closest('.harness-manage')?.querySelector('[role="switch"]')?.id, document.getElementById(el.id + '-card')?.textContent ?? ''])`),
+    [
+      ['manage-claude-cli-info', 'manage-claude-cli', 'Central Knot doesn’t read or write Claude Code while it’s left out, so its copies and every item stay as they are. Its switch asks before managing it again.'],
+      ['manage-info', 'manage-copilot-cli', 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.'],
+    ]);
   await manageAgain(a, 'claude-cli');
   const codex = () => tree(join(practice, '.codex'));
   const before = codex();
@@ -1203,9 +1320,11 @@ async function manageFlow() {
   await a.click('#manage-codex-cli');
   check('the band says Codex is left out and its copies stay', (await a.text('.band-done .band-text') ?? '').startsWith('Codex is left out: Central Knot writes nothing there now.'), await a.text('.band-done'));
   same('turning it off wrote nothing in Codex', codex(), before);
-  const card = await a.text('#harness-codex-cli');
-  check('its card says it is left out and that its switch asks first, opens nothing, and never says Not found or Install',
-    card.includes('Not managed') && card.includes('Left out: Central Knot writes nothing in Codex. Its switch asks before managing it again.') && !/Not found|Install/.test(card) && !(await a.exists('button#harness-codex-cli')), card);
+  const card = await a.text('#harness-card-codex-cli');
+  check('its card says only Left out, puts its explanation behind Not managed (?), opens nothing, and never says Not found or Install',
+    card.includes('Not managed') && (await a.text('#harness-card-codex-cli .harness-card-next')) === 'Left out'
+    && (await a.text('#manage-codex-cli-info-card')) === 'Central Knot doesn’t read or write Codex while it’s left out, so its copies and every item stay as they are. Its switch asks before managing it again.'
+    && !/Not found|Install/.test(card) && !(await a.exists('#harness-codex-cli')), card);
   same('its card says nothing of what turning it on would do until the switch is pressed', await a.exists('#manage-codex-cli-text'), false);
   await shotAt(a, 'harnesses-left-out-860-light', SMALLEST, 'light');
   await fitsAtMinimum(a, 'Harnesses with a tool left out');
@@ -1216,9 +1335,12 @@ async function manageFlow() {
   await asking();
   const nothingYet = 'Changes no item in Codex. 2 items stay Codex’s own: they will show under Found in the Library.';
   same('pressed, the switch asks in the card, Cancel focused, and turns nothing yet', [
-    await a.text('#manage-codex-cli-text'), await a.all('#harness-codex-cli .manage-question button', 'e.textContent'), await a.run(`document.activeElement?.id`),
+    await a.text('#manage-codex-cli-text'), await a.all('#harness-card-codex-cli .manage-question button', 'e.textContent'), await a.run(`document.activeElement?.id`),
     await a.run(`document.getElementById('manage-codex-cli').getAttribute('aria-checked')`), codex(),
   ], [nothingYet, ['Cancel', 'Manage Codex'], 'manage-codex-cli-cancel', 'false', before]);
+  await sizeTo(a, 1316, 822);
+  same('left-out card’s open Manage question sits full width above its path with nothing cut off at 1316×822', [await a.run(CUT_OFF), await a.run(`(() => { const q = document.querySelector('#harness-card-codex-cli .manage-question').getBoundingClientRect(), path = document.querySelector('#harness-card-codex-cli .harness-card-path').getBoundingClientRect(); return q.bottom <= path.top + 1; })()`)], [[], true]);
+  await fullSize(a);
   await shotAt(a, 'question-860-light', SMALLEST, 'light');
   await shotAt(a, 'question-1316-dark', [1316, 819], 'dark');
   await shotAt(a, 'question-1728-light', [1728, 1117], 'light');
@@ -1400,7 +1522,7 @@ async function manageFlow() {
   await a.click('#manage-claude-cli');
   await waitHistory(a, () => a.exists('#manage-claude-cli-confirm'));
   const fits = () => a.run(`(() => {
-    const box = document.querySelector('#harness-claude-cli .manage-question'), style = getComputedStyle(box), outer = box.getBoundingClientRect();
+    const box = document.querySelector('#harness-card-claude-cli .manage-question'), style = getComputedStyle(box), outer = box.getBoundingClientRect();
     const left = outer.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft), right = outer.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
     return ['cancel', 'confirm'].map(part => { const b = document.getElementById('manage-claude-cli-' + part), r = b.getBoundingClientRect(); return [b.scrollWidth <= b.clientWidth, r.height <= 30, r.left >= left - 0.5, r.right <= right + 0.5]; });
   })()`);
@@ -1448,7 +1570,7 @@ async function manageFlow() {
   await w1.run(`document.querySelector('#manage-codex-cli').click()`);
   await waitHistory(w1, () => w1.run(`/no longer/.test(document.getElementById('manage-codex-cli-text')?.textContent ?? '')`));
   same('a read that fails says why in the question, offers Close and Try again, and writes nothing', [
-    await w1.text('#manage-codex-cli-text'), await w1.all('#harness-codex-cli .manage-question button', 'e.textContent'), existsSync(join(staleHome, '.codex')),
+    await w1.text('#manage-codex-cli-text'), await w1.all('#harness-card-codex-cli .manage-question button', 'e.textContent'), existsSync(join(staleHome, '.codex')),
   ], ['Codex is no longer present here. Nothing was changed.', ['Close', 'Try again'], false]);
   await shotAt(w1, 'failed-860-light', SMALLEST, 'light');
   same('no page errors, manage stale', w1.pageErrors, []);
@@ -3156,7 +3278,7 @@ async function practiceFlow() {
   await a.click('#header-refresh');
   check('a tool not in this home has no column or mark', !(await a.exists('[data-tool="pi-cli"], #tool-pi-cli')));
   await a.click('#nav-harnesses');
-  check('nor a card on Harnesses', !(await a.exists('#harness-pi-cli')) && await a.exists('#harness-codex-cli'));
+  check('nor a card on Harnesses', !(await a.exists('#harness-card-pi-cli')) && await a.exists('#harness-card-codex-cli'));
   // Copilot CLI and Codex do read the shared folder, so its skill is theirs; it goes again before the checks that count skills.
   rmSync(join(practice, '.agents'), { recursive: true, force: true });
   await a.click('#header-refresh');
@@ -6603,8 +6725,8 @@ async function fewToolsFlow() {
   await openKind(a, 'skills');
   check('the tool with only a folder has no mark', await a.exists('.tool-mark[data-tool="pi-cli"]') && !(await a.exists('[data-tool="codex-cli"], #tool-codex-cli')));
   await a.click('#nav-harnesses');
-  const folderOnly = await a.text('#harness-codex-cli');
-  check('Harnesses says its folder is all that is here, and its card opens nothing', folderOnly.includes('Not found · only its folder is here') && folderOnly.includes('Install Codex, then Refresh.') && !(await a.exists('button#harness-codex-cli')), folderOnly);
+  const folderOnly = await a.text('#harness-card-codex-cli');
+  check('Harnesses says its folder is all that is here, and its card opens nothing', folderOnly.includes('Not found · only its folder is here') && folderOnly.includes('Install Codex, then Refresh.') && !(await a.exists('#harness-codex-cli')), folderOnly);
   await fitsAtMinimum(a, 'Harnesses with a tool that left only its folder');
   await a.shot('folder-only-harness');
   rmSync(join(home, '.codex'), { recursive: true, force: true });
@@ -6707,7 +6829,7 @@ async function antigravityFlow() {
   await a.click('#nav-harnesses');
   const card = await a.text('.harness-card:has(#harness-antigravity-cli)');
   check('Antigravity’s card names its CLI version without Installed ·, and says its agents aren’t handled',
-    card.includes('1.5.14') && !card.includes('Installed ·') && card.includes('Agents aren’t handled for Antigravity'), card);
+    card.includes('1.5.14') && !card.includes('Installed ·') && card.includes('Central Knot doesn’t handle agents for Antigravity.'), card);
   same('all six Manage switches keep their tool-named accessible names with no dangling descriptions, and only the first managed card carries Managed (?)',
     await a.run(`(() => {
       const expected = [['claude-cli', 'Claude Code'], ['copilot-cli', 'Copilot CLI'], ['codex-cli', 'Codex'], ['pi-cli', 'Pi'], ['opencode-cli', 'OpenCode'], ['antigravity-cli', 'Antigravity']];
@@ -7213,6 +7335,7 @@ async function otherAppsFlow() {
   const pi = await a.text('.harness-card:has(#harness-pi-cli)') ?? '';
   check('pi-gui alone makes Pi a tool here, named as the third-party app it is, with no CLI', pi.includes('pi-gui (third-party) 0.4.0 · no CLI found') && await a.exists('button#harness-pi-cli'), pi);
   await fitsAtMinimum(a, 'Harnesses with other apps named');
+  for (const [w, h] of [[1316, 822], [1728, 1117]]) { await sizeTo(a, w, h); same(`Harnesses with other apps has nothing cut off at ${w}×${h}`, await a.run(CUT_OFF), []); }
   if (shots) for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`other-apps-${width}`); }
   await fullSize(a);
   same('no page errors, other apps', a.pageErrors, []);
