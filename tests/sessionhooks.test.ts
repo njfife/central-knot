@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { ORIGIN_COLOURS, originMark, sessionStrip } from '../src/sessionhooks.ts';
 import { readPluginItems, sessionSettings } from '../src/pluginitems.ts';
 import { installedImpact } from '../src/pluginswitch.ts';
-import { hookEventLabel, outcomes, sessionTextNote } from '../src/pluginoutcomes.ts';
+import { hookEventLabel, outcomes, sessionTextCardNote, sessionTextNote } from '../src/pluginoutcomes.ts';
 import type { DeclaredHook, HarnessId, InstalledPlugin } from '../src/types.ts';
 
 const plugin = (tool: HarnessId, name: string, hooks: DeclaredHook[], extra: Partial<InstalledPlugin> = {}): InstalledPlugin =>
@@ -56,7 +56,7 @@ test('can it add text is each tool’s own rule: Copilot CLI takes only start-of
   assert.deepEqual(commands('codex-cli'), ['./Start.sh', './Prompt.sh']);
   // Copilot CLI with only prompt hooks: no row, and its note says why.
   const prompts = sessionStrip('copilot-cli', [plugin('copilot-cli', 'p', [declared('userPromptSubmitted', './prompt.sh')])], {})!;
-  assert.deepEqual([prompts.groups, prompts.note], [[], sessionTextNote('copilot-cli')]);
+  assert.deepEqual([prompts.groups, prompts.note], [[], sessionTextCardNote('copilot-cli', false)]);
   assert.equal('about' in prompts, false);
   // The outcome table asks the same rule, tool by tool.
   const table = (tool: HarnessId, sessionTextHooks: HarnessId[]) => outcomes(tool, { skills: 0, commands: 0, agents: 0, hooks: true, hooksIn: [tool], startHooksIn: [tool], promptHooksIn: [], mcp: 0, mcpRootVariable: false, bin: false, sessionTextHooks })
@@ -115,16 +115,16 @@ test('sessionSettings reports disableAllHooks so installedImpact omits hooks wit
   }
 });
 
-test('Codex and Copilot CLI say once what they take of a hook, in the words their plugins’ outcome table uses', () => {
+test('Codex and Copilot CLI carry their short card note on the strip and their longer note in the plugins’ outcome table', () => {
   const codex = sessionStrip('codex-cli', [plugin('codex-cli', 'a', atStart('one')), plugin('codex-cli', 'b', atStart('two'))], {});
   const copilot = sessionStrip('copilot-cli', [plugin('copilot-cli', 'c', [declared('sessionStart', 'three')])], {});
-  assert.deepEqual([codex!.groups.length, codex!.note, copilot!.note], [2, sessionTextNote('codex-cli'), sessionTextNote('copilot-cli')]);
+  assert.deepEqual([codex!.groups.length, codex!.note, copilot!.note], [2, sessionTextCardNote('codex-cli', true), sessionTextCardNote('copilot-cli', true)]);
   // Trusting a project is not enough in Codex: each hook is trusted in its /hooks (https://learn.chatgpt.com/docs/hooks).
-  assert.equal(codex!.note, 'Codex runs a hook only after you trust it in `/hooks`');
-  assert.equal(copilot!.note, 'Copilot CLI uses only what a start-of-session hook prints as top-level `additionalContext`, not Claude Code’s `hookSpecificOutput` form; it ignores what prompt hooks print');
+  assert.equal(codex!.note, 'Codex runs a hook only after you trust it in its /hooks command.');
+  assert.equal(copilot!.note, 'Copilot CLI uses only top-level additionalContext from start-of-session hooks (not hookSpecificOutput) and ignores what prompt hooks print.');
   const table = (tool: HarnessId) => outcomes(tool, { skills: 0, commands: 0, agents: 0, hooks: true, hooksIn: [tool], startHooksIn: [tool], promptHooksIn: [], mcp: 0, mcpRootVariable: false, bin: false, sessionTextHooks: [tool] })
     .find(outcome => outcome.component === 'Session text')!.text;
-  assert.deepEqual([table('codex-cli'), table('copilot-cli')], [`waits for trust: ${codex!.note}`, `is limited: ${copilot!.note}`]);
+  assert.deepEqual([table('codex-cli'), table('copilot-cli')], [`waits for trust: ${sessionTextNote('codex-cli')}`, `is limited: ${sessionTextNote('copilot-cli')}`]);
 });
 
 test('the person’s own hooks are marked yours, a group for each file that holds them, before the plugins’, in each tool that keeps them', async () => {

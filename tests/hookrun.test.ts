@@ -16,7 +16,7 @@ import { hookTimeoutSec, runHook, stopHookRun, stopHookRuns, whatHookWouldAdd, t
 import { pickStartSource } from '../src/pluginoutcomes.ts';
 import { readPluginItems, sessionSettings } from '../src/pluginitems.ts';
 import { run } from '../src/plugins.ts';
-import { sessionStrip } from '../src/sessionhooks.ts';
+import { HOOK_RUN_COPILOT_PLUGIN, sessionStrip } from '../src/sessionhooks.ts';
 import type { HarnessId, HookSourceRef } from '../src/types.ts';
 import { standIn } from './standin.ts';
 import { slashPath } from './wincompat.ts';
@@ -574,7 +574,7 @@ test('Gates and refusals: wrong home mode, Windows, uninstalled tool, plugin hoo
     const copilotPluginRef: HookSourceRef = { from: 'installed', tool: 'copilot-cli', plugin: 'p', marketName: 'm', declaredIn: '/x', event: 'sessionStart', at: 0, command: 'echo x', fingerprint: 'fp' };
     const copilotPluginRes = await runHook(box.ctx(), copilotPluginRef);
     assert.equal(copilotPluginRes.outcome, 'refused');
-    assert.equal(copilotPluginRes.problem, 'Copilot CLI plugin hooks aren’t supported here.');
+    assert.equal(copilotPluginRes.problem, HOOK_RUN_COPILOT_PLUGIN);
     const marketRef: HookSourceRef = { from: 'marketplace', plugin: 'p', marketName: 'm', declaredIn: '/x', event: 'SessionStart', at: 0, command: 'echo x', fingerprint: 'fp' };
     const marketRes = await runHook(box.ctx(), marketRef);
     assert.equal(marketRes.outcome, 'refused');
