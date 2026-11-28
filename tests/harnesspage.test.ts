@@ -265,6 +265,21 @@ test('Plugins tab matches boxOf disabled rule, shows box.line on locked rows, an
   resetMarket();
 });
 
+test('tool page tabs keep full labels and switcher buttons carry accessible tool names', () => {
+  app.home = makeHome({ managed: ALL_SIX });
+  Object.assign(app, { page: 'harnesses', harness: 'claude-cli', harnessTab: 'skills', busy: undefined, instructions: { state: 'ready', data: [], gen: 0 } });
+  rendered = harnessesPage() as unknown as FakeNode;
+
+  const tabLabels = findAll(rendered, el => el.className.split(/\s+/).includes('harness-tab')).map(el => textOf(el));
+  assert.deepEqual(tabLabels, ['Skills', 'MCP servers', 'Agents', 'Instructions', 'Plugins', 'About']);
+  for (const tool of ALL_SIX) {
+    const sw: FakeNode = findById(rendered, `harness-switch-${tool}`)!;
+    assert.equal(sw.attrs['aria-label'], SIX_NAMES[tool]);
+    assert.equal(sw.attrs.title, SIX_NAMES[tool]);
+    assert.equal(textOf(findNode(sw, el => el.className.split(/\s+/).includes('harness-switch-name'))!), SIX_NAMES[tool]);
+  }
+});
+
 test('capability reasons live on a keyboard-accessible dash mark naming whose limit it is with no inline prose', () => {
   app.home = makeHome({ managed: ['pi-cli', 'antigravity-cli'] });
   Object.assign(app, { page: 'harnesses', harness: undefined, busy: undefined, instructions: { state: 'ready', data: [], gen: 0 } });
