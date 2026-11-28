@@ -1,6 +1,6 @@
 // A file panel: an item's file, read and drawn where the item is named. What it reads (FileTarget: a library, found or plugin
-// skill's row, an ordinary agent's or MCP server's row, a marketplace skill Find found, the last version kept of an item
-// Central Knot deleted: KeptTarget), the copies it offers (fileCopies, or the text Central Knot holds: storedOf), its mark
+// skill's row, an ordinary agent's or MCP server's row, a marketplace skill Find found, or a kept version in Central Knot—the
+// last version kept of a deleted item or a live item's kept version named by tool(s): KeptTarget), the copies it offers (fileCopies, or the text Central Knot holds: storedOf), its mark
 // (fileButton), the read with its guard against a later one (setFile → skillFoundFile, skillPluginFile, agentFile,
 // serverEntry; Central Knot's text by hash, readStored → skillVersionFile, agentVersion, serverStored), which version that text
 // is (versionWords), the panel (filePanel: tabs or a label, the copy
@@ -10,7 +10,7 @@
 // or a page that names items (a PagePlace: the Overview's cards, History's rows, Settings' added lines, Harnesses' Manage
 // question), in three calls: pagePlace once, for its place and its Escape; itemFile at each name, for the Library's mark there,
 // at that name's occurrence where the page names an item more than once (a name that may be of an item Central Knot deleted: `itemFile(…) ?? keptFile(…)`, its last version kept;
-// itemFile gives a deleted item nothing where the place opens no found rows); then placePanel with those marks, for the one
+// itemFile gives a deleted item nothing where the place opens no found rows; and `versionFile` for a live item's kept version by hash and tool(s)); then placePanel with those marks, for the one
 // open and its panel, which the page puts under that name's row, marking the row .file-anchored (its tint on History;
 // settleFileBox measures from it). Two rows naming one item need an occurrenceId each: two names that would share a mark in one
 // draw get one, the first's.
@@ -25,7 +25,7 @@ import type { PluginRow } from './pluginrows.ts';
 import type { IconName } from './icons.ts';
 import type { FileRead, HarnessId, SearchHit } from './types.ts';
 import type { VersionPart } from './versionlist.ts';
-import { andList, toolNames } from './words.ts';
+import { andList, toolName, toolNames } from './words.ts';
 
 /** The file open in a place, kept between draws: the target's id, its version or copy's token, the file shown, the copy's holder, the folder its read found, the tab list, and the text read (null: it couldn't be). */
 export interface OpenFile { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; blocks?: string[]; note?: string; parts?: VersionPart[]; holder?: string } | null }
@@ -44,8 +44,8 @@ export interface FilePlace {
 
 
 export type CatalogTarget = { kind: 'catalog'; hit: SearchHit };
-/** The last version Central Knot kept of an item it deleted (keptFile): its tombstone's hash (library.ts LibraryItem deleted), by the item's kind and key. */
-export type KeptTarget = { kind: 'kept'; of: PageKind; key: string; hash: string; name: string };
+/** A kept version in Central Knot: a deleted item's last version (keptFile), or a live item's kept version named by its tool(s) (versionFile). */
+export type KeptTarget = { kind: 'kept'; of: PageKind; key: string; hash: string; name: string; tool?: HarnessId | readonly HarnessId[] };
 export type FileTarget = ItemRow | PluginRow | CatalogTarget | KeptTarget;
 const isCatalogHit = (target: FileTarget): target is CatalogTarget => target.kind === 'catalog';
 const isKept = (target?: FileTarget): target is KeptTarget => target?.kind === 'kept';
@@ -138,22 +138,26 @@ const readDefinition = (key: string, hash: string): Promise<PanelRead | null> =>
 /** A version Central Knot stores (a row's item's: storedOf; a kept one), by the item's kind and key and its hash: an agent's parts, a server's definition, a skill's file. */
 const readStored = (of: PageKind, key: string, hash: string, file: string): Promise<PanelRead | null> => (of === 'agents' ? readDefinition(key, hash)
   : of === 'mcp' ? window.centralKnot.serverStored(key, hash) : window.centralKnot.skillVersionFile(key, hash, file));
+const keptWho = (tool: HarnessId | readonly HarnessId[]) => (typeof tool === 'string' ? toolName(tool) : andList(tool.map(toolName)));
 /**
  * Which version of Central Knot's text a panel shows, and what it says where its read brings nothing (`nothing`: it came back
- * empty): a kept one is the last version of an item Central Knot deleted (or, where its read brought nothing, only that it is
- * deleted); on a `storedOnly` place, Central Knot's version alone; elsewhere, the item's current version. Said by a page's
- * panel's header (`now`: each part before one of the header's dots, the first after `glyph`, the bin History's delete rows
- * have; `file`: whether it names the file shown), a page's mark's hover (`open`), the text's accessible name, a table's
- * panel's too (`owner`), and the panel where the read brings nothing (`unread`, a tool's copy's too). A kept version's read
- * brings nothing where it was let go (skillstore.ts pruneDeleted, at History's days), and also where its file is there but
- * can't be read: the read doesn't say which.
+ * empty): a live item's kept version named by its tool(s) (`<Tool>’s version · kept`, or just `<Tool>’s version` where nothing
+ * was read); a deleted item's last version kept (or, where its read brought nothing, only that it is deleted); on a `storedOnly`
+ * place, Central Knot's version alone; elsewhere, the item's current version. Said by a page's panel's header (`now`: each part
+ * before one of the header's dots, the first after `glyph`, the bin History's delete rows have; `file`: whether it names the file
+ * shown), a page's mark's hover (`open`), the text's accessible name, a table's panel's too (`owner`), and the panel where the
+ * read brings nothing (`unread`, a tool's copy's too). A kept version's read brings nothing where it was let go (skillstore.ts
+ * pruneDeleted, at History's days), and also where its file is there but can't be read: the read doesn't say which.
  */
-const versionWords = (t: FilePlace, target: FileTarget, nothing = false): { now: string[]; glyph?: IconName; file: boolean; open: string; owner: string; unread: string } => (isKept(target)
-  ? { now: nothing ? ['deleted'] : ['deleted', 'last version kept'], glyph: 'trash-2', file: !nothing, open: 'Open the last version kept',
-    owner: 'Central Knot’s last version kept', unread: 'Central Knot no longer keeps this version.' }
-  : t.storedOnly
-    ? { now: ['Central Knot’s version'], file: true, open: 'Open Central Knot’s version', owner: 'Central Knot’s version', unread: 'Its file couldn’t be read.' }
-    : { now: ['current version'], file: true, open: 'Open the current version', owner: 'Central Knot’s current version', unread: 'Its file couldn’t be read.' });
+const versionWords = (t: FilePlace, target: FileTarget, nothing = false): { now: string[]; glyph?: IconName; file: boolean; open: string; owner: string; unread: string } => {
+  if (isKept(target) && target.tool) {
+    const who = `${keptWho(target.tool)}’s version`;
+    return { now: nothing ? [who] : [who, 'kept'], file: !nothing, open: `Read ${who}`, owner: who, unread: 'Central Knot no longer keeps this version.' };
+  }
+  if (isKept(target)) return { now: nothing ? ['deleted'] : ['deleted', 'last version kept'], glyph: 'trash-2', file: !nothing, open: 'Open the last version kept', owner: 'Central Knot’s last version kept', unread: 'Central Knot no longer keeps this version.' };
+  if (t.storedOnly) return { now: ['Central Knot’s version'], file: true, open: 'Open Central Knot’s version', owner: 'Central Knot’s version', unread: 'Its file couldn’t be read.' };
+  return { now: ['current version'], file: true, open: 'Open the current version', owner: 'Central Knot’s current version', unread: 'Its file couldn’t be read.' };
+};
 /**
  * Opens a file (`asked`; a skill's SKILL.md when none) of a stored, found, installed plugin or marketplace skill, an agent's file
  * in the chosen tool (or its definition), a server's entry in the chosen tool (its definition where `asked` is DEFINITION, or
@@ -212,7 +216,7 @@ export function setFile(t: FilePlace, target?: FileTarget, asked?: string, refoc
 }
 /** A file mark: its id, its hover, whether its file is open, what a press does (a table's: fileButton; a page's: itemFile). */
 const markButton = (target: FileTarget, id: string, title: string, open: boolean, onclick: (event: Event) => void) => h('button.row-file-btn',
-  { type: 'button', id, title, 'aria-label': `Open file: ${fileTargetName(target)}`, 'aria-pressed': String(open), onclick }, icon('file-text', 14));
+  { type: 'button', id, title, 'aria-label': isKept(target) && target.tool ? `${title} of ${fileTargetName(target)}` : `Open file: ${fileTargetName(target)}`, 'aria-pressed': String(open), onclick }, icon('file-text', 14));
 /** Open file mark right after a library, found or plugin skill's name, an ordinary agent's and an ordinary server's (Library list, Find hits, a tool's tabs). */
 export function fileButton(t: FilePlace, target: FileTarget) {
   if (!hasFile(t, target)) return null;
@@ -334,7 +338,13 @@ export function keptFile(place: PagePlace, kind: PageKind, key: string, occurren
   const item = state.home?.[kind].library[key];
   return item?.deleted ? nameMark(place, { kind: 'kept', of: kind, key, hash: item.hash, name: item.name }, occurrenceId) : undefined;
 }
-/** A target's mark at a name (itemFile, keptFile), once a draw; pressed, its file opens there. */
+/** The mark for a kept version of a live item (historypage.ts), at its occurrence: read by hash with its tool's name (KeptTarget). */
+export function versionFile(place: PagePlace, kind: PageKind, key: string, hash: string, tool: HarnessId | readonly HarnessId[], occurrenceId?: string): FileMark | undefined {
+  thisVisit(place);
+  const item = state.home?.[kind].library[key];
+  return item && !item.deleted ? nameMark(place, { kind: 'kept', of: kind, key, hash, name: item.name, tool }, occurrenceId) : undefined;
+}
+/** A target's mark at a name (itemFile, keptFile, versionFile), once a draw; pressed, its file opens there. */
 function nameMark(place: PagePlace, target: FileTarget, occurrenceId?: string): FileMark | undefined {
   if (!hasFile(place, target)) return undefined;
   const id = fileTargetId(target), drawn = (place.drawn ??= new Set()), open = place.view.openFile?.id === id && place.occurrenceId === occurrenceId;
