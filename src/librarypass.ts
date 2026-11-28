@@ -624,7 +624,7 @@ interface Pass extends AnyLook {
   /** History has the clicks in an entry of the caller's own (PassOptions told). */
   told: boolean;
   /** What Synchronize everything took in, as History told it (logItem): its one notice, made when the pass ends. */
-  takenIn: { name: string; foundIn: HarnessId[]; history: string; settingsChanged?: string[] }[];
+  takenIn: { key: string; name: string; foundIn: HarnessId[]; history: string; settingsChanged?: string[] }[];
   /** What a source's read did to each item, by key, but `nothing` and `same` (fromSourceStep; logItem names its entry): PassResult sourced. */
   sourced: Map<string, NonNullable<PassResult['sourced']>[number]>;
   results: DestinationResult[]; notices: SyncNotice[]; writes: number; made: string[];
@@ -808,7 +808,7 @@ async function syncItem(pass: Pass, item: LibraryItem) {
   for (const harness of [...made.forget, ...outThere]) await follow(pass, item, harness, false);
   const changed = pass.followed.get(item.key);
   if (!changed) return;
-  for (const said of [...told.named.keys(), ...pass.takenIn.filter(taken => taken.name === item.name)]) said.settingsChanged = changed;
+  for (const said of [...told.named.keys(), ...pass.takenIn.filter(taken => taken.key === item.key)]) said.settingsChanged = changed;
   const mine = new Map(told.events.map(event => [event.id, event]));
   if (mine.size) await replaceHistory(pass.context, (await readHistory(pass.context)).map(event => mine.get(event.id) ?? event));
 }
@@ -945,7 +945,7 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
     const filled = !entry.losers && fill ? did[fill] : [];
     const id = log({ ...entry, ...switched, losers: entry.losers ?? before(filled), ...(tookFrom.length ? { tookFrom } : {}), ...(gaveBack.length ? { gaveBack } : {}) }, filled);
     // What Synchronize everything took in is no click's: its notice says it, and no click's Undo undoes it.
-    if (entry.cause === 'sync-everything') pass.takenIn.push({ name: item.name, foundIn: entry.foundIn ?? [], history: id });
+    if (entry.cause === 'sync-everything') pass.takenIn.push({ key: item.key, name: item.name, foundIn: entry.foundIn ?? [], history: id });
     else pass.made.push(id);
     // A source's read names the entry that tells what it did to the item (PassResult sourced).
     const answered = pass.sourced.get(item.key);
@@ -1231,11 +1231,11 @@ async function takeIn(pass: Pass, key: string, answer: { take: FoundCopy; chosen
   else pass.asked.set(key, { kind: 'on', cause: by === 'click' ? 'found' : 'sync-everything', winner, fill: 'written', foundIn, ...tookFrom });
 }
 
-/** Synchronize everything's one notice for a pass: how many it took in, by name, and the tools they were found in. */
+/** Synchronize everything's one notice for a pass: how many it took in, by name and key, and the tools they were found in. */
 function takenInNotice(taken: Pass['takenIn']): TakenInNotice {
   const from = [...new Set(taken.flatMap(entry => entry.foundIn))].sort(byToolOrder);
   const settingsChanged = taken.flatMap(entry => entry.settingsChanged ?? []);
-  return { kind: 'taken-in', items: taken.map(entry => entry.name), from, history: taken[0].history, histories: taken.map(entry => entry.history), ...(settingsChanged.length ? { settingsChanged } : {}) };
+  return { kind: 'taken-in', items: taken.map(entry => entry.name), keys: taken.map(entry => entry.key), from, history: taken[0].history, histories: taken.map(entry => entry.history), ...(settingsChanged.length ? { settingsChanged } : {}) };
 }
 
 /**
