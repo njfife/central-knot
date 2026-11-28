@@ -384,7 +384,7 @@ if (wanted('skills')) {
   mkdirSync(folderIn('claude', 'plain-notes'), { recursive: true }); writeFileSync(join(folderIn('claude', 'plain-notes'), 'SKILL.md'), 'Notes with no frontmatter, which Copilot CLI and Codex won’t load.\n');
   await refresh();
   await openRow('skills', 'has-link');
-  await atEverySize('cannot-copy', 'A skill in Claude Code with a link inside its folder: its row says it can’t be taken in, its Add looks unavailable, and Claude Code’s line says why and what to do (replace the link with the file, then Refresh)', true, '.details');
+  await atEverySize('cannot-copy', 'A skill in Claude Code with a link inside its folder: its row says it can’t be added, its Add looks unavailable, and Claude Code’s line says why and what to do (replace the link with the file, then Refresh)', true, '.details');
   await closeRow('skills', 'has-link');
   await openRow('skills', 'plain-notes');
   await atEverySize('cannot-take', 'A skill with no frontmatter in Claude Code, found: the status says it goes nowhere else, Copilot CLI and Codex can’t take it; their marks (their own) and lines say why, in the same words', false, '.details');
@@ -462,9 +462,9 @@ if (wanted('mcp')) {
   // A server that belongs to an app (ChatGPT desktop's own): seen, never taken in.
   edit(settings.codex, text => `${text}\n[mcp_servers.node_repl]\ncommand = "/Applications/ChatGPT.app/Contents/Resources/node"\nargs = ["repl"]\n`);
   await openKind(a, 'mcp'); await refresh();
-  await atEverySize('found', 'Clicked "MCP servers". Every server is found: docs in Claude Code, files in Copilot CLI and Codex, each with Add; node_repl belongs to ChatGPT desktop, so its Add is unavailable and its tag says it can’t be taken in', true);
+  await atEverySize('found', 'Clicked "MCP servers". Every server is found: docs in Claude Code, files in Copilot CLI and Codex, each with Add; node_repl belongs to ChatGPT desktop, so its Add is unavailable and its tag says it can’t be added', true);
   await openRow('mcp', 'node_repl');
-  await atEverySize('cannot-take-in', 'Opened node_repl: "Not in Central Knot · it can’t be taken in now (see below)", and Codex’s line says why: ChatGPT desktop keeps this server for itself', false, '.details');
+  await atEverySize('cannot-take-in', 'Opened node_repl: no repeating status line, and Codex’s line says why: ChatGPT desktop keeps this server for itself', false, '.details');
   await closeRow('mcp', 'node_repl');
   await openRow('mcp', 'files');
   await atEverySize('found-open', 'Opened files while found: what every tool shares of a server and what stays each tool’s own, each tool’s line with its settings file, and Add', true, '.details');
@@ -678,8 +678,9 @@ if (wanted('agents')) {
   for (let count = 1; count <= 8; count++) { const helper = `helper-${String(count).padStart(2, '0')}`; await a.click(`#${rowPart('add', 'agents', helper)}`); await switchOn('agents', helper); }
   for (const count of [2, 5, 7]) { await a.click(`#${rowPart('switch', 'agents', `helper-0${count}`)}`); await a.settle(); }
   await atEverySize('agents-many', 'Fourteen more agents: some on, three off, six found; the three sections, each with its count and line');
-  await a.run(`document.querySelector('.legend')?.scrollIntoView({ block: 'end' })`);
-  await shot(a, 'agents-legend', 'The key at the end of the list: "Kept out", "Off: Central Knot keeps it", "Can’t take it" among the marks this page uses.');
+  await a.click('#mark-legend-toggle');
+  await shot(a, 'agents-legend', 'Clicked "What the marks mean" pinned at the foot of the list: grouped key above it ("Kept out", "Off: Central Knot keeps it", "Can’t take it" among the marks this page uses).');
+  await a.click('#mark-legend-toggle');
 
   // States added in round 3, after the earlier pictures so their numbers stay. The long name heads its opened panel.
   await openRow('agents', long);
