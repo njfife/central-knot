@@ -351,7 +351,7 @@ function pluginRow({ entry, plugin, version }: InstalledMarketPlugin, tool: Harn
   return h('div.harness-plugin', { role: 'listitem', title: note || undefined },
     h('div.harness-plugin-text', {},
       h('strong', {}, pluginTitle(plugin), version ? h('span.harness-plugin-version', {}, ` ${version}`) : null),
-      stateText ? h('span.harness-plugin-state', {}, stateText) : null),
+      stateText ? h('span.harness-plugin-state', { title: own?.off }, stateText) : null),
     pageLink, uninstall, control, question);
 }
 
