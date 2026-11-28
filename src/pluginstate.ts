@@ -26,10 +26,10 @@ import { harnessTabShown, noteMove, showPage, announce, busy, focusWhenDone, owe
 import { pluginReloads, reloadAdvice, settleReloads, type ReloadAdvice, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Turn } from './clicklist.ts';
 import { pin, placeIn } from './itemrow.ts';
-import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
+import { failPageData, pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
-import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
-import { FIND_FROM, boxOf, categoriesOf, copiesToCompare, installedFrom, marketTitle, matches, pluginPlace, samePart, toolMark } from './pluginstatus.ts';
+import { consequentialRun, noUndoNote, notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, shortOf, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
+import { FIND_FROM, boxOf, categoriesOf, copiesToCompare, foundIn, installedFrom, marketTitle, matches, pluginPlace, samePart, toolMark } from './pluginstatus.ts';
 import { counted, wholeAlso } from './pluginswitch.ts';
 import { yoursStay } from './pluginline.ts';
 import type { PluginEntry } from './pluginrecord.ts';
@@ -132,6 +132,9 @@ export function pluginsResultPlace(): RunPlace | undefined {
   return tab === 'plugins' ? app.harness : tab === 'instructions' ? `instructions:${app.harness!}` : undefined;
 }
 const placeNow = (): RunPlace => pluginsResultPlace() ?? 'plugins';
+const isInstructions = (place: RunPlace) => place === 'instructions' || place.startsWith('instructions:');
+/** Stable id of a listed plugin group’s Turn off button on Instructions, surviving redraws for focus after Undo. */
+export const sessionOffId = (tool: HarnessId, source: string, plugin: string) => `session-off-${tool}-${[source, plugin].map(part => part.replace(/[^a-zA-Z0-9]/g, ch => `_${ch.codePointAt(0)!.toString(16)}_`)).join('-')}`;
 const showsPluginsResult = (place?: RunPlace) => {
   const here = pluginsResultPlace();
   return place !== undefined ? here === place : !!here;
@@ -297,6 +300,7 @@ export function browse(patch: Partial<typeof market.nav>): void {
  * The page says it is reading meanwhile, and anything else can go on: an action keeps its own activity and result.
  */
 export async function loadPlugins(fresh = false, readId?: number): Promise<void> {
+  if (readId !== undefined) viewFor = readId;
   const reading = readPageData(market.read, () => api().plugins(fresh, readId));
   rerender();
   const result = await reading;
@@ -329,7 +333,8 @@ function act(activity: MarketActivity, work: () => Promise<string | void>) {
       const last = runs.get(started);
       const profileLine = last?.done.some(step => succeeded(step.report)) ? profileEndedLine() : undefined;
       if (last && profileLine) last.profileLine = profileLine;
-      announce([said, profileLine].filter(Boolean).join(' '), showsPluginsResult(started) && !problems.get(started) && (undoOps(started).length > 0 || !!profileLine));
+      const display = runDisplay(started);
+      announce([said, profileLine].filter(Boolean).join(' '), showsPluginsResult(started) && !problems.get(started) && (undoOps(started).length > 0 || !!profileLine || (consequentialRun(last) && !display.elsewhere && display.shown)));
     } finally { market.activity = undefined; }
   });
 }
@@ -425,11 +430,11 @@ export const applyPluginOps = (ops: PluginOp[], undo = false, from?: RunPlace) =
     // A run that stopped after some steps names the plugins it didn't reach; the header says what did run, and counts them first.
     const unreached = result.stopped ? unreachedOps(ops, result.done) : [];
     setRun({ done: result.done, undo, home, place, unreached, ...(undo ? { rest: notUndone(ops, result.done) } : {}) }, place);
-    const unrun = [...new Set(unreached.map(op => op.plugin))];
+    const unrun = [...new Map(unreached.map(op => [pluginKey(op.source, op.plugin), pluginLabel(op.source, op.plugin, unreached)])).values()];
     setProblem(result.stopped && result.done.length && unrun.length ? `Stopped before ${andList(unrun)}: ${result.stopped}` : result.stopped, place);
     await readAgain();
   }
-  return problems.get(place) ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.');
+  return problems.get(place) ?? (resultSentence(resultLines(result.done, undo), undo, pluginLabeler(result.done)) || 'Nothing changed.');
 });
 
 /**
@@ -444,25 +449,31 @@ export const usePlugins = (entry: MarketplaceView, plugin: string, tool: Harness
   setRun({ done: result.done, undo: false, home, place, ...(result.back ? { turn: { source: entry.source, plugin, before: result.before ?? null, back: result.back } } : {}) }, place);
   setProblem(result.stopped, place);
   await readAgain();
-  return problems.get(place) ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${plugin}.`);
+  return problems.get(place) ?? (resultSentence(resultLines(result.done, false), false, pluginLabeler(result.done)) || `Nothing changed for ${pluginLabel(entry.source, plugin)}.`);
 });
 
-/** What each tool now has changed: the page and the item lists read again, once for the action (app.ts readHomeOnce). */
+/** What each tool now has changed: the home first (app.ts readHomeOnce), then the marketplaces for the returned home's readId. */
 async function readAgain(): Promise<void> {
-  showView(await api().plugins().catch(() => null));
   // The item lists show what plugins bring, each with its switch in each tool, and a plugin's items in Pi, OpenCode and Antigravity: every
   // plugin change is seen there (and where it came from) at once.
   await readHomeOnce();
-  readShown();
+  const readId = app.home?.readId;
+  const view = await api().plugins(false, readId).catch(() => null);
+  viewFor = readId;
+  if (view) showView(view);
+  else failPageData(market.read);
 }
 
 /**
  * A plugin's click in the page's list (a clicklist.ts Turn): the plugin, what was clicked (in one tool, for a tool's box), what its
  * row says while it waits and while it runs (`said`: aimWords), and once main has answered, what it returned (`ran`; the view is
- * then read back before the click ends).
+ * then read back before the click ends). `also`: parts turned off with it on Instructions, taken at the press.
  */
-export interface PluginClick extends Turn { place: RunPlace; source: string; plugin: string; what: PluginTurn; tool?: HarnessId; said: { waiting: string; running: string }; ran?: PluginTurnResult }
+export interface PluginClick extends Turn { place: RunPlace; source: string; plugin: string; what: PluginTurn; tool?: HarnessId; also?: string; said: { waiting: string; running: string }; ran?: PluginTurnResult }
 const isPluginClick = (turn: Turn): turn is PluginClick => 'plugin' in turn;
+/** Appends the parts turned off with a plugin on Instructions to a successful turn-off line. */
+const withAlso = (lines: ResultLine[], also?: string): ResultLine[] =>
+  !also ? lines : lines.map(line => (line.ok && /^turned off in /.test(line.text) ? { ...line, text: `${line.text}, with its ${also}`, short: `${line.short}, with its ${also}` } : line));
 
 /** The latest click on this plugin in the page's list, if one is there. */
 export const clickOn = (source: string, plugin: string) => market.clicks.findLast(click => click.source === source && click.plugin === plugin);
@@ -483,16 +494,16 @@ export function endListNews(place?: RunPlace): void {
  * unticked or ticked (`tool`). The click joins the page's list and waits its turn there, in the run on its place (clicklist.ts
  * runAt); a new run clears what the last one's stop and notice said.
  */
-export function turnPlugin(entry: MarketplaceView, plugin: string, what: PluginTurn, tool?: HarnessId): void {
+export function turnPlugin(entry: MarketplaceView, plugin: string, what: PluginTurn, tool?: HarnessId, also?: string): void {
   const place = placeNow();
   const run = runAt(place === 'plugins' ? 'plugins' : `plugins:${place}`), home = app.home!.home;
   if (!clickList.turns.some(turn => turn.run === run)) { setProblem(undefined, place); clearNotice(); }
-  const click: PluginClick = { state: 'waiting', run, place, work: () => runClick(click, home), ended: runEnded, source: entry.source, plugin, what, tool, said: aimWords(what, tool) };
+  const click: PluginClick = { state: 'waiting', run, place, work: () => runClick(click, home), ended: runEnded, source: entry.source, plugin, what, tool, ...(also ? { also } : {}), said: aimWords(what, tool) };
   // Its row is pinned where it is on the list (itemrow.ts Pinned), until another list or none is drawn, or Refresh (app.ts pinnedRows).
   if (market.view) pin(pinnedPlugins(entry), plugin, pluginPlace(market.view, entry, plugin));
   // The control clicked waits until it is read back; Add gives way to the switch then. The focus goes back to it at the
   // list's end if nothing else took it; after Uninstall…, whose control goes with the copy, to the result's Undo (pluginspage.ts undoButton).
-  clickedLast = what === 'uninstall' ? 'plugins-undo' : document.activeElement?.id.replace(/^padd/, 'pswitch');
+  clickedLast = what === 'uninstall' || isInstructions(place) ? 'plugins-undo' : document.activeElement?.id.replace(/^padd/, 'pswitch');
   join(click);
   rerender();
 }
@@ -514,44 +525,49 @@ function runEnded(): void {
   const list = market.clicks, lastRan = list.findLast(click => click.ran);
   const ran = lastRan ? list.filter(click => click.ran && click.run === lastRan.run) : [];
   if (!ran.length) return;
+  // A click of this page's own already re-read the marketplaces view; keep it current across its home read so other buttons do not blink Reading….
+  if (market.read.state === 'ready') viewFor = app.home?.readId;
   const place = lastRan!.place, last = runs.get(place);
   // A plugin that partly failed is said once, where it went and where not ("beta: installed in Claude Code, not in Codex");
   // one that went nowhere is named as failed.
-  const lines = lastLines(place), went = new Set(lines.filter(line => line.ok).map(line => line.plugin));
-  const notIn = (plugin: string) => [...new Set(ran.filter(click => click.plugin === plugin).flatMap(click => click.ran?.done ?? []).filter(step => !succeeded(step.report)).map(step => toolNames[step.tool]))];
-  const withNotIn = (list: ResultLine[]) => list.map(line => (line.ok && notIn(line.plugin).length ? { ...line, text: `${line.text}, not in ${andList(notIn(line.plugin))}` } : line));
-  const failed = [...new Set(lines.filter(line => !line.ok && !went.has(line.plugin)).map(line => line.plugin))];
+  const lines = lastLines(place), went = new Set(lines.filter(line => line.ok).map(line => pluginKey(line.source, line.plugin)));
+  const label = pluginLabeler([...lines, ...ran, ...(last?.done ?? [])]);
+  const notIn = (source: string, plugin: string) => [...new Set(ran.filter(click => click.source === source && click.plugin === plugin).flatMap(click => click.ran?.done ?? []).filter(step => !succeeded(step.report)).map(step => toolNames[step.tool]))];
+  const withNotIn = (list: ResultLine[]) => list.map(line => (line.ok && notIn(line.source, line.plugin).length ? { ...line, text: `${line.text}, not in ${andList(notIn(line.source, line.plugin))}` } : line));
+  const failed = [...new Map(lines.filter(line => !line.ok && !went.has(pluginKey(line.source, line.plugin))).map(line => [pluginKey(line.source, line.plugin), label(line)])).values()];
   const did = ran.some(click => click.ran?.done.some(step => succeeded(step.report)));
   const profileLine = last && did ? profileEndedLine(lastRan!.run.before) : undefined;
   if (last) last.profileLine = profileLine;
   const clickName = (click: PluginClick) => {
-    if (click.tool) return `${click.plugin} in ${toolNames[click.tool]}`;
+    const name = label(click);
+    if (click.tool) return `${name} in ${toolNames[click.tool]}`;
     const changedSame = ran.some(other => other !== click && other.source === click.source && other.plugin === click.plugin && (other.ran!.stopped || other.ran!.done.length > 0));
-    return changedSame ? `${click.plugin}’s other tools` : click.plugin;
+    return changedSame ? `${name}’s other tools` : name;
   };
   const unchanged = [...new Set(ran.filter((click, at) => !click.ran!.stopped && !click.ran!.done.length
     && !ran.slice(at + 1).some(later => later.source === click.source && later.plugin === click.plugin && (!click.tool || later.tool === click.tool) && (later.ran!.stopped || later.ran!.done.length > 0))).map(clickName))];
   const unchangedText = unchanged.length ? `Nothing changed for ${andList(unchanged)}.` : '';
   const one = ran.length === 1 ? ran[0]!.ran : undefined;
-  const oneLines = one ? resultLines(one.done, false) : [];
-  const oneFailed = oneLines.filter(line => !line.ok).map(line => `${line.plugin}: ${line.text}`).join(' ');
-  const changedText = [resultSentence(withNotIn(lines), false), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ');
+  const oneLines = one ? withAlso(resultLines(one.done, false), ran[0]!.also) : [];
+  const oneFailed = oneLines.filter(line => !line.ok).map(line => `${label(line)}: ${line.text}`).join(' ');
+  const note = noUndoNote(last, undoOps(place).length > 0);
+  const changedText = [resultSentence(withNotIn(lines), false, label), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ');
   // Lead with any unchanged click so a narrow status bar keeps the news the header does not hold, and never repeat what the header already shows.
-  const multi = [unchangedText, changedText].filter(Boolean).join(' ') || 'Nothing changed.';
-  const base = one ? (one.stopped ?? (resultSentence(withNotIn(oneLines), false) || oneFailed || `Nothing changed for ${clickName(ran[0]!)}.`)) : multi;
+  const multi = [unchangedText, changedText ? `${changedText}${note}` : ''].filter(Boolean).join(' ') || 'Nothing changed.';
+  const oneSaid = one ? resultSentence(withNotIn(oneLines), false, label) : '';
+  const base = one ? (one.stopped ?? (oneSaid ? `${oneSaid}${note}` : oneFailed || `Nothing changed for ${clickName(ran[0]!)}.`)) : multi;
   const full = [base, profileLine].filter(Boolean).join(' ');
   const here = showsPluginsResult(place);
-  const openName = place === 'plugins' ? market.nav.plugin : undefined;
-  const elsewhere = !!openName && !lines.some(line => line.plugin === openName);
-  const onBand = place === 'instructions' || place.startsWith('instructions:');
-  const headerShows = here && !!last && lines.length > 0
-    && (onBand || undoOps(place).length > 0 || lines.some(line => !line.ok) || (!elsewhere && runReloads(place).items.length > 0) || !!profileLine);
-  const quiet = here && (one ? !!one.stopped || !!oneFailed || undoOps(place).length > 0 || !!profileLine : !lines.some(line => !line.ok) && !unchanged.length && (undoOps(place).length > 0 || !!profileLine));
-  announce(full, quiet, undefined, undefined, !quiet && headerShows && unchangedText ? unchangedText : undefined);
+  const { shown, elsewhere } = runDisplay(place);
+  const headerShows = here && shown;
+  // An irreversible uninstall whose page was left (header shows only "Last change: …") stays visible in the status bar;
+  // a multi-click run with an unchanged click stays visible too, showing only the unchanged sentence when the header already holds the rest.
+  const quiet = here && !(note && elsewhere) && (one ? !!one.stopped || !!oneFailed || shown : !lines.some(line => !line.ok) && !unchanged.length && shown);
+  announce(full, quiet, undefined, undefined, !quiet && headerShows && unchangedText && !(note && elsewhere) ? unchangedText : undefined);
   if (here && document.activeElement === document.body && clickedLast) {
     // Undo was drawn off while the list ran, and the list's last draw comes after this: drawn usable first, so it takes the focus.
     if (clickedLast === 'plugins-undo') rerender();
-    document.getElementById(clickedLast)?.focus({ preventScroll: true });
+    (document.getElementById(clickedLast) ?? (clickedLast === 'plugins-undo' ? document.getElementById('plugins-result') : null))?.focus({ preventScroll: true });
   }
 }
 
@@ -578,11 +594,18 @@ async function runClick(click: PluginClick, home: string): Promise<void> {
   market.working = undefined;
   const stop = result.stopped ? { stop: { source: click.source, plugin: click.plugin, ok: false, text: result.stopped, short: result.stopped } } : {};
   const turn = result.back ? { turn: { source: click.source, plugin: click.plugin, before: result.before ?? null, back: result.back } } : {};
-  setRun({ done: result.done, undo: false, home, place: click.place, ...stop, ...turn }, click.place);
-  if (clickList.turns.some(turn => turn.run === click.run && turn.state === 'waiting'))
-    announce(result.stopped ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${click.tool ? `${click.plugin} in ${toolNames[click.tool]}` : click.plugin}.`), showsPluginsResult(click.place) && !result.stopped && undoOps(click.place).length > 0);
+  setRun({ done: result.done, undo: false, home, place: click.place, ...(click.also ? { also: click.also } : {}), ...stop, ...turn }, click.place);
+  if (clickList.turns.some(turn => turn.run === click.run && turn.state === 'waiting')) {
+    const label = pluginLabeler(result.done), display = runDisplay(click.place), note = noUndoNote(display.last, undoOps(click.place).length > 0);
+    const said = resultSentence(withAlso(resultLines(result.done, false), click.also), false, label);
+    const nothing = click.tool ? `${label(click)} in ${toolNames[click.tool]}` : label(click);
+    announce(result.stopped ?? (said ? `${said}${note}` : `Nothing changed for ${nothing}.`), showsPluginsResult(click.place) && !result.stopped && !(note && display.elsewhere) && display.shown);
+  }
   rerender();
-  showView(await api().plugins().catch(() => null));
+  const next = await api().plugins().catch(() => null);
+  viewFor = app.home?.readId;
+  if (next) showView(next);
+  else failPageData(market.read);
 }
 
 const ranFor = (last: LastRun) => market.clicks.filter(click => click.ran && click.place === (last.place ?? 'plugins'));
@@ -594,11 +617,11 @@ const ranFor = (last: LastRun) => market.clicks.filter(click => click.ran && cli
  */
 export function lastLines(place: RunPlace = placeNow()): ResultLine[] {
   const last = runs.get(place), ran = last ? ranFor(last) : [];
-  if (!last || !ran.length) return last ? [...resultLines(last.done, last.undo), ...(last.stop ? [last.stop] : [])] : [];
+  if (!last || !ran.length) return last ? [...withAlso(resultLines(last.done, last.undo), last.undo ? undefined : last.also), ...(last.stop ? [last.stop] : [])] : [];
   // One clause a tool: a later click on the plugin in that tool is what the run says of it (a tick then an untick: turned off).
   const there = (step: PluginDone) => (each: PluginDone) => each.source === step.source && each.plugin === step.plugin && each.tool === step.tool;
   const later = (at: number, step: PluginDone) => ran.slice(at + 1).some(click => click.ran!.done.some(there(step)));
-  return ran.flatMap(({ source, plugin, ran: { done, stopped } = { done: [] } }, at) => [...resultLines(done.filter(step => !later(at, step))), ...(stopped ? [{ source, plugin, ok: false, text: stopped, short: stopped }] : [])]);
+  return ran.flatMap(({ source, plugin, also, ran: { done, stopped } = { done: [] } }, at) => [...withAlso(resultLines(done.filter(step => !later(at, step))), also), ...(stopped ? [{ source, plugin, ok: false, text: stopped, short: stopped }] : [])]);
 }
 
 /** Reload advice for the Plugins page's current run, settled chronologically so a later removal cancels an earlier write. */
@@ -606,6 +629,24 @@ export const runReloads = (place: RunPlace = placeNow()): ReloadAdvice => {
   const last = runs.get(place), ran = last ? ranFor(last) : [];
   return reloadAdvice(settleReloads(pluginReloads(last && ran.length ? ran.flatMap(click => click.ran!.done) : last?.done ?? [])), toolWays());
 };
+
+/**
+ * One rule for where a run's result shows (header on Plugins and a tool's Plugins tab, band on Instructions), shared by
+ * pluginspage.ts and the status-bar quiet check so a result is never dropped from both.
+ */
+export function runDisplay(place: RunPlace = placeNow()) {
+  const last = runs.get(place), lines = last ? lastLines(place) : [];
+  const openName = place === 'plugins' ? market.nav.plugin : undefined;
+  const openEntry = openName ? current()?.entry : undefined;
+  const elsewhere = !!last && (last.reread || (!!openName && !lines.some(line => line.plugin === openName && (!openEntry || line.source === openEntry.source))));
+  const advice = !last || elsewhere ? { text: '', items: [] } : runReloads(place);
+  const back = undoOps(place), failed = last ? shortOf(lines, last.unreached).names.length > 0 : false, hasOk = lines.some(line => line.ok);
+  const onBand = place === 'instructions' || place.startsWith('instructions:');
+  const shown = !!last && (onBand
+    ? hasOk || failed || !!last.profileLine || !!problems.get(place)
+    : ((hasOk || failed) && (back.length > 0 || failed || advice.items.length > 0 || !!last.profileLine || consequentialRun(last))) || back.length > 0);
+  return { last, lines, elsewhere, advice, shown };
+}
 
 /**
  * Each click of the place's run, then each step it did, by plugin and tool (a whole switch's click has none), in the order made:
@@ -635,19 +676,45 @@ const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act
   // The focus goes to the plugin it undid, on the list, on its page, or on a tool's Plugins tab, as Undo itself may go: its switch, or its Add again.
   const entry = market.view?.marketplaces.find(each => each.source === last.turn.source);
   const at = entry ? market.view!.marketplaces.indexOf(entry) : -1;
-  const id = place !== 'plugins' && entry ? `harness-plugin-switch-${entry.name}-${last.turn.plugin}` : `pswitch-${market.nav.plugin ? 'page-' : ''}${at}-${last.turn.plugin}`;
-  if (showsPluginsResult(place)) focusWhenDone(document.getElementById(id) ? id : id.replace(/^pswitch/, 'padd'));
-  return problems.get(place) ?? (resultSentence(resultLines(done, true), true) || 'Nothing changed.');
+  const tool = back[0]?.tool ?? (place.startsWith('instructions:') ? place.slice(13) as HarnessId : undefined);
+  const id = isInstructions(place) && tool ? sessionOffId(tool, last.turn.source, last.turn.plugin)
+    : place !== 'plugins' && entry ? `harness-plugin-switch-${entry.name}-${last.turn.plugin}`
+    : `${entry && foundIn(market.view!, entry, last.turn.plugin).length ? 'padd' : 'pswitch'}-${market.nav.plugin ? 'page-' : ''}${at}-${last.turn.plugin}`;
+  if (showsPluginsResult(place)) focusWhenDone(id);
+  return problems.get(place) ?? (resultSentence(resultLines(done, true), true, pluginLabeler(done)) || 'Nothing changed.');
 });
+
+/** Whether another listed marketplace (or another entry in `extra`) shares this plugin's title or name. */
+export function titleShared(source: string, plugin: string, extra: { source: string; plugin: string }[] = []): boolean {
+  const markets = market.view?.marketplaces ?? [];
+  const entry = markets.find(each => each.source === source);
+  const title = (entry?.plugins.find(each => each.name === plugin)?.displayName ?? plugin).toLowerCase();
+  return markets.some(each => each.source !== source && each.plugins.some(other => other.name === plugin || (other.displayName ?? other.name).toLowerCase() === title))
+    || extra.some(other => other.source !== source && other.plugin === plugin);
+}
+
+/** A plugin's name in a result or Undo, with its marketplace in parentheses when another marketplace shares its title or name. */
+export function pluginLabel(source: string, plugin: string, extra: { source: string; plugin: string; marketName?: string }[] = []): string {
+  if (!titleShared(source, plugin, extra)) return plugin;
+  const entry = market.view?.marketplaces.find(each => each.source === source);
+  const where = entry ? marketTitle(entry) : extra.find(each => each.source === source && each.marketName)?.marketName;
+  return where ? `${plugin} (${where})` : plugin;
+}
+
+/** Label callback for resultSentence, shortOf and header/band rendering over a run's entries. */
+export const pluginLabeler = (extra: { source: string; plugin: string; marketName?: string }[] = []) =>
+  (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, extra);
 
 /**
  * Undo's label: "Undo the rest" after an Undo that didn't finish; with the click it reverses ("Undo gamma", "Undo gamma in Codex"
- * for a box) when the sentence beside it (lastLines) names more than that one click, since it reverses only the last; else "Undo".
+ * for a box on the Plugins page; on a tool's own Plugins tab the tool is not repeated) when the sentence beside it names more
+ * than that one click; else "Undo".
  */
 export function undoLabel(place: RunPlace = placeNow()): string {
   const last = runs.get(place), ran = last ? ranFor(last) : [], click = ran.at(-1);
   if (last?.undo) return 'Undo the rest';
-  return last?.turn && click && ran.length > 1 ? `Undo ${click.plugin}${click.tool ? ` in ${toolNames[click.tool]}` : ''}` : 'Undo';
+  const inTool = click?.tool && place === 'plugins' ? ` in ${toolNames[click.tool]}` : '';
+  return last?.turn && click && ran.length > 1 ? `Undo ${pluginLabel(click.source, click.plugin, [...ran, ...last.done])}${inTool}` : 'Undo';
 }
 
 /** Undo, or "Undo the rest": the last run's way back, by the route that made it (turnPlugin or applyPluginOps). */
@@ -701,8 +768,8 @@ export function listingOf(plugin: string, marketName: string | undefined, source
 /**
  * One tool's box for a plugin on its page (pluginstatus.ts boxOf, as pluginparts.ts toolBox asks it), for that tool's line in the
  * Library (pluginline.ts LineFacts box) and for a tool's Plugins tab under Harnesses (harnesspage.ts pluginRow): with the tool's
- * mark and words, the listing's source and what it lists in the plugin. No box while this page's view is read (wantView);
- * `unlisted` where no listing has it.
+ * mark and words, the listing's source and what it lists in the plugin. No box until this page's view is read once (keeps the
+ * last read view during a re-read or after one that failed); `unlisted` where no listing has it.
  */
 export function lineBox(plugin: string, marketName: string, source: string | undefined, tool: HarnessId) {
   const view = market.view, entry = listingOf(plugin, marketName, source);
@@ -712,10 +779,10 @@ export function lineBox(plugin: string, marketName: string, source: string | und
   const named = view.marketplaces.filter(each => each.name === marketName && each.plugins.some(item => item.name === plugin));
   if (entry.source !== source && named.length > 1) return { box: 'ambiguous' as const };
   const marked = toolMark(view, entry, plugin, tool, entry.switches?.[plugin]?.tools[tool]);
-  return { box: boxOf(view, entry, plugin, tool, marked), mark: marked.mark, words: marked.words, source: entry.source, parts: entry.plugins.find(item => item.name === plugin)?.components };
+  return { box: boxOf(view, entry, plugin, tool, marked), mark: marked.mark, words: marked.words, source: entry.source, entry, parts: entry.plugins.find(item => item.name === plugin)?.components };
 }
 
-/** The read of the home this page's view was last asked for by the Library (wantView); another home starts over (resetMarket). */
+/** The home readId this page's view matches; set by wantView, loadPlugins (when given a readId), readAgain (for the returned home), runClick, and runEnded (when ready after a click), and cleared on home switch (resetMarket). */
 let viewFor: number | undefined;
 /** Whether this page's view is the one read for the home on screen (wantView), so a press may act on what it says: not while read again, or after a read failed. */
 export const viewCurrent = () => market.read.state === 'ready' && viewFor === app.home?.readId;
@@ -723,6 +790,7 @@ export const viewCurrent = () => market.read.state === 'ready' && viewFor === ap
 export function wantView(readId: number | undefined): void {
   if (viewFor === readId || app.page === 'plugins') return;
   viewFor = readId;
+  market.read.state = 'reading';
   // Asked while the page is drawn: the read starts after the drawing.
   queueMicrotask(() => void loadPlugins(false, readId));
 }

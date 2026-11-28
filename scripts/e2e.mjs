@@ -4783,10 +4783,10 @@ async function practiceFlow() {
   const focusAfterUndo = await a.run(`document.activeElement?.id ?? ''`);
   same('keyboard Undo on Claude Code’s Plugins tab turns the plugin back on, restores the record and focus to its switch, shows the reload line, and stays on the tab',
     [readNow(tabCalls).trim(), await a.run(`document.querySelector(${JSON.stringify(tabSwitch)})?.getAttribute('aria-checked')`),
-      await a.exists(`.harness-plugin:has(${tabSwitch}) .harness-plugin-state`), readNow(pluginsJson) === pluginsRecBefore,
+      (await a.text(`.harness-plugin:has(${tabSwitch}) .harness-plugin-state`))?.trim() ?? '', readNow(pluginsJson) === pluginsRecBefore,
       (await a.text('#plugins-result .toolbar-result-text'))?.trim() ?? '', await a.exists('#header .result-reloads'),
       await a.exists('#harness-tab-plugins[aria-selected="true"]'), focusAfterUndo],
-    ['plugin enable issue-tracker@ck-test-market --scope user', 'true', false, true, 'Undone: issue-tracker back on in Claude Code.', true, true, 'harness-plugin-switch-ck-test-market-issue-tracker']);
+    ['plugin enable issue-tracker@ck-test-market --scope user', 'true', 'Still installed', true, 'Undone: issue-tracker back on in Claude Code.', true, true, 'harness-plugin-switch-ck-test-market-issue-tracker']);
   // A problem made on Plugin marketplaces stays off Codex's Plugins tab and reappears on Plugin marketplaces.
   await a.click('#nav-plugins');
   if (!(await a.exists('#marketplace-source'))) await a.click('#open-add-marketplace');
@@ -8870,6 +8870,42 @@ async function syncEverythingFlow() {
   for (let tries = 0; tries < 300 && !/fresh/.test(await unseenOnLibrary()); tries++) await wait(100);
   same('a notice no page has shown stays until shown: the sidebar’s Library names both passes’ notices, of every kind', await unseenOnLibrary(), '3 automatic changes: notes, fresh, files');
   await a.shot('everything-on');
+  // Added lines on Settings: each held item's name gets a file mark; at 860 one press opens its text under that line, a second mark moves it, Escape closes it, nothing cut off.
+  const setTheme = (page, value) => page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  const openAdded = async (page, id, expect) => {
+    await page.click(`#${id}`);
+    const read = () => page.run(`(() => { const p = document.getElementById('file-panel-settings'), l = p?.previousElementSibling;
+      return { anchored: !!l?.classList.contains('file-anchored'), line: l?.textContent ?? '', text: p?.querySelector('pre.content')?.textContent ?? '' }; })()`);
+    for (let tries = 0; tries < 40 && !(await read()).text.includes(expect); tries++) await wait(100);
+    await page.settle();
+    return read();
+  };
+  await sizeTo(a, ...SMALLEST);
+  await setTheme(a, 'light');
+  await a.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+  await a.settle();
+  await a.shot('settings-added-marks-860-light');
+  const markIds = await a.all('.setting-added .row-file-btn', 'e.id');
+  same('at 860, each added item on Settings has a file mark after its name', markIds.map(id => id.replace(/^file-(skills|mcp)-([^-]+)-.*$/, '$1:$2')), ['skills:notes', 'skills:fresh', 'mcp:files']);
+  const firstOpen = await openAdded(a, markIds[0], 'Take notes.');
+  same('at 860, pressing notes’s mark opens its text under that line with nothing cut off', [firstOpen.anchored, firstOpen.line, firstOpen.text.includes('Take notes.'), await a.run(CUT_OFF)], [true, 'Added skill notes from Claude Code.', true, []]);
+  await a.shot('settings-added-open-860-light');
+  const secondOpen = await openAdded(a, markIds[2], 'files-mcp');
+  same('at 860, pressing files’s mark moves the panel under its line with nothing cut off', [secondOpen.anchored, secondOpen.line, secondOpen.text.includes('files-mcp'), await a.run(CUT_OFF)], [true, 'Added MCP server files from Codex.', true, []]);
+  await a.press('Escape');
+  await a.settle();
+  same('Escape closes the file panel on Settings and returns focus to its mark', [await a.exists('#file-panel-settings'), await a.run(`document.activeElement?.id`)], [false, markIds[2]]);
+  await sizeTo(a, 1316, 819);
+  await setTheme(a, 'dark');
+  await a.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+  await a.settle();
+  await a.shot('settings-added-marks-1316-dark');
+  await openAdded(a, markIds[2], 'files-mcp');
+  await a.shot('settings-added-mcp-open-1316-dark');
+  await a.press('Escape');
+  await a.settle();
+  await setTheme(a, '');
+  await fullSize(a);
   await a.click('#outcome-dismiss');
   same('closing the band brings back History on the take-in lines', await a.all('.setting-added .setting-message', 'e.textContent'),
     ['Added skill notes from Claude Code. History can undo it.History', 'Added skill fresh from Claude Code. History can undo it.History', 'Added MCP server files from Codex. History can undo it.History']);
@@ -9026,6 +9062,54 @@ async function syncEverythingFlow() {
       [await b.exists('[data-outcome]'), await b.run(`document.querySelector('#announcement')?.classList.contains('visually-hidden')`), await b.run(`document.querySelector('#announcement')?.dataset.text`)],
       [false, false, 'Copied s1 to Claude Code. Took in s1. Copied s2 to Claude Code. Took in s2. Sync once took in 2 more items.']);
   }
+  // Two-item picture (without repeating the unit test's switch checks), then a twelve-item line at 860 checking wrapping and History.
+  settleOld([skill(uClaude, 'lint', text('lint', 'Lint gently.')), join(uClaude, 'lint/SKILL.md'),
+    skill(uCodex, 'tidy', text('tidy', 'Tidy up.')), join(uCodex, 'tidy/SKILL.md')]);
+  await b.click('#sync-switch');
+  for (let tries = 0; tries < 80 && !(await b.all('.setting-added .setting-message', 'e.textContent')).some(line => line.startsWith('Added 2 skills from Claude Code and Codex: lint and tidy.')); tries++) await wait(100);
+  await sizeTo(b, ...SMALLEST);
+  await setTheme(b, 'light');
+  await b.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+  await b.settle();
+  await b.shot('settings-added-two-items-860-light');
+  const twelve = ['audit-logs', 'bench-run', 'code-review', 'deploy', 'doc-syncs', 'migrate-db', 'plan-work', 'release-cut', 'schema-diff', 'test-smoke', 'trace-req', 'watch-ci'];
+  await b.click('#sync-switch');
+  for (let tries = 0; tries < 40 && await b.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
+  settleOld(twelve.flatMap(name => [skill(uClaude, name, text(name, `Skill ${name}.`)), join(uClaude, `${name}/SKILL.md`)]));
+  await b.click('#sync-switch');
+  for (let tries = 0; tries < 80 && !(await b.all('.setting-added .setting-message', 'e.textContent')).some(line => line.startsWith('Added 12 skills from Claude Code:')); tries++) await wait(100);
+  await b.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+  await b.settle();
+  await b.shot('settings-added-twelve-items-860-light');
+  const wrapped = await b.run(`(() => {
+    const lines = [...document.querySelectorAll('.setting-added .setting-message')];
+    const twelveLine = lines.find(el => el.textContent.startsWith('Added 12 skills from Claude Code:'));
+    let markStarts = 0, punctStarts = 0, historyAlone = 0;
+    for (const line of lines) {
+      const body = line.querySelector('.setting-message-body'), bodyLeft = body.getBoundingClientRect().left;
+      for (const btn of line.querySelectorAll('.row-file-btn')) if (btn.getBoundingClientRect().left <= bodyLeft + 2) markStarts++;
+      const walk = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        if (n.parentElement.closest('button') || !n.nodeValue) continue;
+        for (let i = 0; i < n.nodeValue.length; i++) {
+          if (!/[,.;:]/.test(n.nodeValue[i])) continue;
+          const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 1);
+          if (r.getBoundingClientRect().left <= bodyLeft + 2) punctStarts++;
+        }
+      }
+      const history = line.querySelector('.text-action');
+      if (history && history.getBoundingClientRect().left <= bodyLeft + 2) historyAlone++;
+    }
+    const marks = [...twelveLine.querySelectorAll('.row-file-btn')];
+    return { marks: marks.length, markStarts, punctStarts, historyAlone, thirdMark: marks[2]?.id };
+  })()`);
+  same('at 860, added lines (including a twelve-item line) start no wrapped line with a mark or punctuation and never drop History alone',
+    [wrapped.marks, wrapped.markStarts, wrapped.punctStarts, wrapped.historyAlone, await b.run(CUT_OFF)], [12, 0, 0, 0, []]);
+  await openAdded(b, wrapped.thirdMark, 'Skill code-review.');
+  await b.shot('settings-added-several-open-860-light');
+  await b.press('Escape');
+  await setTheme(b, '');
+  await fullSize(b);
   same('no page errors, Settings inline Undo', b.pageErrors, []);
   await b.quit();
 }
@@ -10336,10 +10420,14 @@ esac
   await a.click('#header-refresh'); await done();
   // An option saved after the home was last read: the question's own read, as it opens, finds it.
   writeFileSync(settingsPath, JSON.stringify({ ...jsonOrNothing(settingsPath), pluginConfigs: { [id]: { options: { endpoint: 'https://issues.example.test' } } } }));
+  const tabPageLink = '#harness-plugin-ck-test-market-issue-tracker';
+  const linkLeftBefore = await a.run(`document.querySelector(${JSON.stringify(tabPageLink)})?.getBoundingClientRect().left ?? -1`);
   const question = 'Uninstall issue-tracker from Claude Code? Installing it again gives the marketplace’s copy; the edits to this one are lost. Its saved options there are deleted for good.';
   await a.click(`#${uninstallFrom}`);
   same('Uninstall… asks in its row first, naming the edited copy and the options saved since the last look, the focus on Cancel', [await asked(), await a.run(`document.activeElement?.id`)],
     [question, `${uninstallFrom}-cancel`]);
+  const linkLeftOpen = await a.run(`document.querySelector(${JSON.stringify(tabPageLink)})?.getBoundingClientRect().left ?? -1`);
+  check('Its page stays put horizontally while Uninstall… asks', Math.abs(linkLeftOpen - linkLeftBefore) < 1, [linkLeftBefore, linkLeftOpen]);
   const callsAsked = calls().length;
   await a.press('Escape');
   same('Escape closes the question, runs nothing, and gives the focus back to Uninstall…', [await a.exists('.uninstall-ask'), calls().length, await a.run(`document.activeElement?.id`)], [false, callsAsked, uninstallFrom]);
@@ -10351,12 +10439,29 @@ esac
   await done();
   same('confirmed: Claude Code’s own uninstall with --keep-data, its data folder as it was, Claude Code kept out, the row gone, the focus on Undo, which says what it brings back',
     [calls().at(-1), treeOf(join(home, '.claude/plugins/data')), entry()?.on, entry()?.except, await a.exists(`#${tabSwitch}`), await a.run(`document.activeElement?.id`), await a.text('#plugins-result .toolbar-result-text'), await a.run(`document.querySelector('#plugins-undo')?.title`)],
-    ['plugin uninstall issue-tracker@ck-test-market --scope user --keep-data', dataBefore, false, ['pi-cli'], false, 'plugins-undo', 'issue-tracker: uninstalled from Claude Code.',
+    ['plugin uninstall issue-tracker@ck-test-market --scope user --keep-data', dataBefore, false, ['pi-cli'], false, 'plugins-undo', 'issue-tracker: uninstalled from Claude Code; its saved options were deleted.',
       'Installs issue-tracker again in Claude Code, from the marketplace, without its saved options.']);
   await a.click('#plugins-undo');
   await done();
   same('Undo installs it in Claude Code again, the record as before, the focus on the row’s switch, and says what was not brought back', [calls().at(-1), installed(), entry()?.on, entry()?.except, await a.run(`document.activeElement?.id`), await a.text('#plugins-result .toolbar-result-text')],
     ['plugin install issue-tracker@ck-test-market --scope user', true, true, ['pi-cli'], tabSwitch, 'Undone: issue-tracker reinstalled in Claude Code, without its saved options.']);
+  // At 860×600 (sidebar open, light and dark): the consequential Undo keeps #366's Row 2 reload chip and Show all in the 48px header,
+  // stays quiet in the status bar, and opening Show all reveals the whole sentence and reload row without covering the tool switcher or tabs.
+  await sizeTo(a, ...SMALLEST);
+  if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+  for (const look of ['light', 'dark']) {
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+    await themeSettled();
+    const fit = await a.run(`(() => { const h = document.querySelector('#header'), more = document.querySelector('#problems-show-all'), bar = document.querySelector('#announcement'); return [h?.offsetHeight ?? 0, document.querySelector('#header .result-reloads #outcome-copy-claude-cli')?.dataset.copy ?? '', !more?.hidden ? more?.textContent?.trim() ?? '' : '', !!bar?.classList.contains('visually-hidden')]; })()`);
+    same(`consequential Undo keeps 48px header with reload chip, Show all, and quiet status bar at 860 (${look})`, fit, [48, '/reload-plugins', 'Show all', true]);
+  }
+  await a.click('#problems-show-all');
+  same('Show all opens the whole sentence and Claude Code’s reload row without covering the tool switcher or tabs',
+    await a.run(`(() => { const w = document.querySelector('#header #result-whole.result-whole')?.getBoundingClientRect(), b = document.querySelector('.harness-bar')?.getBoundingClientRect(), t = document.querySelector('#result-whole .toolbar-result-text'); return [!!w && !!b && w.bottom <= b.top + 1, !!t && t.scrollHeight <= t.clientHeight + 1 && t.scrollWidth <= t.clientWidth + 1, document.querySelector('#problems-show-all')?.textContent?.trim() ?? '', document.querySelector('#result-whole #outcome-copy-claude-cli')?.dataset.copy ?? '']; })()`),
+    [true, true, 'Show less', '/reload-plugins']);
+  await a.click('#problems-show-all');
+  await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+  await fullSize(a);
   await a.click('#nav-plugins');
   if (!(await a.exists(box('claude-cli')))) await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 50 && (await boxIs('claude-cli'))?.[2] !== 'installed'; tries++) await wait(100);
@@ -10474,8 +10579,218 @@ esac
   same('On removes only the added rule, restoring his file byte for byte', readFileSync(codexConfig, 'utf8'), codexBoth);
   same('no page errors, a plugin’s switch', a.pageErrors, []);
   await a.quit();
+  await toolPluginsTabCases();
   await nameClashPage();
   await rootSkillPage();
+}
+
+/**
+ * Tool Plugins tab legibility cases (STEP-TOOLPAGE-T3): ambiguous titles showing marketplace inline only, real-identity
+ * unlisted dedupe, queued/running live switch states, Copilot CLI live/off, Sequence 3 (kept-off older copy uninstall,
+ * failed reinstall keeping record + Undo the rest hover, retry), unread Claude settings prompt, no-Undo completion with
+ * another tool tab open during completion, and 860 light/dark fit.
+ */
+async function toolPluginsTabCases() {
+  const home = join(scratch, 'home-t3'), data = join(scratch, 't3-data'), tools = join(scratch, 't3-tools');
+  const alphaM = join(scratch, 'market-t3-alpha'), betaM = join(scratch, 'market-t3-beta'), officialM = join(scratch, 'market-t3-official');
+  const writeMini = (root, name, plugins) => {
+    mkdirSync(join(root, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name, plugins: plugins.map(p => ({ name: p.name, description: p.description, ...(p.version ? { version: p.version } : {}), source: p.source ?? `./plugins/${p.name}` })) }, null, 2));
+    for (const p of plugins) {
+      if (p.source) continue;
+      mkdirSync(join(root, `plugins/${p.name}/skills/${p.name}`), { recursive: true });
+      writeFileSync(join(root, `plugins/${p.name}/skills/${p.name}/SKILL.md`), `---\nname: ${p.name}\ndescription: ${p.description}\n---\n\n${p.name} body.\n`);
+    }
+  };
+  writeMini(alphaM, 'alpha-market', [
+    { name: 'shared-kit', description: 'Alpha shared kit.', version: '2.0.0' },
+    { name: 'solo-kit', description: 'Unique plugin.', version: '1.0.0' },
+  ]);
+  writeMini(betaM, 'beta-market', [{ name: 'shared-kit', description: 'Beta shared kit.', version: '1.0.0' }]);
+  writeMini(officialM, 'official-market', [{ name: 'incident-io', description: 'Matched directory plugin.', source: { source: 'git-subdir', url: 'https://github.com/incident-io/skills.git', path: 'plugins/incident-io' } }]);
+
+  for (const dir of ['.claude/plugins', '.copilot', '.codex']) mkdirSync(join(home, dir), { recursive: true });
+  const cacheCopy = (market, name, ver, description = `${name}.`) => {
+    const dir = join(home, `.claude/plugins/cache/${market}/${name}/${ver}`);
+    mkdirSync(join(dir, `skills/${name}`), { recursive: true });
+    writeFileSync(join(dir, `skills/${name}/SKILL.md`), `---\nname: ${name}\ndescription: ${description}\n---\n\n${name} body.\n`);
+    return dir;
+  };
+  const sharedAlpha1 = cacheCopy('alpha-market', 'shared-kit', '1.0.0', 'Alpha shared kit.');
+  const sharedAlpha2 = cacheCopy('alpha-market', 'shared-kit', '2.0.0', 'Alpha shared kit.');
+  const sharedBeta1 = cacheCopy('beta-market', 'shared-kit', '1.0.0', 'Beta shared kit.');
+  const soloAlpha1 = cacheCopy('alpha-market', 'solo-kit', '1.0.0', 'Unique plugin.');
+  const dirIncident = cacheCopy('anthropic-plugin-directory', 'incident-io', '1.0.0');
+  const dirLone = cacheCopy('anthropic-plugin-directory', 'lone-dir', '1.0.0');
+  const privShared = cacheCopy('private-market', 'shared-kit', '1.0.0');
+
+  const claudeInstalled = join(home, '.claude/plugins/installed_plugins.json');
+  const claudeSettings = join(home, '.claude/settings.json');
+  writeFileSync(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({
+    'alpha-market': { source: { source: 'git', url: alphaM } },
+    'beta-market': { source: { source: 'git', url: betaM } },
+    'official-market': { source: { source: 'git', url: officialM } },
+  }, null, 2));
+  writeFileSync(claudeInstalled, JSON.stringify({
+    version: 2,
+    plugins: {
+      'shared-kit@alpha-market': [{ scope: 'user', installPath: sharedAlpha1, version: '1.0.0' }],
+      'shared-kit@beta-market': [{ scope: 'user', installPath: sharedBeta1, version: '1.0.0' }],
+      'solo-kit@alpha-market': [{ scope: 'user', installPath: soloAlpha1, version: '1.0.0' }],
+      'incident.io@anthropic-plugin-directory': [{ scope: 'user', installPath: dirIncident, version: '1.0.0', directoryRepositoryKey: 'github.com/incident-io/skills#plugins/incident-io' }],
+      'shared-kit@private-market': [{ scope: 'user', installPath: privShared, version: '1.0.0' }],
+      'lone-dir@anthropic-plugin-directory': [{ scope: 'user', installPath: dirLone, version: '1.0.0' }],
+    },
+  }, null, 2));
+  writeFileSync(claudeSettings, JSON.stringify({ enabledPlugins: {} }, null, 2));
+  writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({
+    extraKnownMarketplaces: { 'alpha-market': { source: { source: 'directory', path: alphaM } } },
+    enabledPlugins: { 'solo-kit@alpha-market': true },
+  }, null, 2));
+
+  mkdirSync(join(tools, '.local/bin'), { recursive: true });
+  writeFileSync(join(tools, '.local/bin/claude'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0
+[ "$1" = "plugin" ] || exit 9
+act="$2"; id="$3"
+case "$act" in
+  disable|enable)
+    [ -f "$HOME/slow" ] && sleep 2
+    "${process.execPath}" -e 'const fs=require("fs"),f=process.argv[1],id=process.argv[2],on=process.argv[3]==="enable";const j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};j.enabledPlugins={...j.enabledPlugins,[id]:on};fs.writeFileSync(f,JSON.stringify(j,null,2));' "$HOME/.claude/settings.json" "$id" "$act"
+    ;;
+  uninstall)
+    [ -f "$HOME/slow-uninstall" ] && sleep 2
+    "${process.execPath}" -e 'const fs=require("fs"),fi=process.argv[1],fs2=process.argv[2],id=process.argv[3];const i=JSON.parse(fs.readFileSync(fi,"utf8"));delete i.plugins[id];fs.writeFileSync(fi,JSON.stringify(i,null,2));try{const s=JSON.parse(fs.readFileSync(fs2,"utf8"));delete s.enabledPlugins?.[id];delete s.pluginConfigs?.[id];fs.writeFileSync(fs2,JSON.stringify(s,null,2));}catch{}' "$HOME/.claude/plugins/installed_plugins.json" "$HOME/.claude/settings.json" "$id"
+    ;;
+  install)
+    [ -f "$HOME/fail-install" ] && echo "Marketplace unreachable." >&2 && exit 9
+    "${process.execPath}" -e 'const fs=require("fs"),fi=process.argv[1],id=process.argv[2],p=process.argv[3];const i=JSON.parse(fs.readFileSync(fi,"utf8"));i.plugins[id]=[{scope:"user",installPath:p,version:"2.0.0"}];fs.writeFileSync(fi,JSON.stringify(i,null,2));' "$HOME/.claude/plugins/installed_plugins.json" "$id" '${sharedAlpha2}'
+    ;;
+  *) exit 9 ;;
+esac
+`, { mode: 0o755 });
+  writeFileSync(join(tools, '.local/bin/copilot'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0
+[ "$1" = "plugin" ] && { [ "$2" = "uninstall" ] || [ "$2" = "install" ]; } || exit 9
+"${process.execPath}" -e 'const fs=require("fs"),f=process.argv[1],id=process.argv[2],on=process.argv[3]==="install";const j=JSON.parse(fs.readFileSync(f,"utf8"));j.enabledPlugins={...j.enabledPlugins,[id]:on};fs.writeFileSync(f,JSON.stringify(j,null,2));' "$HOME/.copilot/settings.json" "$3" "$2"
+`, { mode: 0o755 });
+  writeFileSync(join(tools, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.143.0" && exit 0\nexit 9\n', { mode: 0o755 });
+
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  const a = await launch(data, [], tools);
+  const done = async () => { for (let tries = 0; tries < 120 && (await a.run(`document.body.dataset.busy === 'true' || !!document.querySelector('.plugin-click')`)); tries++) await wait(100); await a.settle(); };
+  const asked = async () => { for (let tries = 0; tries < 100 && (await a.run(`document.querySelector('.uninstall-ask .delete-now')?.disabled !== false`)); tries++) await wait(100); return a.text('.uninstall-ask .band-text'); };
+
+  for (const m of [alphaM, betaM, officialM]) same(`added ${m}`, await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(m)}).then(r => r.problem ?? 'added')`), 'added');
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 60 && !(await a.exists('#harness-plugin-alpha-market-shared-kit')); tries++) await wait(100);
+
+  // 1. Ambiguous titles show marketplace inline; unique titles do not.
+  same('ambiguous plugin titles show marketplace inline while unique titles stay bare',
+    await a.run(`(() => { const m = id => document.querySelector('.harness-plugin:has(#' + id + ') .harness-plugin-market')?.textContent ?? null; return [m('harness-plugin-alpha-market-shared-kit'), m('harness-plugin-beta-market-shared-kit'), m('harness-plugin-alpha-market-solo-kit'), m('harness-plugin-official-market-incident-io')]; })()`),
+    [' · alpha-market', ' · beta-market', null, null]);
+
+  // 2. Real installed identity for #harness-plugins-unlisted: matched Anthropic Directory install excluded; distinct same-name and unmatched directory survive.
+  const unlisted = await a.text('#harness-plugins-unlisted') ?? '';
+  check('unlisted notice excludes matched Anthropic Directory install and keeps distinct same-name and unmatched directory installs',
+    !/incident\.io/.test(unlisted) && unlisted.includes('shared-kit (private-market)') && unlisted.includes('lone-dir (anthropic-plugin-directory)'), unlisted);
+
+  // 3. Queued and running live states on Claude Code's Plugins tab switches.
+  writeFileSync(join(home, 'slow'), '');
+  await a.run(`document.getElementById('harness-plugin-switch-beta-market-shared-kit').click(); document.getElementById('harness-plugin-switch-alpha-market-solo-kit').click();`);
+  for (let tries = 0; tries < 50 && !(await a.exists('[data-click="running"]')); tries++) await wait(50);
+  const liveSnap = await a.run(`(() => { const row = id => document.querySelector('.harness-plugin:has(#' + id + ')'); const r1 = row('harness-plugin-beta-market-shared-kit'), r2 = row('harness-plugin-alpha-market-solo-kit'); return [r1?.querySelector('.plugin-click')?.dataset.click ?? null, r1?.querySelector('.plugin-click')?.textContent?.trim() ?? '', r2?.querySelector('.plugin-click')?.dataset.click ?? null, r2?.querySelector('.plugin-click')?.textContent?.trim() ?? '']; })()`);
+  same('queued and running clicks show live state on their rows', liveSnap,
+    ['running', 'Turning off in Claude Code…', 'waiting', 'Waiting to turn off in Claude Code']);
+  rmSync(join(home, 'slow'));
+  await done();
+  same('after settling, turned-off row shows Off, kept installed',
+    await a.run(`document.querySelector('.harness-plugin:has(#harness-plugin-alpha-market-solo-kit) .harness-plugin-state')?.textContent?.trim() ?? ''`),
+    'Off, kept installed');
+  await a.click('#harness-plugin-switch-alpha-market-solo-kit');
+  await done();
+
+  // 4. Copilot CLI live/off on Copilot CLI's Plugins tab: no Uninstall…, switch turns off (Off, kept installed) and Undo restores.
+  await a.click('#harness-switch-copilot-cli');
+  for (let tries = 0; tries < 50 && !(await a.exists('#harness-plugin-switch-alpha-market-solo-kit')); tries++) await wait(100);
+  const copilotHasUninstall = await a.exists('#harness-plugin-uninstall-alpha-market-solo-kit');
+  await a.click('#harness-plugin-switch-alpha-market-solo-kit');
+  await done();
+  const copilotLiveOff = await a.run(`document.querySelector('.harness-plugin:has(#harness-plugin-alpha-market-solo-kit) .harness-plugin-state')?.textContent?.trim() ?? ''`);
+  await a.click('#plugins-undo');
+  await done();
+  same('Copilot CLI live copy has no Uninstall…, turns off to Off, kept installed, and Undo turns it back on',
+    [copilotHasUninstall, copilotLiveOff, await a.run(`document.getElementById('harness-plugin-switch-alpha-market-solo-kit')?.getAttribute('aria-checked')`)],
+    [false, 'Off, kept installed', 'true']);
+
+  // 5. Sequence 3: turn shared-kit@alpha-market (1.0.0 vs catalog 2.0.0) off, uninstall older copy (question names marketplace for shared title), fail reinstall on Undo, then retry Undo.
+  await a.click('#harness-switch-claude-cli');
+  for (let tries = 0; tries < 50 && !(await a.exists('#harness-plugin-switch-alpha-market-shared-kit')); tries++) await wait(100);
+  await a.click('#harness-plugin-switch-alpha-market-shared-kit');
+  await done();
+  await a.click('#harness-plugin-uninstall-alpha-market-shared-kit');
+  same('older kept-off copy uninstall prompt names the marketplace for a shared title and the lost version', await asked(),
+    'Uninstall shared-kit (alpha-market) from Claude Code? Installing it again gives 2.0.0; this 1.0.0 can’t be brought back.');
+  await a.click('#harness-plugin-uninstall-alpha-market-shared-kit-confirm');
+  await done();
+  const recAfterUninstall = readFileSync(join(home, '.central-knot/plugins.json'), 'utf8');
+  same('uninstall of kept-off copy gives Undo hover naming marketplace and off as it was', await a.run(`document.getElementById('plugins-undo')?.title ?? ''`),
+    'Installs shared-kit (alpha-market) again in Claude Code, from the marketplace, off as it was.');
+  writeFileSync(join(home, 'fail-install'), '');
+  await a.click('#plugins-undo');
+  await done();
+  same('failed reinstall on Undo keeps record as uninstall left it, keeps row absent, shows failure, and Undo the rest keeps accurate hover',
+    [readFileSync(join(home, '.central-knot/plugins.json'), 'utf8') === recAfterUninstall, await a.exists('#harness-plugin-alpha-market-shared-kit'), await a.exists('#header .plugin-problems'),
+      (await a.text('#plugins-undo'))?.trim() ?? '', await a.run(`document.getElementById('plugins-undo')?.title ?? ''`)],
+    [true, false, true, 'Undo the rest', 'Installs shared-kit (alpha-market) again in Claude Code, from the marketplace, off as it was.']);
+  rmSync(join(home, 'fail-install'));
+  await a.click('#plugins-undo');
+  await done();
+  same('retrying Undo the rest brings shared-kit back off as it was',
+    [await a.exists('#harness-plugin-alpha-market-shared-kit'), await a.run(`document.querySelector('.harness-plugin:has(#harness-plugin-alpha-market-shared-kit) .harness-plugin-state')?.textContent?.trim() ?? ''`)],
+    [true, 'Off, kept installed']);
+
+  // 6. Unread Claude Code settings.json when opening Uninstall… warns settings couldn't be read instead of promising nothing is lost.
+  const validClaudeSettings = readFileSync(claudeSettings, 'utf8');
+  writeFileSync(claudeSettings, '{broken');
+  await a.click('#harness-plugin-uninstall-alpha-market-solo-kit');
+  const unreadAsk = await asked();
+  await a.press('Escape');
+  writeFileSync(claudeSettings, validClaudeSettings);
+  same('unreadable settings.json warns record couldn’t be read instead of promising nothing is lost', unreadAsk,
+    'Uninstall solo-kit from Claude Code? It can be installed again. Claude Code’s record of its plugins couldn’t be read, so it isn’t known whether its saved options will be deleted.');
+
+  // 7. No-longer-offered plugin (irreversible uninstall, no Undo) with Codex tab open during completion.
+  writeMini(alphaM, 'alpha-market', [{ name: 'shared-kit', description: 'Alpha shared kit.', version: '2.0.0' }]);
+  await a.click('#header-refresh');
+  await done();
+  await a.click('#harness-plugin-uninstall-alpha-market-solo-kit');
+  same('no-longer-offered uninstall prompt says there is no Undo', await asked(),
+    'Uninstall solo-kit from Claude Code? It is no longer offered, so it can’t be installed again: there is no Undo.');
+  writeFileSync(join(home, 'slow-uninstall'), '');
+  await a.run(`document.getElementById('harness-plugin-uninstall-alpha-market-solo-kit-confirm').click(); document.getElementById('harness-switch-codex-cli').click();`);
+  for (let tries = 0; tries < 100 && JSON.parse(readFileSync(claudeInstalled, 'utf8')).plugins['solo-kit@alpha-market']; tries++) await wait(100);
+  await done();
+  rmSync(join(home, 'slow-uninstall'));
+  same('Codex tab open during Claude Code’s irreversible uninstall neither shows its result nor offers Undo',
+    [await a.exists('#plugins-result'), await a.exists('#plugins-undo')], [false, false]);
+  await a.click('#harness-switch-claude-cli');
+  for (let tries = 0; tries < 50 && !(await a.exists('#plugins-result')); tries++) await wait(100);
+  same('returning to Claude Code’s Plugins tab shows the irreversible completion in the header without Undo and says Can’t be undone',
+    [(await a.text('#plugins-result .toolbar-result-text'))?.trim() ?? '', await a.exists('#plugins-undo'), await a.run(`document.getElementById('header')?.offsetHeight ?? 0`)],
+    ['solo-kit: uninstalled from Claude Code. Can’t be undone.', false, 48]);
+
+  // 8. Check both 860 themes fit without overflow or clipping.
+  for (const look of ['light', 'dark']) {
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+    await fitsAtMinimum(a, `Claude Code Plugins tab (${look})`);
+  }
+  await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+  same('no page errors, tool Plugins tab legibility cases', a.pageErrors, []);
+  await a.quit();
 }
 
 /**
@@ -17983,6 +18298,13 @@ async function libraryFlow() {
   const longKey = 'cross-workspace-release-migration-checklist-v2';
   sFold.items[longKey] = { ...structuredClone(sFold.items['legacy-skill']), key: longKey, name: longKey, on: false, applied: {} };
   cpSync(join(O.home, '.central-knot/items/skills/legacy-skill'), join(O.home, `.central-knot/items/skills/${longKey}`), { recursive: true });
+  // A skill deleted from Central Knot, its long name the longest the panel's header holds here: its tombstone keeps its own last
+  // version, so its name has a mark too. lapsed-notes, deleted too, has no version left in its folder (let go, as at History's days).
+  const retired = 'retired-cross-workspace-quarterly-planning-notes', retiredHash = '5e'.repeat(32);
+  sFold.items[retired] = { key: retired, name: retired, on: false, hash: retiredHash, versions: [{ hash: retiredHash, at: foldAt(30), from: { how: 'found', harness: 'claude-cli' } }],
+    except: [], applied: {}, own: {}, deleted: { at: foldAt(1.1) } };
+  skill(join(O.home, `.central-knot/items/skills/${retired}/versions`), retiredHash, text(retired, 'Kept from the last planning review.'));
+  sFold.items['lapsed-notes'] = { ...structuredClone(sFold.items['legacy-skill']), key: 'lapsed-notes', name: 'lapsed-notes', on: false, applied: {}, deleted: { at: foldAt(1.05) } };
   writeFileSync(oSkillRec, `${JSON.stringify(sFold, null, 2)}\n`);
   hFold.events.push(
     { id: 'fold-legacy', at: foldAt(7), key: 'instructions:old', item: 'old', kind: 'edit', winner: { tool: 'claude-cli', hash: 'a' }, losers: ['claude-cli', 'codex-cli', 'old-cli'].map(tool => ({ tool, hash: 'a' })), orderProved: true },
@@ -17992,7 +18314,10 @@ async function libraryFlow() {
     { id: 'fold-two', at: foldAt(3), key: 'two-tools', of: 'skill', item: 'two-tools', kind: 'on', cause: 'switch', losers: [{ tool: 'claude-cli', hash: '' }, { tool: 'codex-cli', hash: '' }], orderProved: true },
     { id: 'fold-all', at: foldAt(2), key: 'all-six', of: 'skill', item: 'all-six', kind: 'off', cause: 'switch', losers: sixIds.map(tool => ({ tool, hash: 'b' })), orderProved: true },
     { id: 'fold-then', at: foldAt(1.5), key: 'draft-over', of: 'skill', item: 'draft-over', kind: 'on', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: '' })), tookFrom: [{ tool: 'claude-cli', hash: 'old' }], orderProved: true },
+    { id: 'fold-gone-off', at: foldAt(1.3), key: retired, of: 'skill', item: retired, kind: 'off', cause: 'switch', losers: [{ tool: 'codex-cli', hash: 'b' }], orderProved: true },
     { id: 'fold-long', at: foldAt(1.2), key: 'cross-workspace-release-migration-checklist-v2', of: 'skill', item: 'cross-workspace-release-migration-checklist-v2', kind: 'off', cause: 'switch', losers: [{ tool: 'codex-cli', hash: 'b' }], orderProved: true },
+    { id: 'fold-gone', at: foldAt(1.1), key: retired, of: 'skill', item: retired, kind: 'deleted', losers: [], orderProved: true },
+    { id: 'fold-lapsed', at: foldAt(1.05), key: 'lapsed-notes', of: 'skill', item: 'lapsed-notes', kind: 'deleted', losers: [], orderProved: true },
     { id: 'fold-five', at: foldAt(1), key: 'draft-rfc', of: 'skill', item: 'draft-rfc', kind: 'off', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: 'b' })), orderProved: true },
     { id: 'fold-clash', at: foldAt(0.5), key: 'active-skill', of: 'skill', item: 'active-skill', kind: 'conflict', winner: { tool: 'codex-cli', hash: clashItem.hash }, version: clashItem.hash, previous: 'p', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'opencode-cli', hash: 'z' }], orderProved: true },
   );
@@ -18083,7 +18408,9 @@ async function libraryFlow() {
     [[true, true], false, false]);
   // A name History holds an item under has the Library's file mark after it. At 860: one press opens its text under that row, a
   // second row naming it takes it, the profile menu's and the Keep confirmation's Escape leave it open and the next closes it,
-  // nothing cut off; under a row near the foot, its long file uses the window under that row, the next row in sight. At 1316: opened.
+  // nothing cut off; under a row near the foot, its long file uses the window under that row, the next row in sight; a deleted
+  // skill's mark (on the row that deleted it and an earlier one) opens its last version kept under its row; one whose version was
+  // let go, opened near the foot of the scrolled list, says so whole. At 1316: opened.
   const benchRows = await o.run(`[...document.querySelectorAll('.history-row')].filter(row => row.querySelector('.history-what strong')?.textContent === 'bench-runner').map(row => row.id)`);
   const [benchFirst, benchSecond] = benchRows, benchLast = benchRows.at(-1), benchMark = row => `#${row} .history-what strong + .row-file-btn`;
   const fileUnder = () => o.run(`(() => { const box = document.querySelector('.file-open-box'), row = box?.closest('.history-row'), view = document.querySelector('#history-scroll').getBoundingClientRect();
@@ -18116,6 +18443,24 @@ async function libraryFlow() {
   same('at 860, opened at a row near the foot, bench-runner’s long file uses the window under that row, the next row in sight', [foot.rowAtTop, foot.nextInSight], [true, true]);
   await historyShot('history-file-long-foot-860-light', 'light');
   await o.click(benchMark(benchLast));
+  const goneMark = row => `#history-row-${row} .history-what strong + .row-file-btn`;
+  const retiredOpen = async () => (said => said.row === 'history-row-fold-gone' && said.text.includes('Kept from the last planning review.'))(await fileUnder());
+  await o.run(`document.getElementById('history-row-fold-gone-off').scrollIntoView({ block: 'center' })`);
+  await historyShot('history-kept-earlier-860-light', 'light');
+  await o.click(goneMark('fold-gone'));
+  same('at 860, a deleted skill’s mark on History opens the last version Central Knot kept of it under that row, nothing cut off',
+    [await until(retiredOpen), await o.run(CUT_OFF)], [true, []]);
+  await historyShot('history-kept-open-860-light', 'light');
+  await o.click(goneMark('fold-gone'));
+  await o.run(`document.getElementById('history-row-fold-lapsed').scrollIntoView({ block: 'end' })`);
+  await o.click(goneMark('fold-lapsed'));
+  await until(async () => (await o.text('.file-open-box .file-open-state'))?.trim() === 'Central Knot no longer keeps this version.');
+  await o.settle();
+  same('at 860, opened near the foot of the scrolled list, lapsed-notes’ sentence is inside its panel and the panel inside the window',
+    await o.run(`(() => { const box = document.querySelector('.file-open-box'), [said, panel, view] = [box.querySelector('.file-open-state'), box, document.getElementById('history-scroll')].map(e => e.getBoundingClientRect());
+      return [said.top >= panel.top && said.bottom <= panel.bottom + 0.5, panel.top >= view.top && panel.bottom <= view.bottom + 0.5]; })()`), [true, true]);
+  await historyShot('history-kept-let-go-860-light', 'light');
+  await o.click(goneMark('fold-lapsed'));
   if (shots) {
     await o.run(`document.getElementById('history-row-fold-long').scrollIntoView({ block: 'center' })`);
     await historyShot('history-file-long-name-860-light', 'light');
@@ -18127,6 +18472,13 @@ async function libraryFlow() {
   await sizeTo(o, 1316, 819);
   await sidebarOpen();
   await historyShot('history-file-marks-1316-dark', 'dark');
+  if (shots) {
+    await o.click(goneMark('fold-gone'));
+    await until(retiredOpen);
+    await o.run(`document.getElementById('history-row-fold-gone').scrollIntoView({ block: 'start' })`);
+    await historyShot('history-kept-open-1316-dark', 'dark');
+    await o.click(goneMark('fold-gone'));
+  }
   const wide = await openUnder(benchFirst);
   same('at 1316, bench-runner’s file opens under its row, nothing cut off', [wide.row, await o.run(CUT_OFF)], [benchFirst, []]);
   await historyShot('history-file-open-1316-dark', 'dark');
@@ -18767,14 +19119,18 @@ async function sessionStripFlow() {
   for (const [cli, version] of [['copilot', 'GitHub Copilot CLI 1.0.113.'], ['codex', 'codex-cli 0.169.1'], ['pi', '1.5.2']]) writeFileSync(join(bin, cli), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
   mkdirSync(join(tools, '.opencode/bin'), { recursive: true });
   writeFileSync(join(tools, '.opencode/bin/opencode'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.19.6" && exit 0\nexit 9\n', { mode: 0o755 });
-  // Claude Code's stand-in turns release-helper off as its own disable does (enabledPlugins in its settings), and refuses anything
+  // Claude Code's stand-in turns release-helper off or back on as its own disable/enable does (enabledPlugins in its settings), and refuses anything
   // else. Central Knot runs it with HOME set to the home it shows, so its log is there.
   const record = join(home, '.claude/plugins/installed_plugins.json');
   writeFileSync(join(bin, 'claude'), `#!/bin/sh
 [ "$1" = "--version" ] && echo "2.1.327 (Claude Code)" && exit 0
 echo "$*" >> "$HOME/claude-calls.txt"
-[ "$*" = "plugin disable release-helper@${name} --scope user" ] || exit 9
-"${process.execPath}" -e "const fs = require('fs'), f = '${join(home, '.claude/settings.json')}', now = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}; now.enabledPlugins = { ...now.enabledPlugins, 'release-helper@${name}': false }; fs.writeFileSync(f, JSON.stringify(now))"
+case "$*" in
+  "plugin disable release-helper@${name} --scope user") val=false ;;
+  "plugin enable release-helper@${name} --scope user") val=true ;;
+  *) exit 9 ;;
+esac
+"${process.execPath}" -e "const fs = require('fs'), f = '${join(home, '.claude/settings.json')}', now = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}; now.enabledPlugins = { ...now.enabledPlugins, 'release-helper@${name}': $val }; fs.writeFileSync(f, JSON.stringify(now))"
 `, { mode: 0o755 });
   const long = `"\${CLAUDE_PLUGIN_ROOT}/hooks/start.sh" --with-a-very-long-option-name=${'x'.repeat(120)} --from /${'deep-folder/'.repeat(14)}notes.md`;
   const hooks = (event, matcher, ...commands) => JSON.stringify({ hooks: { [event]: [{ matcher, hooks: commands }], PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo checked' }] }] } });
@@ -18861,7 +19217,7 @@ echo "$*" >> "$HOME/claude-calls.txt"
     [[['After the conversation is compacted', 'cat "${CLAUDE_PLUGIN_ROOT}/standup-notes.md"']], []]]);
   same('a copy that can’t be read and a hooks file that doesn’t parse are said in the warning tone, never as no hooks', [claude['vanished'], claude['garbled-hooks'],
     await a.run(`[...document.querySelectorAll('#session-claude-cli .session-warning')].map(line => [line.classList.contains('tone-warning'), line.querySelector('.path-text')?.title ?? null])`)], [
-    [[], ['Claude Code lists it, but its files are not where it records them. What its hooks add isn’t known.']],
+    [[], ['Can’t read its hooks or turn it off here: its files are missing; check its folder or reinstall it in Claude Code.']],
     [[], [`Its hooks couldn’t be read: …${join(home, '.claude/plugins/cache', name, 'garbled-hooks/1.0.0/hooks/hooks.json').slice(home.length)}`]],
     [[true, join(home, '.claude/plugins/cache', name, 'garbled-hooks/1.0.0/hooks/hooks.json')], [true, null]]]);
   same('the hooks strip has its heading with no standing prose paragraph and no removed Instructions phrases',
@@ -18869,8 +19225,16 @@ echo "$*" >> "$HOME/claude-calls.txt"
       await a.run(`[...document.querySelectorAll('.session-hook')].some(hook => /known only/.test(hook.textContent))`),
       await a.run(`(() => { const text = document.querySelector('#instructions-scroll')?.textContent ?? ''; const strip = [...document.querySelectorAll('.base-strip')].some(el => el.textContent.includes('matches the base')); return [...['shown as they are, not changed here', 'Only that tool reads these.'].filter(phrase => text.includes(phrase)), ...(strip ? ['matches the base'] : [])]; })()`)],
     ['Hooks that can add text', [], false, []]);
-  same('your own hooks say the file that holds them; a plugin’s link says what it is for', [await a.text('#session-claude-cli .session-in'), await a.run(`document.querySelector('#session-claude-cli .session-in .path-text')?.title`),
-    [...new Set(await a.all('#session-claude-cli .session-head button', 'e.textContent'))]], [`in …${join(home, '.claude/settings.json').slice(home.length)}`, join(home, '.claude/settings.json'), ['Plugin’s page: turn it off there']]);
+  const headBtn = (stripId, groupName) => a.run(`(() => { const g = [...document.querySelectorAll('#${stripId} .session-group')].find(x => x.querySelector('.session-name')?.textContent === ${JSON.stringify(groupName)}); const b = g?.querySelector('.session-head button'); return b ? { id: b.id, text: b.textContent, title: b.title, disabled: b.disabled } : null; })()`);
+  const groupWhy = (stripId, groupName) => a.run(`([...document.querySelectorAll('#${stripId} .session-group')].find(x => x.querySelector('.session-name')?.textContent === ${JSON.stringify(groupName)})?.querySelector('.session-why')?.textContent ?? null)`);
+  for (let tries = 0; tries < 100 && (await headBtn('session-claude-cli', 'release-helper'))?.disabled !== false; tries++) await wait(100);
+  const helperHead = await headBtn('session-claude-cli', 'release-helper'), vanishedHead = await headBtn('session-claude-cli', 'vanished');
+  same('your own hooks say the file that holds them; an actionable plugin has an enabled button and a vanished copy has no dead button or duplicate why line',
+    [await a.text('#session-claude-cli .session-in'), await a.run(`document.querySelector('#session-claude-cli .session-in .path-text')?.title`),
+      !!helperHead && !helperHead.disabled, vanishedHead, await groupWhy('session-claude-cli', 'vanished'),
+      await a.run(`[...document.querySelectorAll('#session-claude-cli .session-head button')].some(b => /Plugin’s page/.test(b.textContent))`)],
+    [`in …${join(home, '.claude/settings.json').slice(home.length)}`, join(home, '.claude/settings.json'),
+      true, null, null, false]);
   same('on the card: the file, the base strip, the files read with it, this strip, then Earlier versions', await a.run(`(() => { const card = document.querySelector('article[aria-label="Claude Code instructions"]');
     const parts = ['.ins-body > :first-child', '.base-strip', '#ins-parts-claude-cli', '#session-claude-cli', 'details.ins-versions'].map(selector => card.querySelector(selector));
     return [parts.map(part => !!part), parts.every((part, at) => at === 0 || (parts[at - 1].compareDocumentPosition(part) & Node.DOCUMENT_POSITION_FOLLOWING))]; })()`), [[true, true, true, true, true], true]);
@@ -19022,11 +19386,12 @@ echo "$*" >> "$HOME/claude-calls.txt"
     await pictures('hook-source-instructions-plugin', '#session-claude-cli .session-group:has(.hook-source)', atTwo);
     await a.click(byId(styleHookBtn));
   }
-  // Its link opens release-helper's page; Back returns to the Instructions page with its strips.
-  const helperLink = await a.run(`[...document.querySelectorAll('#session-claude-cli .session-group')].find(group => group.querySelector('.session-name').textContent === 'release-helper').querySelector('button').id`);
-  await a.click(byId(helperLink));
+  // Open release-helper's page on Plugins to check marketplace-copy hook View source.
+  await a.click('#nav-plugins');
+  for (let tries = 0; tries < 100 && !(await a.exists('#popen-0-release-helper')); tries++) await wait(100);
+  await a.click('#popen-0-release-helper');
   for (let tries = 0; tries < 100 && (await a.text('.crumb-here')) !== 'release-helper'; tries++) await wait(100);
-  same('the link opens the plugin’s page', await a.text('.crumb-here'), 'release-helper');
+  same('release-helper’s plugin page opens', await a.text('.crumb-here'), 'release-helper');
   for (let tries = 0; tries < 50 && !(await a.exists('.plugin-parts li.with-source button[data-hook-source]')); tries++) await wait(100);
   const pluginHookBtns = await a.run(`[...document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]')].map(b => b.id)`);
   check('on the plugin’s page every hook row has View source (both session-text hooks and other hooks)', pluginHookBtns.length === 3, pluginHookBtns);
@@ -19057,33 +19422,66 @@ echo "$*" >> "$HOME/claude-calls.txt"
       !/No script file found/.test(otherSrc ?? '') && /Declared in .*hooks\/hooks\.json · the marketplace’s copy · PreToolUse/.test(otherSrc ?? '') && /echo checked/.test(otherSrc ?? ''), otherSrc);
     await a.click(byId(pluginHookBtns[2]));
   }
-  const back = async () => { await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.settle(); await showStrips(); };
-  await back();
-  same('Back returns to the Instructions page with the same strips', [await a.run(`document.querySelector('.nav-row[aria-current=page]')?.id`), (await names('claude-cli')).length, (await names('codex-cli')).length], ['nav-instructions', 15, 1]);
-  // Turned off in Claude Code on its page (its box unticked; kept installed), it leaves Claude Code's strip; Codex's group stays.
-  await a.click(byId(helperLink));
-  // Its box for Claude Code, on its page (the marketplace is the first listed); drawn once the page has read the tools' copies.
-  const box = '#pbox-0-release-helper-claude-cli';
-  const boxIs = () => a.run(`(() => { const b = document.querySelector('${box}'); return b ? [b.getAttribute('aria-checked'), b.disabled, b.dataset.state] : null; })()`);
-  for (let tries = 0; tries < 100 && (await boxIs())?.[2] !== 'installed'; tries++) await wait(100);
-  check('on its page, its box for Claude Code is ticked: it is there', JSON.stringify(await boxIs()) === JSON.stringify(['true', false, 'installed']),
-    [await boxIs(), await a.run(`document.querySelector('${box}')?.title`)]);
-  await a.click(box);
-  for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
+  await a.click('#nav-instructions');
+  await showStrips();
+  same('Instructions keeps the same strips on return', [await a.run(`document.querySelector('.nav-row[aria-current=page]')?.id`), (await names('claude-cli')).length, (await names('codex-cli')).length], ['nav-instructions', 15, 1]);
+  // Turn off release-helper in Claude Code right from its group while scrolled down: band with parts and Undo appears above cards (focused) without jumping the scroller, Codex keeps its group; leaving and returning keeps Undo; Undo brings it back and restores focus.
+  const helperOffId = (await headBtn('session-claude-cli', 'release-helper'))?.id;
+  await a.run(`document.getElementById(${JSON.stringify(helperOffId)})?.closest('.session-group')?.scrollIntoView({ block: 'start' })`);
   await a.settle();
-  same('its own disable ran in Claude Code alone', readNow(join(home, 'claude-calls.txt')).trim().split('\n'), [`plugin disable release-helper@${name} --scope user`]);
-  await back();
-  for (let tries = 0; tries < 100 && (await names('claude-cli')).includes('release-helper'); tries++) await wait(100);
-  same('turned off in Claude Code, its group leaves Claude Code’s strip, and Codex’s stays', [(await names('claude-cli')).includes('release-helper'), (await names('claude-cli')).length, await names('codex-cli')], [false, 14, ['release-helper']]);
-  // The box's result is Plugin marketplaces' own (pluginstate.ts pluginsResultPlace): Instructions draws none of it, above its cards or under a strip.
-  same('the box’s result and its Undo stay off Instructions', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
-  // A tool's own Instructions tab under Harnesses has the same strip.
+  const scrollBefore = await a.run(`document.getElementById('instructions-scroll')?.scrollTop ?? 0`);
+  await a.click(byId(helperOffId));
+  for (let tries = 0; tries < 300 && (await a.run(`document.body.dataset.busy === 'true'`) || (await names('claude-cli')).includes('release-helper') || !(await a.exists('#plugins-undo'))); tries++) await wait(100);
+  await a.settle();
+  const scrollAfter = await a.run(`document.getElementById('instructions-scroll')?.scrollTop ?? 0`);
+  same('turning off from Claude Code’s card runs disable alone, removes Claude Code’s group while Codex’s stays, keeps scroll place, shows the band with its parts and Undo, and focuses Undo',
+    [readNow(join(home, 'claude-calls.txt')).trim().split('\n'), (await names('claude-cli')).includes('release-helper'), (await names('claude-cli')).length, await names('codex-cli'),
+      /release-helper: turned off in Claude Code, with its 3 hooks\./.test(await a.text('#plugins-result') ?? ''), await a.run(`document.activeElement?.id`), scrollBefore > 50 && Math.abs(scrollAfter - scrollBefore) <= 2],
+    [[`plugin disable release-helper@${name} --scope user`], false, 14, ['release-helper'], true, 'plugins-undo', true]);
+  const pluginSnapshot = () => [readNow(join(home, '.claude/settings.json')), readNow(join(home, '.central-knot/plugins.json'))];
+  const fromInstructions = pluginSnapshot();
+  await a.click('#nav-overview');
+  await a.click('#nav-instructions');
+  await showStrips();
+  same('leaving Instructions before Undo and coming back keeps the band and Undo', [await a.exists('#plugins-result'), await a.exists('#plugins-undo')], [true, true]);
+  await a.click('#plugins-undo');
+  for (let tries = 0; tries < 300 && (await a.run(`document.body.dataset.busy === 'true'`) || !(await names('claude-cli')).includes('release-helper')); tries++) await wait(100);
+  await a.settle();
+  same('Undo puts release-helper back on Claude Code’s strip and returns focus to its button',
+    [(await names('claude-cli')).includes('release-helper'), await a.run(`document.activeElement?.id`)], [true, helperOffId]);
+  // Compare the files written by Instructions with one press of Claude Code's Plugins tab switch, then leave it off as the rest of this flow expects.
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-plugins');
+  const tabSw = `#harness-plugin-switch-${name}-release-helper`;
+  for (let tries = 0; tries < 100 && !(await a.exists(tabSw)); tries++) await wait(100);
+  await a.click(tabSw);
+  for (let tries = 0; tries < 300 && (await a.run(`document.body.dataset.busy === 'true'`) || (await a.run(`document.querySelector(${JSON.stringify(tabSw)})?.getAttribute('aria-checked')`)) !== 'false'); tries++) await wait(100);
+  await a.settle();
+  same('turning off from Instructions leaves the exact same files as the Plugins tab switch', fromInstructions, pluginSnapshot());
+  await a.click('#nav-instructions');
+  await showStrips();
+  same('a Plugins tab turn’s result and Undo stay off Instructions', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
+  // A tool's own Instructions tab under Harnesses has the same strip and Turn off / Undo in place.
   await a.click(byId('nav-harnesses'));
   await a.click(byId('harness-codex-cli'));
   await a.click(byId('harness-tab-instructions'));
   for (let tries = 0; tries < 100 && !(await a.exists('#session-codex-cli')); tries++) await wait(100);
   same('Codex’s Instructions tab has its strip without standing prose', [(await groups('codex-cli'))[0]?.[1].length, await a.exists('#session-codex-cli .session-about')], [2, false]);
-  same('nor does Codex’s Instructions tab, a place of its own', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
+  same('nor does Codex’s Instructions tab carry another place’s result', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
+  for (let tries = 0; tries < 100 && (await headBtn('session-codex-cli', 'release-helper'))?.disabled !== false; tries++) await wait(100);
+  const codexHead = await headBtn('session-codex-cli', 'release-helper'), codexOffId = codexHead?.id;
+  await a.click(byId(codexOffId));
+  for (let tries = 0; tries < 300 && (await a.run(`document.body.dataset.busy === 'true'`) || !(await a.exists('#plugins-undo'))); tries++) await wait(100);
+  await a.settle();
+  same('turning off on Codex’s Instructions tab removes its group and shows Undo',
+    [await a.exists('#session-codex-cli'), await a.exists('#plugins-undo')],
+    [false, true]);
+  await a.click('#plugins-undo');
+  for (let tries = 0; tries < 300 && (await a.run(`document.body.dataset.busy === 'true'`) || !(await a.exists('#session-codex-cli'))); tries++) await wait(100);
+  await a.settle();
+  same('Undo on Codex’s Instructions tab brings the group back',
+    (await names('codex-cli')).includes('release-helper'), true);
   const codexTabBtn = await hookBtnIn('session-codex-cli', 'release-helper', 'remind.mjs');
   const codexTabSource = codexTabBtn && await openSource(codexTabBtn, '#session-codex-cli .hook-source');
   check('a tool’s own Instructions tab opens View source from that tool’s installed copy', /Declared in .*hooks\/hooks\.json/.test(codexTabSource ?? '') && /installed in Codex/.test(codexTabSource ?? '') && !/marketplace’s copy/.test(codexTabSource ?? ''), codexTabSource);
@@ -19712,12 +20110,10 @@ async function hookRunFlow() {
   await a.click('#nav-overview');
   await steady();
   const pluginMarkerBefore = pluginMarkerCount();
-  // Click 1: Overview -> Instructions.
-  await a.click('#nav-instructions');
-  await waitFor(`!!document.querySelector('#session-claude-cli .session-group')`);
-  await steady();
-  // Click 2: Instructions (Claude Code) -> release-helper's own page.
-  await a.run(`[...document.querySelectorAll('#session-claude-cli .session-group')].find(g => g.querySelector('.session-name')?.textContent === 'release-helper')?.querySelector('button')?.click()`);
+  // Click 1: Overview -> Plugin marketplaces, Click 2: release-helper's own page.
+  await a.click('#nav-plugins');
+  await waitFor(`!!document.querySelector('#popen-0-release-helper')`);
+  await a.click('#popen-0-release-helper');
   await waitFor(`document.querySelector('.crumb-here')?.textContent === 'release-helper'`);
   await waitFor(`!!document.querySelector('#plugin-session-hooks button[data-hook-run]')`);
   await steady();
@@ -19809,10 +20205,12 @@ async function hookRunFlow() {
   check('Run it as Codex on plugin page runs Codex installed hook with executed tool and plugin version and trust note',
     /^Would add as Codex, plugin 0\.4\.1, run in ~, /.test(codexPageRes) && codexPageRes.includes(`codex-root=${codexPluginRoot}`)
     && codexPageRes.includes('Codex adds it only once trusted in /hooks.'), codexPageRes);
-  // Arriving from Codex's strip on Instructions selects As Codex directly.
-  await a.click('#nav-instructions');
-  await waitFor(`!!document.querySelector('#session-codex-cli .session-group')`);
-  await a.run(`[...document.querySelectorAll('#session-codex-cli .session-group')].find(g => g.querySelector('.session-name')?.textContent === 'release-helper')?.querySelector('button')?.click()`);
+  // Arriving from Codex's Plugins tab selects As Codex directly.
+  await a.click('#nav-harnesses');
+  await a.click('#harness-codex-cli');
+  await a.click('#harness-tab-plugins');
+  await waitFor(`!!document.querySelector('#harness-plugin-${marketName}-release-helper')`);
+  await a.click(`#harness-plugin-${marketName}-release-helper`);
   await waitFor(`document.querySelector('.crumb-here')?.textContent === 'release-helper' && document.getElementById('plugin-hook-tool')?.value === 'codex-cli'`);
   same('arriving from Codex selects As Codex', await a.run(`document.getElementById('plugin-hook-tool')?.value`), 'codex-cli');
   // Marketplace-only plugin (document-tools) and off plugin (off-plugin) keep View source alone and explain why in actual home.

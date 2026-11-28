@@ -290,6 +290,32 @@ test('installsIn carries each tool’s own recorded version rather than the mark
   );
 });
 
+test('installsIn carries each install’s real installId and emits one row per installed id across duplicate directory matches', () => {
+  const catalogA: MarketplaceView = {
+    ...entry,
+    name: 'official',
+    plugins: [{ name: 'incident-io', description: '' }, { name: 'notes', description: '' }],
+    states: {
+      'incident-io': { 'claude-cli': { state: 'installed', path: '/x', directory: 'incident.io@anthropic-plugin-directory' } },
+      notes: { 'claude-cli': { state: 'installed', path: '/y' } },
+    },
+  };
+  const catalogB: MarketplaceView = {
+    ...entry,
+    source: 'https://github.com/other/mirror.git',
+    name: 'mirror',
+    plugins: [{ name: 'incident-io', description: '' }],
+    states: {
+      'incident-io': { 'claude-cli': { state: 'installed', path: '/x', directory: 'incident.io@anthropic-plugin-directory' } },
+    },
+  };
+  const installs = installsIn({ ...view, marketplaces: [catalogA, catalogB] }, 'claude-cli')!;
+  assert.deepEqual(
+    installs.installed.map(item => [item.entry.name, item.plugin.name, item.installId]),
+    [['official', 'incident-io', 'incident.io@anthropic-plugin-directory'], ['official', 'notes', 'notes@official']],
+  );
+});
+
 test('Uninstall…’s question compares the tool’s copy with the marketplace’s as just read: comparing until it lands, then the same, different, or not known', () => {
   const copyIn = (text: string) => ({ skills: [{ name: 'a', description: '', path: 'skills/a', text }], commands: [], agents: [], instructions: [], version: '2.0.0' });
   const read = (codex: string, offered = true) => ({ ...copyIn('A'), offered, installed: { 'codex-cli': copyIn(codex) } }) as unknown as PluginDetail;
@@ -321,4 +347,39 @@ test('Uninstall…’s question: one sentence on whether it can come back, then 
     [ask('claude-cli', { cannot: 'not-carried', app: 'Acme Knot' }), 'Uninstall issue-tracker from Claude Code? Acme Knot doesn’t include its files, so it can’t be installed again: there is no Undo.'],
   ];
   for (const [said, wanted] of cases) assert.equal(said, wanted);
+});
+
+test('uninstallFacts falls back to what the view knows when detail lacks the tool, and only says settings could not be read when ownSettings is unknown', () => {
+  const copy = { skills: [], commands: [], agents: [], instructions: [], version: '1.0.0' };
+  const at: MarketplaceView = {
+    ...entry,
+    states: {
+      p: {
+        'claude-cli': { state: 'installed', path: '/c', version: '1.0.0', ownSettings: true },
+        'codex-cli': { state: 'installed', path: '/x', version: '1.0.0' },
+        'copilot-cli': { state: 'installed', path: '/g', version: '1.0.0' },
+      },
+      u: {
+        'claude-cli': { state: 'installed', path: '/c', version: '1.0.0', ownSettings: 'unknown' },
+      },
+    },
+  };
+  const plugin = { name: 'p', description: '', version: '1.0.0', folder: '/m/p' };
+  const unreadPlugin = { name: 'u', description: '', version: '1.0.0', folder: '/m/u' };
+  const claudeUnreadDetail = { ...copy, offered: true, installed: { 'claude-cli': { ...copy, ownSettings: 'unknown' } } } as unknown as PluginDetail;
+  assert.equal(uninstallFacts(at, plugin, 'claude-cli', claudeUnreadDetail).ownSettings, 'unknown');
+  // Unreadable marketplace (detail === null) or missing installed entry falls back to the view's known ownSettings, never falsely hedging true or inventing unknown for false.
+  assert.equal(uninstallFacts(at, plugin, 'claude-cli', null).ownSettings, true);
+  assert.equal(uninstallFacts(at, plugin, 'claude-cli', { ...copy, offered: true, installed: {} } as unknown as PluginDetail).ownSettings, true);
+  assert.equal(uninstallFacts(at, plugin, 'codex-cli', null).ownSettings, false);
+  assert.equal(uninstallFacts(at, plugin, 'copilot-cli', null).ownSettings, false);
+  assert.equal(uninstallFacts(at, unreadPlugin, 'claude-cli', null).ownSettings, 'unknown');
+
+  const none: Parameters<typeof uninstallAsk>[2] = { cannot: undefined, app: undefined, version: undefined, offered: undefined, copy: 'same', ownSettings: 'unknown' };
+  assert.equal(uninstallAsk('issue-tracker', 'claude-cli', none),
+    'Uninstall issue-tracker from Claude Code? It can be installed again. Claude Code’s record of its plugins couldn’t be read, so it isn’t known whether its saved options will be deleted.');
+  assert.equal(uninstallAsk('issue-tracker', 'codex-cli', { ...none, copy: 'unknown' }),
+    'Uninstall issue-tracker from Codex? Installing it again gives the marketplace’s copy; if this one was edited, the edits are lost. Codex’s record of its plugins couldn’t be read, so it isn’t known whether its MCP servers’ settings will be deleted.');
+  assert.equal(uninstallAsk('issue-tracker', 'claude-cli', { ...none, cannot: 'gone' }),
+    'Uninstall issue-tracker from Claude Code? It is no longer offered, so it can’t be installed again: there is no Undo. Claude Code’s record of its plugins couldn’t be read, so it isn’t known whether its saved options will be deleted.');
 });

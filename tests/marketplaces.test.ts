@@ -6,10 +6,10 @@ import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile
 import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
+import { createMarketplaces, registerMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import { resultLines, resultParts, resultSentence, undoTitle } from '../src/pluginplan.ts';
 import * as engine from '../src/plugins.ts';
-import { FROM_DIRECTORY, WAITS_TO_MOVE, boxOf, foundIn, recordUnread, toolMark } from '../src/pluginstatus.ts';
+import { FROM_DIRECTORY, WAITS_TO_MOVE, boxOf, foundIn, installsIn, recordUnread, toolMark } from '../src/pluginstatus.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { readProfiles } from '../src/profiles.ts';
 import { pluginLive, pluginPlan, wholeTurns, type PluginHome } from '../src/profileplan.ts';
@@ -302,6 +302,19 @@ test('Claude Code’s copy of a plugin from the Anthropic Directory shows as ins
     // An older version than the marketplace's, yet nothing is due: Claude Code keeps its directory copy.
     assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops, []);
     assert.deepEqual(Object.keys((await box.markets.detail(root, 'incident-io'))?.installed ?? {}), ['claude-cli'], 'its copy’s contents are read');
+    // A second catalog listing the same repository and folder still yields one row for that Directory install.
+    const mirror = join(box.base, 'mirror');
+    await put(join(mirror, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'mirror', plugins: [{ name: 'incident-io', version: '2.0.0', source: { source: 'git-subdir', url: 'https://github.com/incident-io/skills.git', path: 'plugins/incident-io' } }] }));
+    await box.markets.add(mirror);
+    // Turning the Directory install off in Claude Code's settings.json shows off (unchecked) after Refresh.
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'incident.io@anthropic-plugin-directory': false } }));
+    const offView = await box.markets.view();
+    const offEntry = offView.marketplaces.find(candidate => candidate.name === 'official')!;
+    assert.equal(installsIn(offView, 'claude-cli')!.installed.length, 1, 'two catalogs bound to one Directory install give one row');
+    assert.deepEqual(offEntry.states['incident-io']?.['claude-cli'], { state: 'installed', path: copy, version: '1.0.0', directory: 'incident.io@anthropic-plugin-directory', off: true });
+    const boxState = boxOf(offView, offEntry, 'incident-io', 'claude-cli', toolMark(offView, offEntry, 'incident-io', 'claude-cli', offEntry.switches?.['incident-io']?.tools['claude-cli']));
+    assert.equal(boxState.ticked, false, 'disabled Directory install shows unchecked');
+    assert.equal(boxState.line, 'Off, kept installed · can’t be changed here');
   } finally { await box.cleanup(); }
 });
 
@@ -1718,5 +1731,60 @@ test('A one-tool click writes nothing and returns the refusal when that tool is 
     box.calls.length = 0;
     const recordOnly = await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
     assert.deepEqual([box.calls, (await box.record()).plugins[0]!.except, recordOnly.done], [[], ['claude-cli'], []]);
+  } finally { await box.cleanup(); }
+});
+
+test('Unreadable Claude Code settings.json reports ownSettings unknown in detail, carries deleted unknown through turn, undoTurn and IPC validation', async () => {
+  const box = await switchHome({
+    codex: true,
+    tools: ['claude-cli', 'codex-cli'],
+    engine: {
+      uninstall: async (context, marketplace, plugin, tool) => {
+        const listedPath = join(context.home, '.claude/plugins/installed_plugins.json');
+        const listed = JSON.parse(await readFile(listedPath, 'utf8')).plugins ?? {};
+        delete listed[`${plugin}@${marketplace}`];
+        await put(listedPath, JSON.stringify({ version: 2, plugins: listed }));
+        return { tool, outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true };
+      },
+    },
+  });
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    const settingsPath = join(box.home, '.claude/settings.json');
+    const brokenSettings = '{"pluginConfigs":{"pdf@team":{"theme":"dark"}}, broken';
+    await put(settingsPath, brokenSettings);
+    const det = await box.markets.detail(box.root, 'pdf');
+    assert.equal(det?.installed?.['claude-cli']?.ownSettings, 'unknown');
+
+    const gone = await box.markets.turn(box.root, 'pdf', 'uninstall', 'claude-cli', box.home);
+    assert.equal(await readFile(settingsPath, 'utf8'), brokenSettings, 'broken settings.json stays untouched byte for byte');
+    assert.equal(gone.done[0]?.deleted, 'unknown');
+    assert.equal(gone.back?.[0]?.deleted, 'unknown');
+
+    const undone = await box.markets.undoTurn(box.root, 'pdf', gone.before!, gone.back!, box.home);
+    assert.equal(await readFile(settingsPath, 'utf8'), brokenSettings, 'broken settings.json stays untouched after Undo');
+    assert.equal(undone.done[0]?.deleted, 'unknown');
+
+    // Readable settings with saved options: uninstall marks deleted: true on both done (for the result) and back (for Undo).
+    await put(settingsPath, JSON.stringify({ pluginConfigs: { 'pdf@team': { options: { theme: 'dark' } } } }));
+    const goneKnown = await box.markets.turn(box.root, 'pdf', 'uninstall', 'claude-cli', box.home);
+    assert.equal(goneKnown.done[0]?.deleted, true);
+    assert.equal(goneKnown.back?.[0]?.deleted, true);
+
+    // IPC sanitizer accepts deleted: 'unknown' on plugins:undo-turn (reaching writeAccess instead of malformed refusal) and rejects unknown strings.
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    const reg = (channel: string, fn: (...args: unknown[]) => Promise<unknown>) => { handlers.set(channel, fn); };
+    registerMarketplaces({ handle: reg, handleNow: reg }, {
+      home: () => ({ home: box.home, actual: true }),
+      read: async () => ({ tools: ['claude-cli'], snapshots: [] }),
+      writeAccess: async () => ({ allowed: false, reason: 'Preview only here.' }),
+      dataDir: join(box.base, 'ipc-data'),
+      pickFolder: async () => undefined,
+      openExternal: async () => {},
+    });
+    const accepted = await handlers.get('plugins:undo-turn')!(box.root, 'pdf', gone.before, [{ source: box.root, marketName: 'team', plugin: 'pdf', tool: 'claude-cli', action: 'install', deleted: 'unknown' }], box.home) as { stopped?: string };
+    assert.equal(accepted.stopped, 'Preview only here.');
+    const rejected = await handlers.get('plugins:undo-turn')!(box.root, 'pdf', gone.before, [{ source: box.root, marketName: 'team', plugin: 'pdf', tool: 'claude-cli', action: 'install', deleted: 'bogus' }], box.home) as { stopped?: string };
+    assert.equal(rejected.stopped, 'That request was malformed, so nothing ran.');
   } finally { await box.cleanup(); }
 });
