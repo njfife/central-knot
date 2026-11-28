@@ -6,9 +6,10 @@
 // cell's words (cellSays), the time a column shows of its own (ownTime; a time in words: model.ts timeOrDay), the line saying what a check does on this
 // computer (checkLine, for the tools whose check can run here: cannotRun), a session-only tool's head (IN_SESSION), the marks'
 // cards (connectedCard, SESSION_CARD, LOCAL_CARD), each tool's own sign-in command, run and copied (signInArgs, signInCommand),
-// the tools whose sign-in Central Knot offers to start on a click (offersSignin), and a cell as the page shows it, a sign-in started
-// there included (cellNow; what the page keeps of a sign-in: SigninRun). Pure, for the page and main alike. Elsewhere: the runs, in main (mcpsigninrun.ts
-// checkSignin, startSignin); the page, its clicks and the order it holds its rows in (mcpsigninpage.ts); its state (app.ts
+// the tools whose sign-in Central Knot offers to start on a click (offersSignin), the port OpenCode's listens on (hasOwnPort, callbackPort),
+// how a sign-in ended by what its tool said (signinEnd), and a cell as the page shows it, a sign-in started there included
+// (cellNow; what the page keeps of a sign-in: SigninRun). Pure, for the page and main alike. Elsewhere: the runs, in main
+// (mcpsigninrun.ts checkSignin, startSignin); the page, its clicks and the order it holds its rows in (mcpsigninpage.ts); its state (app.ts
 // state.mcpSignin); the shapes (types.ts SigninAnswer, SigninSaid, SigninEnd).
 // Only what a tool's command prints is read, and what can't be read is said so, never made a status: Central Knot reads, keeps and
 // shows no token, credential file, cache or keychain entry; a sign-in it starts is the tool's own. The words each tool prints were measured on
@@ -336,28 +337,87 @@ export function cannotRun(checks: SigninChecks, home: HomeView, tool: HarnessId)
 const shellWord = (text: string) => (/^[A-Za-z0-9._:/@-]+$/.test(text) ? text : `'${text.replaceAll("'", "'\\''")}'`);
 /**
  * Each tool's own command that signs in to one server (Copilot CLI's is typed inside a session: IN_SESSION). Codex's ends its
- * options with `--`, so a server's name that begins with a dash is never taken for one (its `--help` ends with exit 0); the
- * other three, only copied, are left as their tools take them.
+ * options with `--`, so a server's name that begins with a dash is never taken for one (its `--help` ends with exit 0). Pi's and
+ * OpenCode's are run as their tools take them (Pi takes a `--help` or `-h` anywhere for its help, `--` or not, so its sign-in
+ * is read from its own words: SAYS_IT); Claude Code's is copied only.
  */
 const SIGN_IN: Partial<Record<HarnessId, string[]>> = { 'claude-cli': ['claude', 'mcp', 'login'], 'codex-cli': ['codex', 'mcp', 'login', '--'], 'pi-cli': ['pi', 'mcp', 'login'], 'opencode-cli': ['opencode', 'mcp', 'auth'] };
 /** The command to copy or name, as a shell takes it, the server one shell word. */
 export const signInCommand = (tool: HarnessId, server: string) => (SIGN_IN[tool] ? [...SIGN_IN[tool]!, shellWord(server)].join(' ') : undefined);
-/** The same command's arguments after its binary, as a sign-in runs them (mcpsigninrun.ts startSignin): the server one argument whatever it holds. */
-export const signInArgs = (tool: HarnessId, server: string) => (SIGN_IN[tool] ? [...SIGN_IN[tool]!.slice(1), server] : undefined);
-
 /** How long a sign-in started here waits for its tool to end, the browser's part in it included, before it is stopped. */
 export const SIGNIN_LIMIT_MS = 180_000;
+/** What a sign-in's run gives a tool after the server's name, and its Copy doesn't: Pi waits for the browser that long, as Central Knot does. */
+const RUN_ALSO: Partial<Record<HarnessId, string[]>> = { 'pi-cli': ['--timeout', String(SIGNIN_LIMIT_MS / 1000)] };
+/** The same command's arguments after its binary, as a sign-in runs them (mcpsigninrun.ts startSignin): the server one argument whatever it holds. */
+export const signInArgs = (tool: HarnessId, server: string) => (SIGN_IN[tool] ? [...SIGN_IN[tool]!.slice(1), server, ...(RUN_ALSO[tool] ?? [])] : undefined);
+
+/**
+ * Where Central Knot starts each tool's sign-in on a click, by platform (process.platform's names), said here alone; elsewhere,
+ * and in every other tool, the cell keeps its Copy. Each opens the browser itself and needs no terminal: Codex (measured on
+ * Linux, Codex 0.172.0; offered on macOS too, where it is owed a measure before a release); Pi and OpenCode, on Linux alone (read
+ * in their code; who owns the browser they open on macOS isn't measured, and their sign-in on Linux is owed a measure with a
+ * real opener before a release). None on Windows.
+ */
+const STARTS_SIGNIN: Partial<Record<HarnessId, (platform: string) => boolean>> = {
+  'codex-cli': platform => platform !== 'win32', 'pi-cli': platform => platform === 'linux', 'opencode-cli': platform => platform === 'linux',
+};
 /**
  * Whether a cell of `tool` offers Sign in, on `platform`, in a home that is this computer's own and one Central Knot may write
- * (`here`: not the Practice copy, another folder or a home it may only preview, as share.ts writeAccess says): Codex's, which opens
- * the browser itself and needs no terminal (measured on Linux, Codex 0.172.0; offered on macOS too, where it is owed a measure
- * before a release); not on Windows, where the cell keeps its Copy. Main refuses a start by it too (mcpsigninrun.ts signinRefusal).
+ * (`here`: not the Practice copy, another folder or a home it may only preview, as share.ts writeAccess says), as STARTS_SIGNIN
+ * says. Main refuses a start by it too (mcpsigninrun.ts signinRefusal).
  */
-export const offersSignin = (tool: HarnessId, here: boolean, platform: string) => tool === 'codex-cli' && here && platform !== 'win32';
+export const offersSignin = (tool: HarnessId, here: boolean, platform: string) => here && !!STARTS_SIGNIN[tool]?.(platform);
+
+const address = (text: string) => { try { return new URL(text); } catch { return undefined; } };
+/** Whether `tool`'s sign-in listens on a port of its own for the browser's answer, the server's own (callbackPort): OpenCode's alone. */
+export const hasOwnPort = (tool: HarnessId) => tool === 'opencode-cli';
+/**
+ * The port OpenCode's sign-in for a server listens on for the browser's answer, from what its entry holds besides the server
+ * (`extras`, as mcp.ts reads it): as OpenCode 1.19.6 takes it (read in its code), the port of the entry's `oauth.redirectUri`
+ * (its scheme's where it names none), else its `oauth.callbackPort`, else 19876.
+ */
+export function callbackPort(extras: Record<string, unknown> | undefined): number {
+  const oauth = record(extras?.oauth), redirect = typeof oauth?.redirectUri === 'string' ? address(oauth.redirectUri) : undefined;
+  if (redirect) return redirect.port ? Number(redirect.port) : redirect.protocol === 'https:' ? 443 : 80;
+  return typeof oauth?.callbackPort === 'number' ? oauth.callbackPort : 19876;
+}
+/**
+ * Where a tool's exit code alone doesn't say it signed in, the line that does, as its tool prints it (its colours left out),
+ * whole: Pi 1.7.0 ends 0 after its help where a server's name is `--help` or `-h`; OpenCode 1.19.6 ends 0 and `└  Done` whether
+ * it signed in or not, and says why not on its last line marked an error, its `Authentication failed` aside (`failed`; read
+ * in their code).
+ */
+const SAYS_IT: Partial<Record<HarnessId, { signedIn: RegExp; failed?: RegExp }>> = {
+  'pi-cli': { signedIn: /^(?:Already s|S)igned in to MCP server "/ },
+  'opencode-cli': { signedIn: /^◇\s+Authentication successful!$/, failed: /^[■▲]\s+(?!Authentication failed$)(.+)$/ },
+};
+/**
+ * The words of a reason a tool gave, each address in them taken out with the space before it, up to the punctuation that ends
+ * it (nothing left where it was all address): the page is never given an address a tool printed.
+ */
+const withoutAddress = (line: string) => line.replace(/\s*[a-z][a-z0-9+.-]*:\/\/\S+?(?=[,.;:)]*(?:\s|$))/gi, '').trim();
+/**
+ * How a sign-in ended, its tool having ended with `code` after printing `said` (both streams, by arrival): Signed in on exit 0
+ * and its own line where it has one (SAYS_IT), first; else, where its tool listens on a port of its own (`port`) and said that
+ * port was in use (EADDRINUSE), that; else why: Codex's last line (lastSaid), Pi's and OpenCode's line that says why, or their
+ * last line, its address taken out (withoutAddress).
+ */
+export function signinEnd(tool: HarnessId, code: number | 'timeout' | 'missing', said: string, port?: number): SigninEnd {
+  const own = SAYS_IT[tool], plain = lines(said.replace(COLOUR, '')).map(line => line.trim());
+  if (code === 0 && (!own || plain.some(line => own.signedIn.test(line)))) return { signedIn: true };
+  if (port !== undefined && plain.some(line => line.includes('EADDRINUSE'))) return { portInUse: port };
+  if (!own) return { unfinished: lastSaid(said) };
+  const why = (own.failed && plain.flatMap(line => own.failed!.exec(line)?.[1] ?? []).at(-1)) || lastSaid(said);
+  return { unfinished: cut(withoutAddress(why)) };
+}
+/** What a sign-in's end says behind its (?): the line its tool said why, or whose its port in use is and what to do. */
+const endWhy = (tool: HarnessId, end: Exclude<SigninEnd, { signedIn: true }>) => ('unfinished' in end ? end.unfinished
+  : 'portInUse' in end ? `${toolNames[tool]}’s sign-in listens on this port. Close what holds it, then Try again.` : undefined) || undefined;
 /** A sign-in's end in a cell's words, after its tool ended or was stopped, or main started nothing. */
 function endWords(tool: HarnessId, end: Exclude<SigninEnd, { signedIn: true }>): string {
   if ('notStarted' in end) return end.notStarted;
   if ('unfinished' in end) return 'Sign-in didn’t finish';
+  if ('portInUse' in end) return `Port ${end.portInUse} is in use`;
   return { timeout: `Not finished in ${SIGNIN_LIMIT_MS / 60_000} minutes`, stopped: 'Stopped', missing: `No ${toolNames[tool]} command line here` }[end.failed];
 }
 /**
@@ -380,7 +440,7 @@ export function cellNow(checks: SigninChecks, tool: HarnessId, row: SigninRow, o
     return said.command && offers ? { words: said.words, tone: said.tone, act: { label: 'Sign in', runs: said.command }, heed: true, need: true } : said;
   }
   if ('signedIn' in run.end) return { words: `Signed in ${timeOrDay(run.at!)}`, need: false };
-  const command = signInCommand(tool, cell.name!)!;
-  return { words: endWords(tool, run.end), tone: 'warning', ...('unfinished' in run.end && run.end.unfinished ? { why: run.end.unfinished } : {}), command,
-    act: { label: 'Try again', runs: command }, heed: true, need: true };
+  // The port's cell has nothing to copy: its command run in a terminal meets the same port.
+  const command = signInCommand(tool, cell.name!)!, why = endWhy(tool, run.end);
+  return { words: endWords(tool, run.end), tone: 'warning', ...(why ? { why } : {}), ...('portInUse' in run.end ? {} : { command }), act: { label: 'Try again', runs: command }, heed: true, need: true };
 }

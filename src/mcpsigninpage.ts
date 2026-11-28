@@ -49,7 +49,7 @@ async function checkColumns(tools: HarnessId[], whole = false) {
 }
 
 /** Why every Sign in waits: one is under way (one at a time: mcpsigninrun.ts startSignin). */
-const signingIn = () => (Object.values(state.mcpSignin.signins ?? {}).some(run => !run.end) ? 'Another sign-in is under way: finish or stop it first' : false);
+const signingIn = () => (Object.values(state.mcpSignin.signins ?? {}).some(run => !run.end) ? 'Another sign-in is waiting: finish or stop it first' : false);
 /**
  * Starts `tool`'s own sign-in for `row`'s server (main.ts mcp-signin:start → mcpsigninrun.ts startSignin, given the row and the
  * copy the cell shows, never a name, command or path) and keeps it, with how it ended and when, in the checks of the home it was
@@ -129,9 +129,11 @@ function cellView(tool: HarnessId, row: SigninRow, mark: Mark, offers: boolean) 
   const shown = says.line ?? (says.act ? undefined : says.command);
   const id = `${tool}-${row.id}`;
   const copy = says.command ? copyButton(says.command, says.command, `signin-copy-${id}`, says.act ? 'Copy command' : 'Copy', 'Copied: run it in a terminal') : null;
-  // A sign-in's button, with Copy where it has one, on a line of their own under the words; else Copy beside the words.
-  return h(`td.signin-cell${says.tone ? `.tone-${says.tone}` : ''}`, { id: `signin-cell-${id}`, title: says.title },
-    h('span.signin-words', { 'data-info-block': '' }, says.words === SAID.connected ? keep(says.words, mark('connected'))
+  // A sign-in's button, with Copy where it has one, on a line of their own under the words; else Copy beside the words. A card
+  // opens below the words (dom.ts infoMark data-info-block), a reason's below the whole cell, clear of its Try again.
+  const block = { 'data-info-block': '' };
+  return h(`td.signin-cell${says.tone ? `.tone-${says.tone}` : ''}`, { id: `signin-cell-${id}`, title: says.title, ...(says.why ? block : {}) },
+    h('span.signin-words', says.why ? {} : block, says.words === SAID.connected ? keep(says.words, mark('connected'))
       : says.why ? keep(says.words, infoMark(`signin-why-${id}`, `what ${toolNames[tool]} said`, says.why)) : says.words, says.act ? null : copy),
     says.act ? h('span.signin-acts', {}, actButton(tool, row, says.act, `signin-act-${id}`), copy) : null,
     shown ? h('code.signin-command', {}, shown) : null);
