@@ -2055,6 +2055,8 @@ async function backgroundRefresh() {
     if (!view) return;
     // A tool appeared or went away: the page leaves a kind no longer here and reads its own data again (setHome).
     setHome(view, { background: true });
+    // While Settings holds a switch-on Undo band, keep History current so take-in lines know what Undo still takes back.
+    if (state.page === 'settings' && state.outcome?.page === 'settings' && state.outcome.everythingUndo) await putHistory().catch(() => undefined);
     rerender();
   } finally {
     refreshing = false;

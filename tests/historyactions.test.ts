@@ -228,6 +228,10 @@ test('A switch-on, a switch-off and an Undo say what they did; the Undo’s entr
   // An Undo an earlier build recorded, which left in a server found in Claude Code (LeftIn `claude-code`), still says so.
   const undo = rule('undo', false, { everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['gone'], left: [{ item: 'docs', why: 'claude-code' }], keptIn: [] } } });
   assert.equal(everythingSentence(undo).text, 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: docs (found in Claude Code: no Undo).');
+  const twoUndone = rule('undo2', false, { everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['gone', 'gone2'], left: [], keptIn: [] } } });
+  assert.equal(everythingSentence(twoUndone).text, 'Undone: switched off, and 2 items it took in are out of Central Knot again, each tool they were found in keeping its own.');
+  assert.equal(everythingAction(rule('on', true), [rule('on', true), ruleTook('t1'), ruleTook('t2')], about())?.help,
+    'Switch Synchronize everything off and take back the 2 items it took in since, each tool they were found in keeping its own');
   assert.deepEqual(everythingAction(undo, [deleted, undo], about(item({ deleted: { at } }))), { label: 'Restore', help: 'Switch Synchronize everything on again and put back the 1 item this took out of Central Knot, which the switch-on’s Undo then takes back again' });
   assert.equal(everythingAction(undo, [deleted, undo], about(item())), undefined, 'added again since: nothing to restore');
   // Added again, edited and deleted since the Undo: its own Restore is offered, but the Undo's Restore passes it over.

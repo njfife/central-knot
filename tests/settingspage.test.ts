@@ -149,10 +149,10 @@ test('Update plugins automatically card says its schedule only while true and ch
   assert.equal(await setPrefs({ pluginUpdates: false, tray: false }),
     'When on, checks every four hours (soon after opening when one is due) while this window stays open. A plugin you turned off stays off.');
 
-  // Automatic sync off: when on, paused; when off, explains what turning it on would do and that it waits while Automatic sync is off.
+  // Automatic sync off: when on, the page already shows the paused line so the card says only what stays off; when off, the card says it waits while Automatic sync is off.
   pluginUpdates.view = { on: true, paused: true, checking: false, updated: [], failed: [], first: true };
   assert.equal(await setPrefs({ pluginUpdates: true, tray: true }),
-    'Paused while Automatic sync is off. A plugin you turned off stays off.');
+    'A plugin you turned off stays off.');
   assert.equal(await setPrefs({ pluginUpdates: false, tray: true }),
     'When on, checks every four hours (soon after opening when one is due), window closed too. It waits while Automatic sync is off. A plugin you turned off stays off.');
   assert.equal(await setPrefs({ pluginUpdates: false, tray: false }),
@@ -160,7 +160,7 @@ test('Update plugins automatically card says its schedule only while true and ch
   pluginUpdates.view = undefined;
   state.home = makeHome({ syncOn: false });
   assert.equal(await setPrefs({ pluginUpdates: true, tray: true }),
-    'Paused while Automatic sync is off. A plugin you turned off stays off.');
+    'A plugin you turned off stays off.');
 
   state.home = makeHome();
   settings = { ...settings, pluginUpdates: true, tray: true };
@@ -193,10 +193,10 @@ test('Synchronize everything shows the switch difference on the page', () => {
   assert.equal(findById(rendered, 'sync-everything-on')?.attrs['aria-describedby'],
     'setting-sync-everything-info-card setting-sync-everything-hint setting-sync-everything-notice');
   assert.equal(textOf(findById(rendered, 'setting-sync-everything-info-card')),
-    'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice. Automatic sync in the status bar keeps items already in Central Knot in step.');
+    'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice.');
 });
 
-test('Synchronize everything agrees on managed tools and singular/plural taken-out wording', () => {
+test('Synchronize everything agrees on managed tools and puts not-added-again first after Undo', () => {
   state.outcome = undefined;
   state.history.data = undefined;
   state.dismissed.clear();
@@ -205,15 +205,21 @@ test('Synchronize everything agrees on managed tools and singular/plural taken-o
   });
   draw();
   assert.equal(textOf(findById(rendered, 'setting-sync-everything-notice')),
-    'Turning it on puts the 1 item found in your tools into every tool Central Knot manages now. 1 found item was taken out of Central Knot and isn’t added by itself again: Add on its row in the Library, or Restore in History, brings it back. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
+    'Turning it on puts the 1 item found in your tools into every tool Central Knot manages now. 1 found item isn’t added by itself again (taken out of Central Knot). Add on its row in the Library, or Restore in History, brings it back. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
 
-  // Plural taken out agrees on "their rows" and "brings them back".
+  // After Undo (nothing ready to add, 2 taken out, 1 waiting): leads directly with not added again by themselves.
   state.home = makeHome({
     skills: { ...emptyKind(), items: [deletedFact('old-one'), deletedFact('old-two'), waitingFact('review')] },
   });
   draw();
   assert.equal(textOf(findById(rendered, 'setting-sync-everything-notice')),
-    'Nothing found in your tools now would be added. 2 found items were taken out of Central Knot and aren’t added by themselves again: Add on their rows in the Library, or Restore in History, brings them back. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
+    '2 found items aren’t added by themselves again (taken out of Central Knot). Add on their rows in the Library, or Restore in History, brings them back. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
+
+  // With nothing found at all while off, still says nothing would be added.
+  state.home = makeHome();
+  draw();
+  assert.equal(textOf(findById(rendered, 'setting-sync-everything-notice')),
+    'Nothing found in your tools now would be added.');
 });
 
 test('Synchronize everything puts what was taken in before what waits with Choose copies last', () => {
@@ -236,42 +242,86 @@ test('Synchronize everything puts what was taken in before what waits with Choos
     'Automatic sync is off, so it takes items in at Sync once. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
 });
 
-test('Synchronize everything drops History only on take-in lines covered by the band’s Undo', () => {
-  const oldNotice = { kind: 'taken-in', items: ['early'], from: ['claude-cli'], history: 'take-early', histories: ['take-early'] };
-  const newNotice = { kind: 'taken-in', items: ['notes'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes'] };
-  const bgNotice = { kind: 'taken-in', items: ['fresh'], from: ['claude-cli'], history: 'take-fresh', histories: ['take-fresh'] };
+test('Synchronize everything drops History only on take-in lines the band’s Undo takes back as items stand now', () => {
+  const oldNotice = { kind: 'taken-in' as const, items: ['early'], from: ['claude-cli' as const], history: 'take-early', histories: ['take-early'] };
+  const notesNotice = { kind: 'taken-in' as const, items: ['notes'], from: ['claude-cli' as const], history: 'take-notes', histories: ['take-notes'] };
+  const editedNotice = { kind: 'taken-in' as const, items: ['edited'], from: ['claude-cli' as const], history: 'take-edited', histories: ['take-edited'] };
+  const mcpNotice = { kind: 'taken-in' as const, items: ['files'], from: ['codex-cli' as const], history: 'take-files', histories: ['take-files'] };
+  const live = (key: string, hash = 'v1') => ({
+    key, name: key, on: true, hash, except: [], versions: [{ hash, at: '2026-11-27T19:00:00Z', from: { how: 'found', harness: 'claude-cli' } }],
+    applied: { 'claude-cli': hash, 'codex-cli': hash },
+  });
+  const ev = (id: string, kind: HistoryEvent['kind'], extra: Partial<HistoryEvent> = {}) =>
+    ({ id, at: '2026-11-27T19:00:00Z', kind, item: id, key: id, losers: [], ...extra }) as HistoryEvent;
+  const takeEv = (id: string, of: 'skill' | 'mcp', key: string, tool: 'claude-cli' | 'codex-cli') => ev(id, 'on', {
+    of, key: of === 'mcp' ? `mcp:${key}` : key, item: key, cause: 'sync-everything', version: 'v1', winner: { tool, hash: 'v1' },
+    tookFrom: [{ tool, hash: 'v1' }], foundIn: [tool],
+  });
+  const addedLines = () => (findById(rendered, 'setting-sync-everything')?.querySelector('.setting-added')?.children ?? [])
+    .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
+
   state.dismissed.clear();
   state.home = makeHome({
     sync: { managed: ['claude-cli', 'codex-cli'], present: ['claude-cli', 'codex-cli'], leftOut: [], access: { allowed: true }, gate: { state: 'ready' }, syncEverything: true, caughtUp: [] },
-    skills: { ...emptyKind(), notices: [oldNotice, newNotice] },
-    mcp: { ...emptyKind(), notices: [bgNotice] },
+    skills: {
+      ...emptyKind(),
+      library: { early: live('early'), notes: live('notes'), edited: live('edited') },
+      notices: [oldNotice, notesNotice, editedNotice],
+    },
+    mcp: { ...emptyKind(), library: { files: live('files') }, notices: [mcpNotice] },
   });
 
-  // Turn on -> take-early -> close band -> turn off -> turn on again (sw2) -> take-notes (+ later background take-fresh):
-  // the new band's Undo covers take-notes and take-fresh, NOT take-early, so take-early keeps its History link.
-  const ev = (id: string, kind: HistoryEvent['kind'], extra: Partial<HistoryEvent> = {}) =>
-    ({ id, at: '2026-11-27T19:00:00Z', kind, item: id, key: id, ...extra }) as HistoryEvent;
+  // Switch on -> take-early -> off -> switch on again (sw2) -> take-notes, take-edited, take-files.
   state.history.data = [
     ev('sw1', 'everything', { everything: { ruleOn: true } }),
-    ev('take-early', 'on', { cause: 'sync-everything' }),
+    takeEv('take-early', 'skill', 'early', 'claude-cli'),
     ev('sw-off', 'everything', { everything: { ruleOn: false } }),
     ev('sw2', 'everything', { everything: { ruleOn: true } }),
-    ev('take-notes', 'on', { cause: 'sync-everything' }),
+    takeEv('take-notes', 'skill', 'notes', 'claude-cli'),
+    takeEv('take-edited', 'skill', 'edited', 'claude-cli'),
+    takeEv('take-files', 'mcp', 'files', 'codex-cli'),
   ];
-  state.outcome = { page: 'settings', band: true, settingsBand: true, everythingUndo: 'sw2', text: 'Synchronize everything is on.', act: { label: 'Undo', id: 'outcome-undo', run() {} } };
+  state.outcome = { page: 'settings', band: true, settingsBand: true, everythingUndo: 'sw2', text: 'Synchronize everything is on: it added 3 items.', act: { label: 'Undo', id: 'outcome-undo', run() {} } };
   draw();
-  const addedMessages = (findById(rendered, 'setting-sync-everything')?.querySelector('.setting-added')?.children ?? [])
-    .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
-  assert.deepEqual(addedMessages.map(textOf), [
-    'Synchronize everything took in 1 skill, found in Claude Code: early. History can undo it.History',
-    'Synchronize everything took in 1 skill, found in Claude Code: notes.',
-    'Synchronize everything took in 1 MCP server, found in Claude Code: fresh.',
+  assert.deepEqual(addedLines().map(textOf), [
+    'Added skill early from Claude Code. History can undo it.History',
+    'Added skill notes from Claude Code.',
+    'Added skill edited from Claude Code.',
+    'Added MCP server files from Codex.',
   ]);
-  assert.ok(addedMessages[0].querySelector('.text-action'), 'older take-in keeps History link');
-  assert.equal(addedMessages[1].querySelector('.text-action'), null, 'covered take-in drops History link');
-  assert.equal(addedMessages[2].querySelector('.text-action'), null, 'later background take-in drops History link');
+  assert.deepEqual(addedLines().map(line => !!line.querySelector('.text-action')), [true, false, false, false]);
+
+  // Edit `edited` in its tool while Settings stays open and sw2's band still stands: Undo would leave `edited` in,
+  // so `edited`'s surviving notice immediately shows History again while untouched `notes` and `files` still omit it.
+  state.home.skills.library.edited = live('edited', 'v2') as never;
+  draw();
+  assert.deepEqual(addedLines().map(textOf), [
+    'Added skill early from Claude Code. History can undo it.History',
+    'Added skill notes from Claude Code.',
+    'Added skill edited from Claude Code. History can undo it.History',
+    'Added MCP server files from Codex.',
+  ]);
+  assert.deepEqual(addedLines().map(line => !!line.querySelector('.text-action')), [true, false, true, false]);
+
+  // An un-synced edit on disk (pending change while library hash is still v1) also keeps History on that line.
+  state.home.skills.library.edited = live('edited', 'v1') as never;
+  state.home.skills.items = [{
+    key: 'edited', name: 'edited', description: '', copies: {}, except: [], cannot: {}, edited: ['claude-cli'],
+    plan: { takeIn: 'claude-cli', keep: [] },
+  }] as never;
+  draw();
+  assert.equal(!!addedLines()[2].querySelector('.text-action'), true, 'pending edit on disk restores History before pass runs');
+
+  // Multi-item notice: if even one item on it was changed since, the line keeps History.
+  state.home.skills.items = [];
+  state.home.skills.library.edited = live('edited', 'v2') as never;
+  state.home.skills.notices = [{ kind: 'taken-in', items: ['notes', 'edited'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes', 'take-edited'] }];
+  draw();
+  assert.equal(textOf(addedLines()[0]), 'Added 2 skills from Claude Code: notes and edited. History can undo each.History');
 
   // Dismissed band, Undo's own result, or another Settings band with id 'outcome-undo' but no everythingUndo: every line keeps History.
+  state.home.skills.library.edited = live('edited', 'v1') as never;
+  state.home.skills.notices = [oldNotice, notesNotice];
   for (const outcome of [
     undefined,
     { page: 'settings' as const, band: true, settingsBand: true, text: 'Undone: switched off.' },
@@ -279,10 +329,42 @@ test('Synchronize everything drops History only on take-in lines covered by the 
   ]) {
     state.outcome = outcome;
     draw();
-    const lines = (findById(rendered, 'setting-sync-everything')?.querySelector('.setting-added')?.children ?? [])
-      .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
+    const lines = addedLines();
     assert.ok(lines.every(line => /History can undo it\.History$/.test(textOf(line))), `expected History on all lines: ${lines.map(textOf).join(' | ')}`);
   }
+  state.outcome = undefined;
+  state.history.data = undefined;
+});
+
+test('editing a taken-in skill in its tool restores History on its line while the band’s Undo still stands', () => {
+  const live = (key: string, hash: string) => ({
+    key, name: key, on: true, hash, except: [], versions: [{ hash, at: '2026-11-27T19:00:00Z', from: { how: 'found', harness: 'claude-cli' } }],
+    applied: { 'claude-cli': hash, 'codex-cli': hash },
+  });
+  const ev = (id: string, kind: HistoryEvent['kind'], extra: Partial<HistoryEvent> = {}) =>
+    ({ id, at: '2026-11-27T19:00:00Z', kind, item: id, key: id, losers: [], ...extra }) as HistoryEvent;
+  state.dismissed.clear();
+  state.home = makeHome({
+    sync: { managed: ['claude-cli', 'codex-cli'], present: ['claude-cli', 'codex-cli'], leftOut: [], access: { allowed: true }, gate: { state: 'ready' }, syncEverything: true, caughtUp: [] },
+    skills: {
+      ...emptyKind(),
+      library: { notes: live('notes', 'v1'), edited: live('edited', 'v2') },
+      notices: [
+        { kind: 'taken-in', items: ['notes'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes'] },
+        { kind: 'taken-in', items: ['edited'], from: ['claude-cli'], history: 'take-edited', histories: ['take-edited'] },
+      ],
+    },
+  });
+  state.history.data = [
+    ev('sw', 'everything', { everything: { ruleOn: true } }),
+    ev('take-notes', 'on', { of: 'skill', key: 'notes', item: 'notes', cause: 'sync-everything', version: 'v1', winner: { tool: 'claude-cli', hash: 'v1' }, tookFrom: [{ tool: 'claude-cli', hash: 'v1' }], foundIn: ['claude-cli'] }),
+    ev('take-edited', 'on', { of: 'skill', key: 'edited', item: 'edited', cause: 'sync-everything', version: 'v1', winner: { tool: 'claude-cli', hash: 'v1' }, tookFrom: [{ tool: 'claude-cli', hash: 'v1' }], foundIn: ['claude-cli'] }),
+  ];
+  state.outcome = { page: 'settings', band: true, settingsBand: true, everythingUndo: 'sw', text: 'Synchronize everything is on: it added 2 items.', act: { label: 'Undo', id: 'outcome-undo', run() {} } };
+  draw();
+  const lines = (findById(rendered, 'setting-sync-everything')?.querySelector('.setting-added')?.children ?? [])
+    .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
+  assert.deepEqual(lines.map(line => !!line.querySelector('.text-action')), [false, true], 'untouched notes hides History while edited skill restores History');
   state.outcome = undefined;
   state.history.data = undefined;
 });

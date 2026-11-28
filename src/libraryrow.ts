@@ -773,13 +773,17 @@ export function sentences(words: RowWords) {
   }
 
   /**
-   * What Synchronize everything's notice says (types.ts TakenInNotice), on its page and in Settings: how many it took in and
-   * where it found them, their names, and (unless `withHistory` is false, as on Settings while the band holds Undo) that History can undo each.
+   * What Synchronize everything's notice says (types.ts TakenInNotice), on its page and in Settings: how many it added and
+   * where it found them, their names, and (unless `history` is false, as on Settings while the band holds Undo) that History
+   * can undo each. `lead: false` omits the repeated "Synchronize everything" lead under Settings' own row.
    */
-  function takenInWords(notice: Pick<TakenInNotice, 'items' | 'from' | 'settingsChanged'>, withHistory = true): string {
-    const count = notice.items.length, many = count === 1 ? noun : words.many;
-    const history = withHistory ? ` History can undo ${count === 1 ? 'it' : 'each'}.` : '';
-    return `Synchronize everything took in ${count} ${many}, found in ${andList(notice.from.map(toolName))}: ${andList(notice.items)}.${notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : ''}${history}`;
+  function takenInWords(notice: Pick<TakenInNotice, 'items' | 'from' | 'settingsChanged'>, options?: { history?: boolean; lead?: boolean }): string {
+    const { history = true, lead = true } = options ?? {};
+    const count = notice.items.length, from = andList(notice.from.map(toolName));
+    const what = lead ? `Synchronize everything took in ${count} ${count === 1 ? noun : words.many}, found in ${from}: ${andList(notice.items)}.`
+      : count === 1 ? `Added ${noun} ${notice.items[0]} from ${from}.` : `Added ${count} ${words.many} from ${from}: ${andList(notice.items)}.`;
+    const tail = history ? ` History can undo ${count === 1 ? 'it' : 'each'}.` : '';
+    return `${what}${notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : ''}${tail}`;
   }
 
   return { harnessLine, detailLine, placeTag, said, noticeWords, takenInWords };

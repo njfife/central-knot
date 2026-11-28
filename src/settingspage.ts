@@ -14,7 +14,8 @@ import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import { openWalkthrough } from './firstsetup.ts';
 import { whatYesDoes, takenOutEarlier } from './setupcounts.ts';
 import { plural } from './model.ts';
-import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, LogTail, PluginTextView, SignInPlace, TakenInNotice } from './types.ts';
+import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, LogTail, PluginTextView, SignInPlace } from './types.ts';
+import { entriesNow, everythingPlan } from './historyactions.ts';
 import { libraryWords, sentences } from './libraryrow.ts';
 import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
 import { checkNow, settingUpdateButton, unsavedWork, updates } from './updateview.ts';
@@ -439,10 +440,10 @@ async function choosePluginUpdates(on: boolean): Promise<void> {
   if (await save('plugin-updates', () => window.centralKnot.setPluginUpdates(on), kept)) announce(on ? 'Plugins are updated automatically from now on.' : 'Plugins are updated only when you choose Update.', true);
 }
 
-/** What the plugin-updates card says: only claims the four-hour schedule while true, and "window closed too" only with a tray. */
+/** What the plugin-updates card says: only claims the four-hour schedule while true, "window closed too" only with a tray, and never repeats the paused line on the page. */
 function pluginUpdatesCard(on: boolean, paused: boolean, hasTray: boolean): string {
   const staysOff = 'A plugin you turned off stays off.';
-  if (on && paused) return `Paused while Automatic sync is off. ${staysOff}`;
+  if (on && paused) return staysOff;
   const when = hasTray ? ', window closed too' : ' while this window stays open';
   const schedule = `every four hours (soon after opening when one is due)${when}.`;
   return `${on ? 'Checks' : 'When on, checks'} ${schedule}${paused ? ' It waits while Automatic sync is off.' : ''} ${staysOff}`;
@@ -526,19 +527,6 @@ function buildRow(): HTMLElement | null {
   return lines?.length ? settingRow('build', 'This build', lines.join(' '), h('span')) : null;
 }
 
-/** Whether the Settings band's switch-on Undo covers every item on `told` (historyactions.ts everythingPlan). */
-function bandCoversNotice(told: TakenInNotice, switchOnId: string | undefined): boolean {
-  const events = switchOnId ? state.history.data : undefined;
-  if (!events) return false;
-  const at = events.findIndex(entry => entry.id === switchOnId);
-  if (at < 0) return false;
-  const ids = told.histories?.length ? told.histories : [told.history];
-  const after = events.slice(at + 1), end = after.findIndex(entry => entry.kind === 'everything' && !entry.everything?.undo);
-  if (end >= 0) { const covered = new Set(after.slice(0, end).map(entry => entry.id)); return ids.every(id => covered.has(id)); }
-  const before = new Set(events.slice(0, at + 1).map(entry => entry.id));
-  return ids.every(id => !before.has(id));
-}
-
 /**
  * Synchronize everything, for the open home: what it does (in its card), and, while it is off, how many found items it would
  * add now; either way, how many found items wait for a choice of copy, with the way into first setup's walkthrough of them
@@ -551,20 +539,23 @@ function syncEverythingRow(): HTMLElement | null {
   const on = !!home.sync.syncEverything, cannot = whyReadOnly(home) ?? (home.sync.gate.state === 'needs-resume' ? home.sync.gate.reason : undefined);
   const { takes, choosing } = whatYesDoes(home);
   const waiting = choosing ? `${plural(choosing, 'found item')} ${choosing === 1 ? 'has' : 'have'} copies that differ and ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy.` : '';
-  const adds = !on ? (takes ? `Turning it on puts the ${plural(takes, 'item')} found in your tools into every tool Central Knot manages now.` : 'Nothing found in your tools now would be added.') : '';
-  const later = on && !home.syncOn ? 'Automatic sync is off, so it takes items in at Sync once.' : '';
-  // What it leaves for good, said beside what it would add: found items taken out of Central Knot.
+  // What it leaves for good, said first when nothing else would be added: found items taken out of Central Knot.
   const out = takenOutEarlier(home);
-  const takenOut = out === 1 ? '1 found item was taken out of Central Knot and isn’t added by itself again: Add on its row in the Library, or Restore in History, brings it back.'
-    : out ? `${out} found items were taken out of Central Knot and aren’t added by themselves again: Add on their rows in the Library, or Restore in History, brings them back.` : '';
+  const adds = !on ? (takes ? `Turning it on puts the ${plural(takes, 'item')} found in your tools into every tool Central Knot manages now.` : out ? '' : 'Nothing found in your tools now would be added.') : '';
+  const later = on && !home.syncOn ? 'Automatic sync is off, so it takes items in at Sync once.' : '';
+  const takenOut = out === 1 ? '1 found item isn’t added by itself again (taken out of Central Knot). Add on its row in the Library, or Restore in History, brings it back.'
+    : out ? `${out} found items aren’t added by themselves again (taken out of Central Knot). Add on their rows in the Library, or Restore in History, brings them back.` : '';
   const text = [adds, takenOut, later, waiting].filter(Boolean).join(' ');
   const notice: RowMessage | undefined = text ? { text, tone: 'info', action: choosing && !cannot ? { label: 'Choose copies', run: openWalkthrough } : undefined } : undefined;
   const undoEvent = state.outcome?.page === 'settings' ? state.outcome.everythingUndo : undefined;
-  // What it took in comes first; History stays off only on lines the standing band's Undo covers.
+  const switchOn = undoEvent ? state.history.data?.find(entry => entry.id === undoEvent) : undefined;
+  const takenBack = switchOn && state.history.data ? new Set(everythingPlan(switchOn, state.history.data, entriesNow(home)).takeBack.map(entry => entry.id)) : undefined;
+  // What it added comes first; History stays off only on lines the standing band's Undo actually takes back as items stand now.
   const added = (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => {
     if (told.kind !== 'taken-in' || state.dismissed.has(told.history)) return [];
-    const covered = bandCoversNotice(told, undoEvent);
-    return [messageLine({ text: sentences(libraryWords[kind]).takenInWords(told, !covered), tone: 'done', action: covered ? undefined : { label: 'History', run: () => showPage('history') } }, { id: `setting-sync-everything-added-${kind}` })];
+    const ids = told.histories?.length ? told.histories : [told.history];
+    const covered = !!takenBack && ids.every(id => takenBack.has(id));
+    return [messageLine({ text: sentences(libraryWords[kind]).takenInWords(told, { history: !covered, lead: false }), tone: 'done', action: covered ? undefined : { label: 'History', run: () => showPage('history') } }, { id: `setting-sync-everything-added-${kind}` })];
   }));
   const hint = cannot ?? 'Also adds what turns up in a tool; Automatic sync in the status bar keeps what’s already in Central Knot in step.';
   const described = [cannot ? null : infoCardId('setting-sync-everything-info'), 'setting-sync-everything-hint', notice && 'setting-sync-everything-notice'].filter(Boolean).join(' ');
@@ -572,8 +563,7 @@ function syncEverythingRow(): HTMLElement | null {
     toggle({ on, label: 'Synchronize everything', onchange: chosen => void switchSyncEverything(chosen), disabled: cannot || acting(), id: 'sync-everything-on',
       attrs: { 'aria-describedby': described, title: null } }),
     undefined, [added.length ? h('div.setting-added', {}, added) : null, notice ? messageLine(notice, { id: 'setting-sync-everything-notice', announce: false }) : null],
-    'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice. '
-      + 'Automatic sync in the status bar keeps items already in Central Knot in step.');
+    'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice.');
 }
 
 /** Shared end of the disclosure sentence that each keep-costs info card (Sessions and Settings) begins. */
