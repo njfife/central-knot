@@ -2,12 +2,15 @@
 // download-estimate hint and unread-count tails, plugin-update card truth, and Synchronize everything copy and History link.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { AppPreferences, HistoryEvent, HomeView, PluginTextView } from '../src/types.ts';
-import { findById, installDom, textOf, type FakeNode } from './domstub.ts';
+import type { AppPreferences, HistoryDays, HistoryEvent, HistoryWindowSaved, HomeView, PluginTextView } from '../src/types.ts';
+import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let onPluginText: ((view: PluginTextView) => void) | undefined;
 let rendered: FakeNode | undefined;
 let redraws = 0;
+let historyReads = 0;
+let saveHistoryImpl: (days: HistoryDays) => Promise<HistoryWindowSaved> = async days => ({ settings: { ...settings, historyDays: days }, pruned: 'done' });
+let historyEvents: HistoryEvent[] = [];
 
 let settings: AppPreferences = {
   appearance: 'system',
@@ -19,7 +22,9 @@ let settings: AppPreferences = {
 };
 
 const api = {
-  getSettings: async () => settings,
+  getSettings: async () => ({ ...settings }),
+  setHistoryDays: (days: HistoryDays) => saveHistoryImpl(days),
+  history: async () => { historyReads++; return { events: historyEvents, days: settings.historyDays }; },
   pluginText: async (): Promise<PluginTextView> => ({ read: 0, of: 0, elsewhere: 0, reading: false, on: true }),
   onPluginTextChanged: (listener: (view: PluginTextView) => void) => { onPluginText = listener; },
   onUpdatesChanged() {},
@@ -34,7 +39,7 @@ const api = {
 installDom(api, { byId: id => (rendered ? findById(rendered, id) ?? null : null) });
 
 const { setRenderer, state } = await import('../src/app.ts');
-const { loadSettings, settingsPage } = await import('../src/settingspage.ts');
+const { historyWindowControl, loadSettings, openHistoryWindow, settingsPage } = await import('../src/settingspage.ts');
 const { checkedWords, pluginUpdates } = await import('../src/pluginupdateview.ts');
 
 const emptyKind = () => ({ tools: ['claude-cli', 'codex-cli'], items: [], library: {}, access: { allowed: true }, gate: { state: 'ready' }, problems: [], notices: [], unread: [] });
@@ -367,4 +372,64 @@ test('editing a taken-in skill in its tool restores History on its line while th
   assert.deepEqual(lines.map(line => !!line.querySelector('.text-action')), [false, true], 'untouched notes hides History while edited skill restores History');
   state.outcome = undefined;
   state.history.data = undefined;
+});
+
+test('History and Settings share one Keep label and one-sentence shortening warning with icon beside text', () => {
+  draw();
+  const settingsLabel = textOf(findById(rendered, 'setting-history-title'));
+  const control = historyWindowControl() as unknown as FakeNode;
+  const historyLabel = textOf(findById(control, 'history-keep-label'));
+  assert.equal(historyLabel, 'Keep history for');
+  assert.equal(settingsLabel, historyLabel);
+
+  const select = findById(control, 'history-days') as unknown as { onchange?: (event: unknown) => void };
+  select.onchange?.({ target: { value: '7' } });
+  const withWarn = historyWindowControl() as unknown as FakeNode;
+  const question = findById(withWarn, 'setting-history-question');
+  assert.ok(question);
+  assert.equal(question.classList.contains('notice'), false);
+  const body = findNode(question, el => el.classList.contains('setting-confirm-body'));
+  assert.ok(body, 'icon and text share a non-wrapping body');
+  assert.equal(
+    textOf(findById(body, 'history-shorten-text')),
+    'In every home, History entries older than 7 days will be removed and can’t be restored.',
+  );
+  findById(withWarn, 'history-shorten-cancel')?.click();
+});
+
+test('a failed Keep save on History keeps prior History and shows a retryable error, and retry succeeds', async () => {
+  const keptEvent: HistoryEvent = { id: 'kept-1', at: new Date().toISOString(), key: 'notes', of: 'skill', item: 'notes', kind: 'on', cause: 'switch', losers: [], orderProved: true };
+  state.page = 'history';
+  state.history.data = [keptEvent];
+  state.history.state = 'ready';
+  historyEvents = [keptEvent];
+  openHistoryWindow();
+  setRenderer(() => { rendered = historyWindowControl() as unknown as FakeNode; });
+  rendered = historyWindowControl() as unknown as FakeNode;
+
+  saveHistoryImpl = async () => { throw new Error('EACCES: permission denied'); };
+  const select = findById(rendered, 'history-days') as unknown as { onchange?: (event: unknown) => void };
+  select.onchange?.({ target: { value: '90' } });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(state.history.data, [keptEvent]);
+  assert.equal(
+    textOf(findById(rendered, 'setting-history-message')),
+    'Couldn’t save: Central Knot can’t write its settings file. History is still kept for 30 days. Check the file’s permissions, then try again.',
+  );
+  assert.equal('disabled' in (findById(rendered, 'history-days')?.attrs ?? {}), false);
+
+  const readsBefore = historyReads;
+  saveHistoryImpl = async days => {
+    settings.historyDays = days;
+    return { settings: { ...settings }, pruned: 'failed' };
+  };
+  const retrySelect = findById(rendered, 'history-days') as unknown as { onchange?: (event: unknown) => void };
+  retrySelect.onchange?.({ target: { value: '7' } });
+  findById(rendered, 'history-shorten')?.click();
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(settings.historyDays, 7);
+  assert.equal(historyReads, readsBefore + 1);
+  assert.match(textOf(findById(rendered, 'setting-history-message')), /^Saved, but History before .+ couldn’t be removed\./);
 });
