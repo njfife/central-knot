@@ -3181,16 +3181,6 @@ async function practiceFlow() {
   // Copilot CLI and Codex do read the shared folder, so its skill is theirs; it goes again before the checks that count skills.
   rmSync(join(practice, '.agents'), { recursive: true, force: true });
   await a.click('#header-refresh');
-  // Watching: an edit on disk spreads with no click (an event prompts a read; polling is the fallback).
-  await openKind(a, 'skills');
-  writeFileSync(standupPath('copilot'), standupBefore.replace(/\n*$/, '\nEdited in Copilot, watched.\n'));
-  let watched = false;
-  for (let tries = 0; tries < 40 && !watched; tries++) { await wait(250); watched = readNow(standupPath('claude')).includes('watched'); }
-  check('a change on disk spreads on its own', watched);
-  // The page hears of it once the pass that spread it has told it, and it has read again.
-  const heard = async () => (await noticeInLines(a) ?? '').includes('standup was edited in Copilot CLI');
-  for (let tries = 0; tries < 50 && !(await heard()); tries++) await wait(100);
-  check('and the page hears about it without a click', await heard(), await a.text('#header'));
   // Only a missing event should use the deadline. Check each assertion once, after its prerequisite is observable.
   const waitFor = async (what, observed) => {
     const deadline = performance.now() + 60000;
@@ -3199,6 +3189,16 @@ async function practiceFlow() {
       await wait(50);
     }
   };
+  // Watching: an edit on disk spreads with no click (an event prompts a read; polling is the fallback).
+  await openKind(a, 'skills');
+  writeFileSync(standupPath('copilot'), standupBefore.replace(/\n*$/, '\nEdited in Copilot, watched.\n'));
+  const watched = () => readNow(standupPath('claude')).includes('watched');
+  await waitFor('the watched edit to spread to Claude Code', watched);
+  check('a change on disk spreads on its own', watched());
+  // The page hears of it once the pass that spread it has told it, and it has read again.
+  const heard = async () => (await noticeInLines(a) ?? '').includes('standup was edited in Copilot CLI');
+  await waitFor('the header notice for the watched Copilot edit', heard);
+  check('and the page hears about it without a click', await heard(), await a.text('#header'));
   // Deliver the same notification as main and wait until the renderer has received it, even while a read is held.
   if (main) await a.run(`window.ckSyncSignals = 0; centralKnot.onSyncChanged(() => { window.ckSyncSignals++; })`);
   const tellOfChange = async () => {
@@ -9227,7 +9227,7 @@ esac
   for (let tries = 0; tries < 50 && !(await a.exists(take)); tries++) await wait(100);
   const piBox = () => a.run(`document.querySelector('#pbox-0-issue-tracker-pi-cli')?.getAttribute('aria-checked')`);
   check('under Pi’s box: 1 of its 2 items, a part tick; triage his, said as a state, Use the plugin’s triage under it, and once what that keeps',
-    /1 of its 2 items is on in Pi\.\s*triage: you keep your own skill by that name, not the plugin’s\.\s*Use the plugin’s triage\s*Using the plugin’s keeps yours as a version, and your other tools keep their copies\./.test(await piLine() ?? '') && await piBox() === 'mixed', [await piLine(), await piBox()]);
+    /1 of its 2 items is on in Pi\. A click takes all 2 out\.\s*triage: you keep your own skill by that name, not the plugin’s\.\s*Use the plugin’s triage\s*Using the plugin’s keeps yours as a version, and your other tools keep their copies\./.test(await piLine() ?? '') && await piBox() === 'mixed', [await piLine(), await piBox()]);
   if (shots) for (const theme of ['light', 'dark']) {
     await a.run(`window.centralKnot.setAppearance('${theme}')`);
     for (const [width, height] of [SMALLEST, [1316, 819]]) { await sizeTo(a, width, height); await a.shot(`name-conflict-${theme}-${width}`); }
@@ -9253,7 +9253,7 @@ esac
   const box = tool => `#pbox-0-issue-tracker-${tool}`;
   const boxIs = tool => a.run(`(() => { const b = document.querySelector('${box(tool)}'); return b ? [b.getAttribute('aria-checked'), b.disabled, b.dataset.state] : null; })()`);
   for (let tries = 0; tries < 50 && !(await a.exists(box('pi-cli'))); tries++) await wait(100);
-  same('each tool’s box is ticked where it is, and says what a click does', [await boxIs('claude-cli'), await boxIs('pi-cli'), /Click to take issue-tracker’s items out of Pi: it stays out until you tick it again\./.test(await a.run(`document.querySelector('${box('pi-cli')}').title`) ?? '')],
+  same('each tool’s box is ticked where it is, and says what a click does', [await boxIs('claude-cli'), await boxIs('pi-cli'), /Click to take all of issue-tracker’s items out of Pi: it stays out until you tick it again\./.test(await a.run(`document.querySelector('${box('pi-cli')}').title`) ?? '')],
     [['true', false, 'installed'], ['mixed', false, 'items'], true]);
   await a.click(box('pi-cli'));
   await done();
@@ -9702,17 +9702,17 @@ async function foundOwnCopyPage() {
   const reasonsOf = tool => a.all(`.plugin-tool[data-tool="${tool}"] .plugin-tool-why`, 'e.textContent');
   const stateOf = tool => a.text(`.plugin-tool[data-tool="${tool}"] .plugin-tool-state:not(.plugin-tool-why)`);
   const buttonsOf = tool => a.all(`.plugin-tool[data-tool="${tool}"] button.btn`, 'e.textContent');
-  // Worked example 1 (one of two tools, some placed): OpenCode gets both items; Pi keeps its own tdd and offers one button to use the plugin's.
+  // Worked example 1 (one of two tools, some placed): OpenCode gets both items; Pi keeps its own tdd, and tdd's row offers one button to use the plugin's.
   await openAndTick('kit-own', 'opencode-cli', 'pi-cli');
   const ownBtn = '#pclash-0-kit-own-pi-cli-skill-tdd';
   const ownHover = await a.run(`document.querySelector(${JSON.stringify(ownBtn)})?.title ?? ''`);
-  same('one of two tools: OpenCode has both items with no clash button; Pi keeps its own tdd and offers Use the plugin’s tdd with kept-and-Undo hover',
+  same('one of two tools: OpenCode has both items with no clash button; Pi keeps its own tdd, nothing of it under Pi’s box, and tdd’s row offers Use the plugin’s with kept-and-Undo hover',
     [readNow(piTddPath), readNow(ocTddPath), readNow(join(home, '.pi/agent/skills/a/SKILL.md')),
       await stateOf('opencode-cli'), await buttonsOf('opencode-cli'),
       await stateOf('pi-cli'), await reasonsOf('pi-cli'), await buttonsOf('pi-cli'), await a.exists(ownBtn), ownHover],
     [piTddMine, pluginTdd, md('a', 'Plugin a.'), '2 of its 2 items are on in OpenCode.', [],
-      '1 of its 2 items is on in Pi.', ['tdd: Pi has its own copy.Use the plugin’s tdd'], ['Use the plugin’s tdd'], true,
-      'Puts the plugin’s tdd in Pi. Pi’s own copy is kept as a version, and Undo puts it back.']);
+      '1 of its 2 items is on in Pi. A click takes all 2 out.', [], [], true,
+      'Pi has its own copy of tdd. Puts the plugin’s in its place there; Pi’s copy is kept as a version, and Undo puts it back.']);
   if (shots) {
     for (const theme of ['light', 'dark']) {
       await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
@@ -9738,7 +9738,7 @@ async function foundOwnCopyPage() {
   const afterUndo = await a.run(`({ text: document.querySelector('#header [data-outcome] .band-text')?.textContent ?? '', warn: !!document.querySelector('#header [data-outcome].band-warn'), problems: [...document.querySelectorAll('#header .problem-line')].map(e => e.textContent) })`);
   same('header Undo puts Pi’s own tdd back byte for byte, leaves Claude Code and OpenCode untouched, names Pi only with no warning, and refreshes the box',
     [readNow(piTddPath), readNow(ocTddPath), existsSync(join(home, '.claude/skills/tdd')), await stateOf('pi-cli'), await a.exists(ownBtn), afterUndo],
-    [piTddMine, pluginTdd, false, '1 of its 2 items is on in Pi.', true, { text: 'tdd: kept out of Pi: Pi has its own copy back, as before. Central Knot keeps it.', warn: false, problems: [] }]);
+    [piTddMine, pluginTdd, false, '1 of its 2 items is on in Pi. A click takes all 2 out.', true, { text: 'tdd: kept out of Pi: Pi has its own copy back, as before. Central Knot keeps it.', warn: false, problems: [] }]);
   // Click again and undo from History: check History's own sentence and byte-exact restoration of Pi's copy.
   await a.click(ownBtn);
   await done();
@@ -9756,9 +9756,9 @@ async function foundOwnCopyPage() {
   // Worked example 1b (one tool alone, none placed): normal act + Undo, then all four stale-clash refusals (copy gone, turned Off, no longer kept out, no longer from source).
   await openAndTick('kit-only', 'pi-cli');
   const soloBtn = '#pclash-0-kit-only-pi-cli-skill-solo';
-  same('solo own copy: Pi’s box shows solo once with Use the plugin’s solo and no old redirect',
+  same('solo own copy: said once, on solo’s row with Use the plugin’s, nothing of it under Pi’s box',
     [readNow(piSoloPath), await reasonsOf('pi-cli'), await buttonsOf('pi-cli'), await a.exists(soloBtn)],
-    [piSoloMine, ['solo: Pi has its own copy.Use the plugin’s solo'], ['Use the plugin’s solo'], true]);
+    [piSoloMine, [], [], true]);
   await a.click(soloBtn);
   await done();
   same('solo Use the plugin’s solo puts the plugin’s solo in Pi and refreshes the box',
@@ -9819,8 +9819,8 @@ async function foundOwnCopyPage() {
       await stateOf('pi-cli'), await reasonsOf('pi-cli'), await buttonsOf('pi-cli'),
       await stateOf('opencode-cli'), await reasonsOf('opencode-cli'), await buttonsOf('opencode-cli')],
     [md('b', 'Plugin b.'), false, sharedMine,
-      '1 of its 2 items is on in Pi.', ['shared-tdd: Pi reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.'], [],
-      '1 of its 2 items is on in OpenCode.', ['shared-tdd: OpenCode reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.'], []]);
+      '1 of its 2 items is on in Pi. A click takes all 2 out.', ['shared-tdd: Pi reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.'], [],
+      '1 of its 2 items is on in OpenCode. A click takes all 2 out.', ['shared-tdd: OpenCode reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.'], []]);
   await a.click('#plugin-back');
   // Worked example 2 (Library item On, and Off): unchanged, Use the plugin's offered, no duplicate line.
   await openAndTick('kit-lib-on', 'pi-cli');
@@ -19446,7 +19446,10 @@ async function profilePluginsFlow() {
   // Plugin acts ending Work say "Work stopped being the profile in use." on Row 2 of #plugins-result (or under a Library plugin line) and in the spoken announcement.
   const spoken = () => a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`);
   const pluginProfile = () => a.run(`document.querySelector('#header .band-profile')?.textContent ?? ''`);
-  const waitEnabled = async sel => { for (let tries = 0; tries < 80 && !(await a.exists(`${sel}:not([disabled])`)); tries++) await wait(100); };
+  const waitEnabled = async sel => {
+    for (let tries = 0; tries < 80 && !(await a.exists(`${sel}:not([disabled])`)); tries++) await wait(100);
+    if (!(await a.exists(`${sel}:not([disabled])`))) throw new Error(`Waited for ${sel}: ${(await a.exists(sel)) ? 'drawn and disabled' : 'absent'}`);
+  };
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pbox-0-issue-tracker-codex-cli') || await a.exists('#popen-0-issue-tracker')); tries++) await wait(100);
   if (!(await a.exists('#pbox-0-issue-tracker-codex-cli'))) await a.click('#popen-0-issue-tracker');
@@ -19613,6 +19616,8 @@ async function profilePluginsFlow() {
   const recordPath = join(home, '.central-knot/plugins.json'), held = () => ({ ...files(), record: JSON.parse(readNow(recordPath)).plugins.find(each => each.plugin === 'issue-tracker') });
   const heldFiles = held(), bandSaid = async () => (await a.text('.profiles-page .band-done .band-text'))?.split('.')[0];
   let ran = runs();
+  // Refusing Work still returned a fresh HomeView (new readId), so Profiles re-reads the plugins view before restoring the press.
+  await waitEnabled('#profile-turn-on');
   await a.click('#profile-turn-on'); await done();
   same('pressed: one step, in Codex; its result and Undo in Profiles’ band; the header offers Switch', [held(), newRuns(ran), await bandSaid(), await a.exists('.profiles-page .band-done #outcome-undo'),
     await a.text('.profile-header p'), await a.exists('#profile-switch:not([disabled])')], [{ ...heldFiles, codex: ruleOff }, ['codex-cli'], 'Turned on issue-tracker in Codex', true, 'Switching turns 1 on', true]);
@@ -22784,7 +22789,11 @@ async function skillFileFlow() {
       await clickTab('plan.md');
       await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Claude plan for same-md-notes.'));
       await a.run(`(() => { const s = document.querySelector('.file-open-box .file-copy-select select'); s.value = '1'; s.dispatchEvent(new Event('change')); })()`);
-      await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/same-md-notes/SKILL.md'));
+      // The footer names the copy at once; its tabs come with its read.
+      if (!(await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/same-md-notes/SKILL.md')
+        && (await a.all('.file-open-box .file-tab', 'e.textContent.trim()')).includes('plan.md')))) {
+        throw new Error('Copilot CLI’s copy of same-md-notes did not load its plan.md tab');
+      }
       await clickTab('plan.md');
       await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot plan for same-md-notes.'));
       same('switching chooser on same-md-notes reads the other copy’s differing file', [
@@ -23651,10 +23660,234 @@ async function pluginPageSaysLessFlow() {
   await a.quit();
 }
 
+/**
+ * A plugin's items, switched one tool at a time on its own page (pluginpage.ts itemCells, itemSwitch; matrix.ts flipInHarness): placed in Pi
+ * by its box, two kept out of Pi by their switches (the box counts 1 of its 3, a dash), the header's Library sentence and Undo; one
+ * let into OpenCode, whose box is unticked, counted there; and where no switch stands, why: Pi's own settings, his own copy (also
+ * when it arrives behind the page, here and on the Library's own row, in the shared skills folder, and with Pi's box unticked),
+ * a copy gone by hand, a kind Antigravity holds none of, an Off line, a deleted one and one the plugin no longer has; and after a
+ * background refresh under the open page (as after a profile switched from the menu bar), each switch drawn from the home its click acts on.
+ */
+async function pluginItemSwitchesFlow() {
+  const home = join(scratch, 'home-item-switches'), data = join(scratch, 'item-switches-data'), market = join(scratch, 'market-item-switches');
+  const put = (path, content) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); };
+  const md = (name, body) => `---\nname: ${name}\ndescription: ${name}.\n---\n\n${body}\n`;
+  // As long as a skill's name may be (64), so at 860 with the sidebar open it can't fit whole beside its switches.
+  const long = 'a-skill-whose-name-runs-on-to-sixty-four-letters-the-longest-one';
+  put(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'ck-switch-market', plugins: [
+    { name: 'trio', source: './plugins/trio', version: '1.0.0' }, { name: 'pair', source: './plugins/pair', version: '1.0.0' }] }));
+  const polishMd = md('polish', 'Plugin polish.'), mineInPi = md('mine', 'My own mine in Pi.'), draftInPi = md('draft', 'My own draft, made later in Pi.');
+  put(join(market, 'plugins/trio/skills/draft/SKILL.md'), md('draft', 'Plugin draft.'));
+  put(join(market, 'plugins/trio/skills/polish/SKILL.md'), polishMd);
+  put(join(market, 'plugins/trio/.mcp.json'), JSON.stringify({ mcpServers: { relay: { command: 'npx', args: ['relay'] } } }));
+  put(join(market, 'plugins/pair/skills/mine/SKILL.md'), md('mine', 'Plugin mine.'));
+  put(join(market, `plugins/pair/skills/${long}/SKILL.md`), md(long, 'Long.'));
+  put(join(market, 'plugins/pair/agents/checker.md'), '---\nname: checker\ndescription: Checks.\n---\nCheck.\n');
+  put(join(home, '.pi/agent/skills/mine/SKILL.md'), mineInPi);
+  for (const [bin, ver] of [['claude', '2.1.322 (Claude Code)'], ['pi', 'pi 0.1.0'], ['opencode', 'opencode 1.19.5'], ['agy', '1.5.14']]) {
+    put(join(home, '.local/bin', bin), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${ver}" && exit 0\nexit 9\n`);
+    chmodSync(join(home, '.local/bin', bin), 0o755);
+  }
+  for (const dir of ['.claude', '.config/opencode', '.gemini/config']) mkdirSync(join(home, dir), { recursive: true });
+  put(join(data, 'marketplaces.json'), JSON.stringify([market]));
+  put(join(data, 'app-settings.json'), JSON.stringify({ home: canWriteRealHome ? { mode: 'actual' } : { mode: 'custom', path: home }, closeExplained: true }));
+  const a = await launch(data, [], home, { CK_TEST_HOME_ONLY: 'claude,pi,opencode,agy' });
+  const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const until = async fn => { for (let tries = 0; tries < 100 && !(await fn()); tries++) await wait(100); };
+  const sw = (plugin, tool, kind, key) => `#pitem-0-${plugin}-${tool}-${kind}-${key}`;
+  const switches = plugin => a.run(`[...document.querySelectorAll('.plugin-items-list [id^="pitem-0-${plugin}-"]')].map(e => e.id.replace('pitem-0-${plugin}-', '') + ' ' + e.getAttribute('aria-checked'))`);
+  const cell = (kind, key, tool) => a.run(`(() => { const row = document.querySelector('.plugin-items-list [data-key="${kind}:${key}"]'), at = [...document.querySelectorAll('.plugin-items-section .skill-switch-head')].findIndex(e => e.title === ${JSON.stringify(tool)});
+    const place = row?.querySelectorAll('.skill-switches > .skill-switch')[at]; return place ? [place.textContent, place.title || place.querySelector('.switch, button')?.title || ''] : null; })()`);
+  const words = (kind, key) => a.text(`.plugin-items-list [data-key="${kind}:${key}"] .plugin-outcome-what`);
+  const toolSays = tool => a.text(`.plugin-tool[data-tool="${tool}"] .plugin-tool-state`);
+  const header = () => a.text('#header [data-outcome] .band-text');
+  const refresh = async () => { await a.click('#header-refresh'); await done(); };
+  // History entries a click made since `before` (their ids): no cause, or the person's switch; a sync pass's own say why.
+  const entryIds = () => a.run('window.centralKnot.history().then(history => history.events.map(event => event.id))');
+  // Every file under the tools' folders and the shared skills folder, by its path, with its bytes; and History's entries.
+  const homeNow = async () => {
+    const files = {};
+    const walk = dir => { for (const each of readdirSync(dir, { withFileTypes: true })) { const path = join(dir, each.name); if (each.isDirectory()) walk(path); else files[path] = readFileSync(path, 'utf8'); } };
+    for (const dir of ['.pi', '.config/opencode', '.gemini', '.agents', '.claude']) if (existsSync(join(home, dir))) walk(join(home, dir));
+    return { files, history: await entryIds() };
+  };
+  // What a click changed (`before`: homeNow before it): the paths whose bytes differ as soon as its result is told, and History's new
+  // entries made by then (each its kind and cause). Sync's own pass on what changed outside (a debounce after it) comes later.
+  const changedSince = async before => {
+    const told = Date.now(), now = await homeNow();
+    const events = await a.run('window.centralKnot.history().then(history => history.events.map(event => [event.id, event.kind, event.cause ?? "", event.at]))');
+    const paths = [...new Set([...Object.keys(before.files), ...Object.keys(now.files)])].filter(path => before.files[path] !== now.files[path]);
+    const made = events.filter(([id, , , at]) => !before.history.includes(id) && Date.parse(at) <= told);
+    return { files: paths.map(path => path.slice(home.length + 1)), history: made.map(([, kind, cause]) => `${kind} ${cause}`.trim()) };
+  };
+  const clicksSince = async before => (await a.run('window.centralKnot.history().then(history => history.events.map(event => [event.id, event.cause ?? ""]))'))
+    .filter(([id, cause]) => !before.includes(id) && (!cause || cause === 'switch'));
+  // A picture with `place` in view (Its items: at 860 it is below the panel), the header's result above it, the pointer over `hover`.
+  const shot = async (name, [width, height], theme, place = '.plugin-items-section', hover) => { if (!shots) return; await a.run(`window.centralKnot.setAppearance('${theme}')`); await sizeTo(a, width, height);
+    await a.run(`document.querySelector('${place}')?.scrollIntoView({ block: 'end' })`);
+    if (hover) { const [x, y] = await a.run(`(() => { const r = document.querySelector('${hover}').getBoundingClientRect(); return [r.left + 40, r.top + r.height / 2]; })()`); await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }); }
+    await a.settle(); await a.shot(name); await fullSize(a); await a.run(`window.centralKnot.setAppearance('system')`); };
+  const openPage = async plugin => { if (await a.exists('#plugin-back')) await a.click('#plugin-back'); await until(() => a.exists(`#popen-0-${plugin}`)); await a.click(`#popen-0-${plugin}`); await until(() => a.exists(`#pbox-0-${plugin}-pi-cli`)); };
+
+  await a.click('#nav-plugins');
+  await openPage('trio');
+  same('before Pi’s box is ticked, no item has a switch', await switches('trio'), []);
+  await a.click('#pbox-0-trio-pi-cli');
+  await done();
+  await until(() => a.exists(sw('trio', 'pi-cli', 'skill', 'draft')));
+  same('Pi’s box ticked: each item has a switch per tool under the tools’ marks, on in Pi, kept out of OpenCode and Antigravity, no words for it; its hover is the Library row’s',
+    [await a.all('.plugin-items-section .skill-switch-head', 'e.title'), await switches('trio'), await a.all('.plugin-items-list .plugin-outcome-what', 'e.textContent'), (await cell('skill', 'draft', 'Pi'))[1]],
+    [['Pi', 'OpenCode', 'Antigravity'], ['pi-cli-skill-draft true', 'opencode-cli-skill-draft false', 'antigravity-cli-skill-draft false', 'pi-cli-skill-polish true', 'opencode-cli-skill-polish false',
+      'antigravity-cli-skill-polish false', 'pi-cli-mcp-relay true', 'opencode-cli-mcp-relay false', 'antigravity-cli-mcp-relay false'], ['', '', ''],
+      'draft in Pi: on. Click to keep it out of Pi: its copy there goes, and Central Knot keeps it.']);
+  check('a switch is a target 24px tall: 2px above its drawing is still the switch', await a.run(`(() => { const s = document.querySelector('${sw('trio', 'pi-cli', 'skill', 'draft')}'), r = s.getBoundingClientRect();
+    return r.height === 18 && document.elementFromPoint(r.left + r.width / 2, r.top - 2) === s && document.elementFromPoint(r.left + r.width / 2, r.bottom + 2) === s; })()`));
+  await shot('item-switches-light-860', SMALLEST, 'light');
+  await shot('item-switches-dark-1316', [1316, 819], 'dark', '.plugin-items-section', '.plugin-items-list [data-key="skill:polish"]');
+  await fitsAtMinimum(a, 'a plugin’s page with its items’ switches');
+  // Two siblings kept out of Pi on the page: each the Library row's act and sentence, with Undo; the box counts what is left.
+  await a.click(sw('trio', 'pi-cli', 'skill', 'draft'));
+  await done();
+  same('draft kept out of Pi: its copy goes, the header says the Library switch’s sentence with Undo, its switch is off, the box a dash at 2 of its 3',
+    [existsSync(join(home, '.pi/agent/skills/draft')), await header(), await a.exists('#outcome-undo'), await a.run(`document.querySelector('${sw('trio', 'pi-cli', 'skill', 'draft')}').getAttribute('aria-checked')`),
+      await a.run(`document.querySelector('#pbox-0-trio-pi-cli').getAttribute('aria-checked')`), await toolSays('pi-cli')],
+    [false, 'draft is kept out of Pi. Central Knot keeps its folder for when you turn it on there.', true, 'false', 'mixed', '2 of its 3 items are on in Pi. A click takes all 3 out.']);
+  await shot('item-switches-result-light-860', SMALLEST, 'light');
+  await a.click(sw('trio', 'pi-cli', 'skill', 'polish'));
+  await done();
+  same('polish kept out too: the box says 1 of its 3, and relay alone is in Pi', [existsSync(join(home, '.pi/agent/skills/polish')), await toolSays('pi-cli'), Object.keys(JSON.parse(readNow(join(home, '.pi/agent/mcp.json')) || '{}').mcpServers ?? {})],
+    [false, '1 of its 3 items is on in Pi. A click takes all 3 out.', ['relay']]);
+  await a.click('#outcome-undo');
+  await done();
+  same('the header’s Undo puts polish back in Pi byte for byte, draft still out', [readNow(join(home, '.pi/agent/skills/polish/SKILL.md')), existsSync(join(home, '.pi/agent/skills/draft')), await toolSays('pi-cli')], [polishMd, false, '2 of its 3 items are on in Pi. A click takes all 3 out.']);
+  // relay let into OpenCode, whose box stays unticked: its line counts it, as a ticked box's does.
+  await a.click(sw('trio', 'opencode-cli', 'mcp', 'relay'));
+  await done();
+  same('relay in OpenCode with its box unticked: the line under the box counts it, and the box is a dash, never a full tick', [await toolSays('opencode-cli'), await a.run(`document.querySelector('#pbox-0-trio-opencode-cli').getAttribute('aria-checked')`),
+    (readNow(join(home, '.config/opencode/opencode.json')) || readNow(join(home, '.config/opencode/opencode.jsonc'))).includes('relay')], ['1 of its 3 items is on in OpenCode. A click takes all 3 out.', 'mixed', true]);
+  await shot('item-switches-one-in-light-860', SMALLEST, 'light', '.plugin-panel');
+  await a.click('#outcome-undo');
+  await done();
+  // Pi's own settings keep polish off: the Library's word in its place, no switch.
+  const piSettings = join(home, '.pi/agent/settings.json'), settingsBefore = readNow(piSettings);
+  put(piSettings, JSON.stringify({ ...JSON.parse(settingsBefore || '{}'), skills: ['-skills/polish/SKILL.md'] }));
+  await refresh();
+  same('Pi’s own settings keep polish off: said in its place, why on hover, and no switch', [await cell('skill', 'polish', 'Pi'), await a.exists(sw('trio', 'pi-cli', 'skill', 'polish'))],
+    [['Off in Pi’s settings', 'Pi’s own settings keep polish off.'], false]);
+  await shot('item-switches-switched-off-light-860', SMALLEST, 'light');
+  if (settingsBefore) put(piSettings, settingsBefore); else rmSync(piSettings);
+  await refresh();
+  // A copy of his own named draft arrives in Pi behind the page: draft's switch there, drawn before, is refused; his copy stays.
+  put(join(home, '.pi/agent/skills/draft/SKILL.md'), draftInPi);
+  await a.click(sw('trio', 'pi-cli', 'skill', 'draft'));
+  await done();
+  // The refusal is said from the home alone: its place says his copy is there; Use the plugin's comes with the page's next read of its plugins.
+  same('a switch over a copy of his that came behind the page is refused; his copy byte for byte; then his copy is said once, in its place',
+    [await header(), readNow(join(home, '.pi/agent/skills/draft/SKILL.md')), await a.exists(sw('trio', 'pi-cli', 'skill', 'draft')), (await cell('skill', 'draft', 'Pi'))?.[0], await words('skill', 'draft')],
+    ['draft changed since the page was read. Nothing was changed.', draftInPi, false, 'Its own copy', '']);
+  // The Library's own row, by the same rule: polish kept out of Pi there and let into OpenCode, then a copy of his named polish comes
+  // in the shared skills folder behind the page. The refused click looks at the home and runs no pass: nothing anywhere changes.
+  await openKind(a, 'skills');
+  const libSwitch = tool => `#${rowPart('enable', 'skills', 'polish', tool)}`, polishShared = md('polish', 'My own polish, in the shared skills folder.');
+  if (await a.run(`document.querySelector('#${rowPart('open', 'skills', 'polish')}')?.getAttribute('aria-expanded')`) !== 'true') await a.click(`#${rowPart('open', 'skills', 'polish')}`);
+  await until(() => a.exists(libSwitch('pi-cli')));
+  for (const tool of ['pi-cli', 'opencode-cli']) { await a.click(libSwitch(tool)); await done(); }
+  put(join(home, '.agents/skills/polish/SKILL.md'), polishShared);
+  const beforeLibrary = await homeNow();
+  await a.click(libSwitch('pi-cli'));
+  await done();
+  same('on the Library’s row too, its Pi switch drawn before his shared copy came is refused; when it is told, every tool’s files and History are as before it',
+    [await header(), await changedSince(beforeLibrary)], ['polish changed since the page was read. Nothing was changed.', { files: [], history: [] }]);
+  await a.click('#nav-plugins');
+  await openPage('trio');
+  // An Off line and a deleted one have no switch.
+  await a.run(`(async () => { const { home } = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'polish', on: false, except: [], seenOn: true }, { key: 'draft', on: false, except: [], deleted: true }], false, home); })()`);
+  await refresh();
+  same('an Off line and a deleted one: their words, no switch', [await words('skill', 'polish'), await words('skill', 'draft'), (await switches('trio')).filter(each => !each.includes('relay'))], ['Off', 'Deleted here: tick to bring it back', []]);
+  // relay gone from the plugin: its line turns to going, still On, and has no switch.
+  rmSync(join(market, 'plugins/trio/.mcp.json'));
+  await refresh();
+  same('a line the plugin no longer has: its words, no switch', [await words('mcp', 'relay'), await switches('trio')], ['No longer in the plugin: Update turns it off', []]);
+  // pair: Pi's own mine is kept, so mine has Use the plugin's in Pi's place on its row; an agent has no switch in Antigravity.
+  await openPage('pair');
+  await a.click('#pbox-0-pair-pi-cli');
+  await done();
+  await until(() => a.exists(sw('pair', 'pi-cli', 'agent', 'checker')));
+  same('his own mine in Pi: said once, in its place on its row, as Use the plugin’s with whose copy is there on hover; an agent: a dash in Antigravity, why on hover',
+    [(await switches('pair')).sort(), await cell('skill', 'mine', 'Pi'), await words('skill', 'mine'), await a.exists('#pclash-0-pair-pi-cli-skill-mine'), await cell('agent', 'checker', 'Antigravity'), readNow(join(home, '.pi/agent/skills/mine/SKILL.md'))],
+    [['opencode-cli-skill-mine false', 'antigravity-cli-skill-mine false', `pi-cli-skill-${long} true`, `opencode-cli-skill-${long} false`, `antigravity-cli-skill-${long} false`, 'pi-cli-agent-checker true', 'opencode-cli-agent-checker false'].sort(),
+      ['Use the plugin’s', 'Pi has its own copy of mine. Puts the plugin’s in its place there; Pi’s copy is kept as a version, and Undo puts it back.'], '', true, ['–', 'Antigravity takes no agents.'], mineInPi]);
+  await sizeTo(a, ...SMALLEST);
+  const railed = await a.run(`document.body.classList.contains('rail')`);
+  if (railed) await a.click('#sidebar-toggle');
+  // At 860 its switches stay in its line; held narrower than any window makes it, the name is cut, never a switch pushed out.
+  same('at 860 with the sidebar open the 64-letter name and its switches fit in its line; held to 520px, the name is cut with an ellipsis and its switches stay in', await a.run(`(() => {
+    const list = document.querySelector('.plugin-items-list'), row = list.querySelector('[data-key="skill:${long}"]'), name = row.querySelector('.plugin-name');
+    const fits = () => [...row.querySelectorAll('.skill-switch')].at(-1).getBoundingClientRect().right <= row.getBoundingClientRect().right, wide = fits();
+    list.style.width = '520px';
+    const narrow = [name.scrollWidth > name.clientWidth, getComputedStyle(name).textOverflow, fits()];
+    list.style.width = '';
+    return [wide, ...narrow]; })()`), [true, true, 'ellipsis', true]);
+  if (railed) await a.click('#sidebar-toggle');
+  await fullSize(a);
+  await shot('item-switches-cannot-light-860', SMALLEST, 'light');
+  // His own mine with Pi's box unticked (OpenCode keeps the plugin on): still no Pi switch over it, and his copy as it was.
+  await a.click('#pbox-0-pair-opencode-cli');
+  await done();
+  await a.click('#pbox-0-pair-pi-cli');
+  await done();
+  same('Pi unticked with OpenCode ticked: mine has no Pi switch, its own copy said, his copy byte for byte', [await a.exists(sw('pair', 'pi-cli', 'skill', 'mine')), (await cell('skill', 'mine', 'Pi'))?.[0], readNow(join(home, '.pi/agent/skills/mine/SKILL.md'))],
+    [false, 'Its own copy', mineInPi]);
+  // The home read again under the open page by the app itself (a background refresh, which a profile switched from the menu bar makes
+  // too), the plugins view not: checker kept out of OpenCode behind the page; its switch is drawn from the home its click acts on.
+  const ocChecker = sw('pair', 'opencode-cli', 'agent', 'checker');
+  const drawnNow = () => a.run(`(() => { const s = document.querySelector('${ocChecker}'); return s ? [s.getAttribute('aria-checked'), s.title.split('.')[0]] : null; })()`);
+  same('before, checker is on in OpenCode', await drawnNow(), ['true', 'checker in OpenCode: on']);
+  if (a.inspect) {
+    await a.run(`(async () => { const view = await window.centralKnot.refresh(), now = view.agents.library.checker;
+      await window.centralKnot.applyAgents([{ key: 'checker', on: true, except: [...now.except, 'opencode-cli'], seenOn: true }], false, view.home); })()`);
+    const menu = await mainHelpers(a.inspect);
+    try { await menu.tellPage('sync:changed'); } finally { menu.close(); }
+    await until(async () => (await drawnNow())?.[0] === 'false');
+    same('after a background refresh under the open page, checker’s switch says what the home it acts on has: kept out of OpenCode', await drawnNow(), ['false', 'checker in OpenCode: kept out']);
+    await a.click(ocChecker);
+    await done();
+    same('its click does what it said: checker is on in OpenCode again', await drawnNow(), ['true', 'checker in OpenCode: on']);
+  } else console.log('No main-process inspector: skipping the background refresh under an open plugin page.');
+  // checker's copy in OpenCode moved away by hand behind the page: the switch drawn before is refused, nothing is written, no click recorded.
+  const ocAgent = ['agents', 'agent'].map(dir => join(home, '.config/opencode', dir, 'checker.md')).find(path => existsSync(path)), aside = join(scratch, 'item-switches-checker-aside.md');
+  check('checker has its copy in OpenCode', !!ocAgent, readdirSync(join(home, '.config/opencode')));
+  if (ocAgent) {
+    const checkerText = readNow(ocAgent), beforeGone = await entryIds();
+    renameSync(ocAgent, aside);
+    await a.click(ocChecker);
+    await done();
+    same('a copy gone by hand behind the page: the switch drawn before is refused, nothing written in OpenCode, his moved copy as it was, no click recorded',
+      [await header(), existsSync(ocAgent), readNow(aside), await clicksSince(beforeGone)], ['checker changed since the page was read. Nothing was changed.', false, checkerText, []]);
+    same('then its place says what the Library’s row says: its copy was deleted there, and what sync does', [await a.exists(`.plugin-items-list [data-key="agent:checker"] .skill-switch-lock`), (await cell('agent', 'checker', 'OpenCode'))?.[1]],
+      [true, 'Its copy was deleted in OpenCode. When sync runs, the agent turns off; Central Knot keeps it.']);
+    await shot('item-switches-copy-gone-light-860', SMALLEST, 'light');
+  }
+  // The long skill is kept out of Pi and on in OpenCode now (Pi's box unticked, OpenCode's ticked); once the pass the moved copy set
+  // off has run, his copy of it comes in the shared skills folder, which both read, behind the page: the Pi switch drawn before is
+  // refused, and as the click looks at the home and runs no pass, nothing anywhere changes.
+  await until(async () => (await a.run('window.centralKnot.history().then(history => history.events.map(event => event.cause ?? ""))')).includes('deleted-by-hand'));
+  await a.click('#header-refresh');
+  await done();
+  put(join(home, `.agents/skills/${long}/SKILL.md`), md(long, 'My own, in the shared skills folder.'));
+  const beforeShared = await homeNow();
+  await a.click(sw('pair', 'pi-cli', 'skill', long));
+  await done();
+  same('his copy in the shared skills folder behind the page: the Pi switch drawn before is refused; when it is told, every tool’s files and History are as before it',
+    [await header(), await changedSince(beforeShared)], [`${long} changed since the page was read. Nothing was changed.`, { files: [], history: [] }]);
+  same('no page errors, item switches', a.pageErrors, []);
+  await a.quit();
+}
+
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, selectFlow, sessionStripFlow, hookRunFlow, fromFlow, claudeWholeFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow, sessionsFlow, keepSessionCostsFlow, sessionsWeekFlow],
-  [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginPageSaysLessFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
+  [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginPageSaysLessFlow, pluginItemSwitchesFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
   [backFlow, backPlaceFlow, libraryLinesFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, skillFileFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
