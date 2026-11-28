@@ -79,7 +79,7 @@ const manageFiles = pagePlace('harnesses', { storedOnly: true });
 export function manageCardFile(home?: HomeView): { tool?: HarnessId; mark?: HTMLElement; panel?: HTMLElement } {
   const open = home && question ? openQuestion(home, question.tool, CARD) : undefined;
   const one = open?.read && 'counts' in open.read ? namedItem(open.read.counts) : undefined;
-  const mark = one ? itemFile(manageFiles, pageOfPart[one.kind], one.key) : undefined;
+  const mark = one && one.does !== 'keep' ? itemFile(manageFiles, pageOfPart[one.kind], one.key) : undefined;
   const file = placePanel(manageFiles, [mark]);
   return mark ? { tool: open!.tool, mark: mark.mark, panel: file?.panel } : {};
 }
@@ -139,9 +139,11 @@ export function manageQuestion(home: HomeView, tool: HarnessId, at: string, file
   const text = !read ? `Reading ${name}…` : 'failed' in read ? read.failed : joiningWords(home, tool, read, at !== CARD, fileMark);
   const act = (part: 'cancel' | 'close' | 'retry' | 'confirm', label: string, onclick: () => void) =>
     button({ variant: part === 'confirm' ? 'primary' : 'outline', size: 'small', label, id: partId(open, part), disabled: part === 'confirm' && acting(), onclick });
-  return h('div.band.manage-question', { role: 'group', 'aria-labelledby': partId(open, 'text') },
-    h('span.band-text', { id: partId(open, 'text') }, open.changed ? h('strong.manage-question-changed', {}, 'Changed since this was read; nothing was written. ') : null,
-      at === CARD || !read || failed ? null : h('strong', {}, `Managing ${name}: `), text),
+  const line = h('span.band-text', { id: partId(open, 'text') }, open.changed ? h('strong.manage-question-changed', {}, 'Changed since this was read; nothing was written. ') : null,
+    at === CARD || !read || failed ? null : h('strong', {}, `Managing ${name}: `), text);
+  // With a file mark inside the text, name the group from the question's words alone so the mark's own label isn't read twice.
+  return h('div.band.manage-question', { role: 'group', ...(fileMark ? { 'aria-label': line.textContent ?? '' } : { 'aria-labelledby': partId(open, 'text') }) },
+    line,
     h('span.manage-question-actions', {}, failed ? [act('close', 'Close', closeQuestion), act('retry', 'Try again', () => void askManage(tool, at))]
       : [act('cancel', 'Cancel', closeQuestion), read && 'counts' in read ? act('confirm', `Manage ${name}`, () => void manageTool(tool, true, open.home, { read, at })) : null]));
 }
@@ -182,7 +184,7 @@ function oneChange(n: string, { name, does, saves }: JoinItem, restore: string, 
   if (does === 'remove') return saves
     ? [`${saved}, then removes it: ${name}`, mark ?? null, ' is off.']
     : [`Removes ${name}`, mark ?? null, ` from ${n}: it is off.`];
-  return [`Saves ${n}’s copy of ${name}`, mark ?? null, ` as a version (${restore}).`];
+  return [`${saved}.`];
 }
 
 /**

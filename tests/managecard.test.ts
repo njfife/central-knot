@@ -145,7 +145,13 @@ test('A single named library item gets a file mark opening Central Knot’s pane
   assert.equal(findNode(findById(rendered, 'manage-codex-cli-text'), el => el.classList.contains('row-file-btn')), undefined, 'several items: no mark');
   await ask({ removed: 1, changing: [item('gone', 'remove')] });
   assert.equal(findNode(findById(rendered, 'manage-codex-cli-text'), el => el.classList.contains('row-file-btn')), undefined, 'deleted item: no mark');
+  await ask({ kept: 1, changing: [item('standup', 'keep', 1)] });
+  assert.deepEqual([
+    findNode(findById(rendered, 'manage-codex-cli-text'), el => el.classList.contains('row-file-btn')),
+    question(),
+  ], [undefined, 'Saves Codex’s copy of standup as a version (History can restore it).'], 'keep-only wording: no mark');
   await ask({ kept: 1, written: 1, changing: [item('standup', 'write', 1)] });
+  const group = findNode(rendered, el => el.classList.contains('manage-question'))!;
   const textNode = findById(rendered, 'manage-codex-cli-text')!;
   const mark = findById(textNode, 'file-skills-standup')!;
   const splitAt = (root: FakeNode, target: FakeNode): [string, string] => {
@@ -158,15 +164,28 @@ test('A single named library item gets a file mark opening Central Knot’s pane
     walk(root);
     return [out[0], out[1]];
   };
-  assert.deepEqual([mark?.attrs.title, question(), splitAt(textNode, mark)], [
+  assert.deepEqual([mark?.attrs.title, question(), splitAt(textNode, mark), group.attrs['aria-label'], group.attrs['aria-labelledby']], [
     'Open Central Knot’s version',
     'Saves Codex’s copy of standup as a version (History can restore it), then replaces it in Codex with Central Knot’s version.',
     ['Saves Codex’s copy of standup as a version (History can restore it), then replaces it in Codex with Central Knot’s version', '.'],
+    'Saves Codex’s copy of standup as a version (History can restore it), then replaces it in Codex with Central Knot’s version.',
+    undefined,
   ]);
   mark.click();
   const cards = (findNode(rendered, el => el.classList.contains('harness-cards'))?.children ?? []).map(el => (el as FakeNode).attrs?.id);
   assert.deepEqual([cards, findById(rendered, 'harness-card-codex-cli')!.classList.contains('file-anchored'), findById(findById(rendered, 'harness-card-codex-cli'), 'file-panel-harnesses')],
     [['harness-card-claude-cli', 'harness-card-codex-cli', 'file-panel-harnesses'], true, undefined]);
+  await ask({ kept: 1, changing: [item('standup', 'keep', 1)] });
+  const keepGroup = findNode(rendered, el => el.classList.contains('manage-question'))!;
+  assert.deepEqual([
+    findNode(findById(rendered, 'manage-codex-cli-text'), el => el.classList.contains('row-file-btn')),
+    findById(rendered, 'file-panel-harnesses'),
+    question(),
+    keepGroup.attrs['aria-label'],
+    keepGroup.attrs['aria-labelledby'],
+  ], [undefined, undefined, 'Saves Codex’s copy of standup as a version (History can restore it).', undefined, 'manage-codex-cli-text'], 'keep-only wording: no mark and no panel');
+  await ask({ kept: 1, written: 1, changing: [item('standup', 'write', 1)] });
+  findById(rendered, 'file-skills-standup')!.click();
   await press('manage-codex-cli-cancel');
   await ask({ kept: 1, written: 1, changing: [item('standup', 'write', 1)] });
   assert.equal(findById(rendered, 'file-panel-harnesses'), undefined, 'closing the question forgets its open panel');
