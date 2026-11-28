@@ -558,7 +558,7 @@ export interface Click {
    * item): carryOut runs only those switches (switchesOnly); `undone` is what its Undo says once done ("Undone: triage is back on in Codex."). */
   pluginsOnly?: boolean;
   undone?: string;
-  /** On Undo of this single-tool click, say History's own sentence rather than "Undone: X is as before." (pluginpage.ts letToolIn). */
+  /** On Undo of this single-tool click, say History's own sentence rather than "Undone: X is as before." (matrix.ts flipInHarness, for a plugin page's Use the plugin's). */
   undoSentence?: boolean;
 }
 
