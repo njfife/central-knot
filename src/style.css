@@ -827,7 +827,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .file-open-named { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .file-open-item { font-weight: 600; overflow-wrap: anywhere; }
 .file-open-item::after { content: "·"; margin-left: 8px; font-weight: 400; color: var(--ink-faint); }
-/* A page's panel says it shows the item as it is now (filepanel.ts filePanel named), before its file's name. */
+/* A page's panel says which version it shows (filepanel.ts versionWords), each part before a dot, a deleted item's after the bin, before its file's name. */
+.file-open-now { display: inline-flex; align-items: center; }
+.file-open-now > .icon { margin-right: 4px; }
 .file-open-now::after { content: "·"; margin-left: 8px; color: var(--ink-faint); }
 .file-open-tabs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
 .file-tab { appearance: none; max-width: 100%; overflow-wrap: anywhere; border: 1px solid transparent; border-radius: 6px; padding: 2px 8px; background: transparent; color: var(--ink-soft); font: 500 11.5px/16px var(--mono); cursor: pointer; }

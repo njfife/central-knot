@@ -8,10 +8,12 @@
 // (keepOpenFile, asked by matrix.ts tableOf and placePanel). Where a panel is drawn is its caller's, a FilePlace: a table
 // (matrix.ts Table: under a closed row, or in an open row's details' place, matrix.ts openedPart; Escape there is matrix.ts's),
 // or a page that names items (a PagePlace: the Overview's cards, History's rows), in three calls: pagePlace once, for its place
-// and its Escape; itemFile at each name, for the Library's mark there (keptFile for a deleted item's), at that name's occurrence
-// where the page names an item more than once; then placePanel with those marks, for the one open and its panel, which the page
-// puts under that name's row, marking the row .file-anchored (its tint on History; settleFileBox measures from it). Two rows
-// naming one item need an occurrenceId each: two names that would share a mark in one draw get one, the first's.
+// and its Escape; itemFile at each name, for the Library's mark there, at that name's occurrence where the page names an item
+// more than once (a name that may be of an item Central Knot deleted: `itemFile(…) ?? keptFile(…)`, its last version kept;
+// itemFile gives a deleted item nothing where the place opens no found rows); then placePanel with those marks, for the one
+// open and its panel, which the page puts under that name's row, marking the row .file-anchored (its tint on History;
+// settleFileBox measures from it). Two rows naming one item need an occurrenceId each: two names that would share a mark in one
+// draw get one, the first's.
 import { rerender, shownPath, state, type Page, type PageKind } from './app.ts';
 import { afterLayout, closeButton, fileBlocks, h, icon, pathText } from './dom.ts';
 import { partId, rowId, type ItemRow, type Tool } from './itemrow.ts';
@@ -20,6 +22,7 @@ import { inLibrary } from './libraryrow.ts';
 import { libraryPages } from './librarypages.ts';
 import { idOf, isPluginRow, itemOf, reloadButton, rowOf, showInFolder, toolsFor } from './matrix.ts';
 import type { PluginRow } from './pluginrows.ts';
+import type { IconName } from './icons.ts';
 import type { FileRead, HarnessId, SearchHit } from './types.ts';
 import type { VersionPart } from './versionlist.ts';
 import { andList, toolNames } from './words.ts';
@@ -28,7 +31,7 @@ import { andList, toolNames } from './words.ts';
 export interface OpenFile { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; blocks?: string[]; note?: string; parts?: VersionPart[]; holder?: string } | null }
 /**
  * Where a file panel is drawn: the file open there (`view.openFile`), the tool whose copy it offers first (`tool`: a tool's tab's),
- * whether its panels begin with the item's name and say it is the current version (`named`: a page's, pagePlace), what the place
+ * whether its panels begin with the item's name and say which version it is (`named`: a page's, pagePlace; versionWords), what the place
  * does as a file opens for an item (`opening`) and once one newly opened is read (`reveal`). A table's say what a table does
  * (matrix.ts fileHooks). `markOf`: the id of the mark its open file was opened at, where it isn't the item's own (a page's).
  */
@@ -130,12 +133,17 @@ const readDefinition = (key: string, hash: string): Promise<PanelRead | null> =>
 const readStored = (of: PageKind, key: string, hash: string, file: string): Promise<PanelRead | null> => (of === 'agents' ? readDefinition(key, hash)
   : of === 'mcp' ? window.centralKnot.serverStored(key, hash) : window.centralKnot.skillVersionFile(key, hash, file));
 /**
- * Which version of Central Knot's text a page's panel shows, as its header (`now`), its mark's hover (`open`) and its text's
- * accessible name (`owner`) say it: a row's is its item's current version; a kept one, the last version of an item it deleted.
+ * Which version of Central Knot's text a panel shows, and what it says where its read brings nothing: a row's is its item's
+ * current version; a kept one, the last version of an item Central Knot deleted. Said by a page's panel's header (`now`: each
+ * part before one of the header's dots, the first after `glyph`, the bin History's delete rows have), a page's mark's hover
+ * (`open`), the text's accessible name, a table's panel's too (`owner`), and the panel where the read brings nothing (`unread`,
+ * a tool's copy's too). A kept version's read brings nothing where it was let go (skillstore.ts pruneDeleted, at History's
+ * days), and also where its file is there but can't be read: the read doesn't say which.
  */
-const versionWords = (target: FileTarget) => (isKept(target)
-  ? { now: 'deleted · last version kept', open: 'Open the last version kept', owner: 'Central Knot’s last version kept' }
-  : { now: 'current version', open: 'Open the current version', owner: 'Central Knot’s current version' });
+const versionWords = (target: FileTarget): { now: string[]; glyph?: IconName; open: string; owner: string; unread: string } => (isKept(target)
+  ? { now: ['deleted', 'last version kept'], glyph: 'trash-2', open: 'Open the last version kept', owner: 'Central Knot’s last version kept',
+    unread: 'Central Knot no longer keeps this version.' }
+  : { now: ['current version'], open: 'Open the current version', owner: 'Central Knot’s current version', unread: 'Its file couldn’t be read.' });
 /**
  * Opens a file (`asked`; a skill's SKILL.md when none) of a stored, found, installed plugin or marketplace skill, an agent's file
  * in the chosen tool (or its definition), a server's entry in the chosen tool (its definition where `asked` is DEFINITION, or
@@ -210,7 +218,7 @@ export function fileButton(t: FilePlace, target: FileTarget) {
  */
 export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare = false, back?: HTMLElement) {
   const id = fileTargetId(target);
-  const name = fileTargetName(target);
+  const name = fileTargetName(target), words = versionWords(target);
   const offered = storedOf(t, target), stored = !!offered && !open.copy;
   const copies = fileCopies(t, target);
   const activeAt = open.copy ? copies.findIndex(copy => copy.tool === open.copy!.tool && copy.rootLabel === open.copy!.rootLabel) : -1;
@@ -222,8 +230,7 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare
   const dir = !stored ? active?.directory ?? open.directory : target.kind === 'skills' ? storedPath(target as ItemRow) : undefined;
   const leaf = isServerRow(target) ? open.files?.[0] ?? '' : open.file;
   const full = dir && (dir.includes('\\') ? `${dir}\\${leaf.replaceAll('/', '\\')}` : `${dir}/${leaf}`);
-  // A kept version that reads as nothing has been let go (skillstore.ts pruneDeleted, at History's days).
-  const missing = open.loaded === undefined ? 'Reading…' : isKept(target) ? 'Central Knot no longer keeps this version.' : 'Its file couldn’t be read.';
+  const missing = open.loaded === undefined ? 'Reading…' : words.unread;
   const note = open.loaded ? open.loaded.note : missing;
   const copyLabel = (entry: FileCopy) => (entry.version ? `${copyName(entry.tool)} · ${entry.version}`
     : entry.rootLabel && copies.filter(other => other.tool === entry.tool).length > 1 ? `${copyName(entry.tool)} (${entry.rootLabel})` : copyName(entry.tool));
@@ -243,7 +250,7 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare
   const close = back ? null : closeButton(() => setFile(t, undefined, undefined, true),
     { id: partId('file-close', id), label: `Close file for ${name}`, title: 'Close', look: '.file-open-close' });
   const blockId = partId('file-text', id, ...(active ? [String(Math.max(0, activeAt))] : []), String(Math.max(0, tabs.indexOf(open.file))));
-  const owner = () => (active ? copyLabel(active) : isCatalogHit(target) ? `${target.hit.item!.marketName}’s copy` : versionWords(target).owner);
+  const owner = () => (active ? copyLabel(active) : isCatalogHit(target) ? `${target.hit.item!.marketName}’s copy` : words.owner);
   // A Codex entry's blocks, each apart: between two, a separator named for the lines between them, its words drawn by CSS from
   // that name, so no selection or copy of the blocks holds them.
   const body = note ? [h('p.file-open-state', {}, note)]
@@ -253,7 +260,7 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare
     : fileBlocks(blockId, `${name} ${open.file}`, [{ text: open.loaded!.text ?? '' }], owner);
   // A server's path is copied by a button in words: beside its JSON a bare copy icon would read as copying the entry.
   const copy = full && reloadButton(isServerRow(target) ? { chip: 'Copy path', command: full, title: full } : { command: full, title: 'Copy path' }, partId('file-copy', id));
-  // Where the stored text is shown, a table's foot says so; a page's header has said it is the current version, and it has no foot.
+  // Where the stored text is shown, a table's foot says so; a page's header has said which version it is, and it has no foot.
   const foot = full ? [pathText(shownPath(full), full), h('span.file-open-foot-actions', {}, showInFolder(full), copy)]
     : stored && !t.named ? [h('span.file-open-stored', {}, 'Stored in Central Knot')] : [];
   // An agent's or a server's panel shows one file, or its definition: its name is a label, with nothing to press. A server's
@@ -263,7 +270,8 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare
   const lead = isServerRow(target) && h('span.file-open-lead', {}, where, where && !chooser ? h('span.meta-dot', { 'aria-hidden': 'true' }, '·') : null, chooser ? null : label);
   const shows = isAgentRow(target) || keptDefinition(target) ? label : lead || h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(tab));
   return h(`div.details.details-file-only${bare ? '.details-bare' : ''}`, { role: 'region', 'aria-label': `File for ${name}` }, back ?? null, h('div.file-open-box', {},
-    h('div.file-open-head', {}, t.named ? h('span.file-open-named', {}, h('strong.file-open-item', {}, name), h('span.file-open-now', {}, versionWords(target).now), shows) : shows,
+    h('div.file-open-head', {}, t.named ? h('span.file-open-named', {}, h('strong.file-open-item', {}, name),
+      ...words.now.map((part, index) => h('span.file-open-now', {}, index || !words.glyph ? null : icon(words.glyph, 12), part)), shows) : shows,
       h('span.file-open-controls', {}, chooser, close)),
     ...body, foot.length || !t.named ? h('div.file-open-foot', {}, ...foot) : null));
 }

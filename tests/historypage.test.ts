@@ -136,10 +136,10 @@ function markedHome() {
     name: (id: string) => findNode(findById(page, `history-row-${id}`), el => el.tag === 'strong')?.attrs.title };
 }
 
-test('History marks a name Central Knot holds now, and one it deleted (its last version kept); the name of one it has no record of is muted and says so; a file opens under the row pressed, stays there through a newer entry, and goes with its row', () => {
+test('History marks a name Central Knot holds now, and one it deleted (its last version kept); the name of one it no longer holds is muted and says so, one with no record has no mark; a file opens under the row pressed, stays there through a newer entry, and goes with its row', () => {
   const marked = markedHome(), { entries, inRow, name } = marked;
   assert.deepEqual(['notes-on', 'notes-off', 'gone-deleted', 'draft-off'].map(id => [!!inRow(id, 'row-file-btn'), name(id)]),
-    [[true, 'notes'], [true, 'notes'], [true, 'gone'], [false, 'draft: no longer in Central Knot']]);
+    [[true, 'notes'], [true, 'notes'], [true, 'gone: no longer in Central Knot'], [false, 'draft: no longer in Central Knot']]);
   inRow('notes-on', 'row-file-btn')!.click();
   marked.draw();
   assert.deepEqual(['notes-on', 'notes-off'].map(id => !!inRow(id, 'details-file-only')), [true, false]);

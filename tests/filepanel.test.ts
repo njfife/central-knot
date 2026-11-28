@@ -8,13 +8,13 @@ import { test } from 'node:test';
 import type { HarnessId, HomeView } from '../src/types.ts';
 import { findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
-// Central Knot's store keeps h2, gone's last version, and no longer keeps h3 (old's: let go at History's days); a tool's found copy of gone reads otherwise.
-// It keeps scout's (an agent's) and tracker's (a server's) last versions too, each by its hash.
+// Central Knot's store keeps gone's last version (h2), and no longer keeps old's (h3: let go at History's days); a tool's found copy of gone reads otherwise.
+// It keeps scout's (an agent's: a1) and tracker's (a server's: s1) last versions too: each read by its key and hash.
 const { dispatch } = installDom({
-  skillVersionFile: async (_key: string, hash: string) => (hash === 'h2' ? { files: ['SKILL.md'], text: 'gone, as Central Knot kept it' } : null),
+  skillVersionFile: async (key: string, hash: string) => (key === 'gone' && hash === 'h2' ? { files: ['SKILL.md'], text: 'gone, as Central Knot kept it' } : null),
   skillFoundFile: async () => ({ files: ['SKILL.md'], text: 'a tool’s copy of gone' }),
-  agentVersion: async (_key: string, hash: string) => (hash === 'a1' ? { name: 'scout', description: 'Scouts.', prompt: 'Look around first.' } : null),
-  serverStored: async (_key: string, hash: string) => (hash === 's1' ? { files: [], text: '{ "command": "tracker" }' } : null),
+  agentVersion: async (key: string, hash: string) => (key === 'scout' && hash === 'a1' ? { name: 'scout', description: 'Scouts.', prompt: 'Look around first.' } : null),
+  serverStored: async (key: string, hash: string) => (key === 'tracker' && hash === 's1' ? { files: [], text: '{ "command": "tracker" }' } : null),
 });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
@@ -39,9 +39,9 @@ const homeAt = (home: string): HomeView => ({
 setRenderer(() => {});
 state.page = 'history';
 const place = pagePlace('history');
-/** The page drawn as History draws it: notes named in two entries, older and newer; their marks, which of them is open, its panel. */
-const draw = () => {
-  const marks = ['older', 'newer'].map(occurrenceId => itemFile(place, 'skills', 'notes', occurrenceId)), open = placePanel(place, marks);
+/** The page drawn as History draws it: notes (or what `named` marks) named in two entries, older and newer; their marks, which of them is open, its panel. */
+const draw = (named = (occurrenceId: string) => itemFile(place, 'skills', 'notes', occurrenceId)) => {
+  const marks = ['older', 'newer'].map(named), open = placePanel(place, marks);
   return { marks: marks.map(mark => mark?.mark as unknown as FakeNode | undefined), open: open && marks.indexOf(open.mark), panel: open?.panel as unknown as FakeNode | undefined };
 };
 
@@ -77,17 +77,32 @@ test('a mark only for an item Central Knot holds now; a page that opens found co
   assert.deepEqual([itemFile(place, 'skills', 'gone'), !!itemFile(anyRow, 'skills', 'gone')], [undefined, true]);
 });
 
-test('a deleted item’s name has a mark of its own (keptFile): it opens the last version Central Knot kept, said so, never a tool’s copy of that name; a version let go says so', async () => {
+/** Every node under `node` that `match` takes, in order. */
+const allOf = (node: FakeNode | undefined, match: (el: FakeNode) => boolean): FakeNode[] => (!node ? []
+  : [...(match(node) ? [node] : []), ...(node.children ?? []).flatMap(child => (child && typeof child === 'object' ? allOf(child as FakeNode, match) : []))]);
+
+test('a deleted item named twice has a mark of its own (keptFile) at each name: it opens the last version Central Knot kept at the one pressed, said with the bin, never a tool’s copy of that name; a version let go says so', async () => {
   state.home = homeAt('/tmp/filepanel-kept');
-  const kept = (key: string) => { const mark = keptFile(place, 'skills', key, 'row'), open = placePanel(place, [mark]); return { mark: mark?.mark as unknown as FakeNode | undefined, panel: open?.panel as unknown as FakeNode | undefined }; };
-  const said = (panel?: FakeNode) => [textOf(findNode(panel, el => el.classList.contains('file-open-now'))), textOf(findNode(panel, el => el.tag === 'pre' || el.classList.contains('file-open-state'))), !!findNode(panel, el => el.tag === 'select')];
-  assert.deepEqual([keptFile(place, 'skills', 'notes'), kept('gone').mark?.attrs.id, kept('gone').mark?.attrs.title], [undefined, 'file-kept-skills-gone-h2-row', 'Open the last version kept']);
-  for (const [key, text] of [['gone', 'gone, as Central Knot kept it'], ['old', 'Central Knot no longer keeps this version.']]) {
-    kept(key).mark!.click();
-    await new Promise(resolve => setTimeout(resolve));
-    assert.deepEqual(said(kept(key).panel), ['deleted · last version kept', text, false], key);
-    kept(key).mark!.click();
-  }
+  const kept = (key: string) => draw(occurrenceId => keptFile(place, 'skills', key, occurrenceId));
+  let page = kept('gone');
+  assert.deepEqual([keptFile(place, 'skills', 'notes'), page.marks.map(mark => [mark?.attrs.id, mark?.attrs.title])],
+    [undefined, [['file-kept-skills-gone-h2-older', 'Open the last version kept'], ['file-kept-skills-gone-h2-newer', 'Open the last version kept']]]);
+  page.marks[0]!.click();
+  await new Promise(resolve => setTimeout(resolve));
+  page = kept('gone');
+  const header = allOf(page.panel, el => el.classList.contains('file-open-now'));
+  assert.deepEqual([page.open, page.marks.map(mark => mark?.attrs['aria-pressed']), header.map(textOf), !!findNode(header[0], el => el.tag === 'svg'),
+    textOf(findNode(page.panel, el => el.tag === 'pre')), !!findNode(page.panel, el => el.tag === 'select')],
+  [0, ['true', 'false'], ['deleted', 'last version kept'], true, 'gone, as Central Knot kept it', false]);
+  page.marks[1]!.click();
+  page = kept('gone');
+  assert.deepEqual([page.open, page.marks.map(mark => mark?.attrs['aria-pressed'])], [1, ['false', 'true']]);
+  page.marks[1]!.click();
+  kept('old').marks[0]!.click();
+  await new Promise(resolve => setTimeout(resolve));
+  page = kept('old');
+  assert.equal(textOf(findNode(page.panel, el => el.classList.contains('file-open-state'))), 'Central Knot no longer keeps this version.');
+  page.marks[0]!.click();
 });
 
 test('a deleted agent’s and a deleted server’s last version kept is its definition, under a label as a held one’s is, read by the tombstone’s hash', async () => {
@@ -96,8 +111,8 @@ test('a deleted agent’s and a deleted server’s last version kept is its defi
     const draw = () => { const mark = keptFile(place, kind, key); return { mark: mark?.mark as unknown as FakeNode, panel: placePanel(place, [mark])?.panel as unknown as FakeNode | undefined }; };
     draw().mark.click();
     await new Promise(resolve => setTimeout(resolve));
-    const panel = draw().panel, pres = (node?: FakeNode): FakeNode[] => (!node ? [] : [...(node.tag === 'pre' ? [node] : []), ...(node.children ?? []).flatMap(child => pres(child as FakeNode))]);
-    assert.deepEqual([textOf(findNode(panel, el => el.classList.contains('file-open-name'))), !!findNode(panel, el => el.attrs.role === 'tablist'), pres(panel).map(textOf).at(-1)],
+    const panel = draw().panel;
+    assert.deepEqual([textOf(findNode(panel, el => el.classList.contains('file-open-name'))), !!findNode(panel, el => el.attrs.role === 'tablist'), allOf(panel, el => el.tag === 'pre').map(textOf).at(-1)],
       ['Central Knot’s definition', false, text], key);
     draw().mark.click();
   }
