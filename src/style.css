@@ -293,15 +293,15 @@ ul { list-style: none; }
 .band-done:not(.band-two):has(> :is(.reload-list, .reload-fold)) > .band-dismiss { grid-column: 4; }
 .band-done > :is(.reload-list, .reload-fold) { order: 2; flex-basis: 100%; grid-column: 1 / -1; }
 .result-whole { --card: color-mix(in oklab, var(--surface) 88%, white); align-self: flex-start; max-height: calc(100vh - 120px); overflow-y: auto; margin: 0 -12px;
-  padding: 0 12px 12px; background: var(--card); border: 1px solid var(--control-line); border-top: 0; border-radius: 0 0 8px 8px;
+  padding: 0 12px 6px; background: var(--card); border: 1px solid var(--control-line); border-top: 0; border-radius: 0 0 8px 8px;
   box-shadow: 0 14px 28px -10px rgb(0 0 0 / 0.5); }
 .result-whole::-webkit-scrollbar { width: 8px; }
 .result-whole::-webkit-scrollbar-thumb { background: var(--control-line); border-radius: 4px; }
 .result-whole > :is(.band, .toolbar-result) { align-items: flex-start; }
-.result-whole > :is(.band-done, .toolbar-result) > svg { margin-top: 6px; }
-.result-whole > :is(.band-done, .toolbar-result) > :is(.band-text, .toolbar-result-text, #problems-show-all) { margin: 5px 0; }
-.result-whole > :is(.band-done, .toolbar-result) > .band-dismiss { margin-top: 2px; }
-.result-whole > :first-child { position: sticky; top: 0; z-index: 1; padding-top: 5px; background: var(--card); }
+.result-whole > :is(.band-done, .toolbar-result) > svg { margin-top: 1px; }
+.result-whole > :is(.band-done, .toolbar-result) .btn:not(.micro) { height: 22px; }
+.result-whole > :is(.band-done, .toolbar-result) > :is(.band-actions, .btn:not(.micro), .band-dismiss) { margin-block: -3px; }
+.result-whole > :first-child { position: sticky; top: 0; z-index: 1; padding: 8px 0 3px; background: var(--card); }
 .result-whole :is(.band-done > .band-text, .toolbar-result-text) { display: block; overflow: visible; overflow-wrap: anywhere; }
 #header #problems-show-all { flex: none; white-space: nowrap; }
 .result-whole #problems-show-all { align-self: flex-end; }
