@@ -658,7 +658,7 @@ test('Codex MCP advises /new or restarting with codex resume --last to copy', ()
   const mcp = reloadAdvice([{ tool: 'codex-cli', kind: 'mcp', key: 'docs', on: true }]);
   assert.equal(mcp.text, 'In Codex, type /new, or restart it (codex resume --last keeps the chat).');
   assert.equal(mcp.items[0]?.command, '/new');
-  assert.deepEqual(mcp.items[0]?.more, [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.' }]);
+  assert.deepEqual(mcp.items[0]?.more, [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.', note: 'to restart and keep the chat.' }]);
 });
 
 test('Whole plugin install and switch advise plugin-level reload per tool and way in while keeping stronger MCP advice', async () => {

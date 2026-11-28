@@ -176,7 +176,7 @@ test('reloadLines folds from exactly 3 shown steps on every page band (including
     state.page = 'plugins';
     const plugRun = { done: [failStep, okStep('claude-cli'), okStep('codex-cli'), okStep('pi-cli')], undo: false, home: '/tmp/ck-reload-unit', place: 'plugins' as const };
     market.lastRun = plugRun;
-    state.shownWhole = plugRun;
+    state.shownWhole = market.lastRun;
     const parts = pluginsResult() as unknown as FakeNode[];
     const problemAt = parts.findIndex(part => !!findNode(part, el => el.className.split(/\s+/).includes('problem-line')));
     const reloadAt = parts.findIndex(part => part.className.split(/\s+/).includes('reload-list'));
