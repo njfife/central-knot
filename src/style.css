@@ -1328,6 +1328,9 @@ span.ins-confirm { margin-top: 0; }
 .history-row > .details-file-only { grid-column: 1 / -1; }
 .history-row > .manage-question, .harness-manage > .manage-question { border: 1px solid var(--line); border-radius: 8px; flex-wrap: wrap; justify-content: space-between; gap: 8px 12px; padding: 8px 12px; }
 .manage-question > .band-text { flex: 1 1 320px; color: var(--ink); }
+.manage-question > .band-text:has(.row-file-btn) { line-height: 22px; }
+.manage-question-mark { white-space: nowrap; }
+.manage-question .row-file-btn { width: 20px; height: 20px; margin: 0 3px 0 4px; vertical-align: -2px; }
 .manage-question-changed { display: block; }
 /* The buttons keep to the box: one that doesn't fit beside the other goes whole to the next line. */
 .manage-question-actions { flex: 0 1 auto; min-width: 0; display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; margin-left: auto; }
@@ -2303,8 +2306,15 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .harness-scroll > * { flex: none; }
 .harness-scroll > .tools-note { margin: 0; max-width: 80ch; }
 .tools-note-profile { white-space: nowrap; }
-.harness-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; }
+/* Cap auto-fit tracks at --tool-count (dom.ts withToolCount) so a full-width file panel (1 / -1) never adds an empty column in a wide window. */
+.harness-cards {
+  --card-min: max(300px, calc((100% - (var(--tool-count, 6) - 1) * 12px - 1px) / var(--tool-count, 6)));
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--card-min)), 1fr)); grid-auto-flow: row dense; gap: 12px;
+}
+.harness-cards > .details-file-only { grid-column: 1 / -1; }
+.harness-cards > .details-file-only > .file-open-box { border-color: color-mix(in oklab, var(--accent) 42%, var(--line)); border-left: 3px solid var(--accent); }
 .harness-card { container-type: inline-size; display: flex; flex-direction: column; color: var(--ink); }
+.harness-card.file-anchored { border-color: color-mix(in oklab, var(--accent) 42%, var(--line)); box-shadow: inset 3px 0 0 var(--accent), var(--lift); }
 .harness-card-main { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 12px 14px; }
 .harness-card-links { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0 8px 8px; margin-top: -4px; }
 .harness-card-missing { color: var(--ink-soft); }

@@ -1,12 +1,13 @@
 // A tool's Manage switch, on its card on the Harnesses list, and what both it and History's Manage entries (historypage.ts
 // managingRow) share: the switch (with one Managed (?) card on the first managed tool); the question before a tool left out is
-// managed again, read when it is asked (askManage) and shown where it was asked (manageQuestion, worded by joiningWords); the click
-// (manageTool); and the band after a click (doneWords). The engine is toolchoice.ts: chooseTools turns it, and what turning a
-// left-out tool on would do there is its whatJoiningDoes, which main reads for the question (main.ts `tools:joining`, a look
-// and no pass) and again for the click, which turns nothing and asks again where that changed. The band says what the pass
-// after the click did there, from its results (main.ts `tools:manage`, `did`). The cards themselves are harnesspage.ts's.
+// managed again (askManage, manageQuestion, joiningWords; a card's single named item opens Central Knot's version under its
+// card's row via manageCardFile and filepanel.ts); the click (manageTool); and the band after a click (doneWords). The engine
+// is toolchoice.ts: chooseTools turns it, and what turning a left-out tool on would do there is its whatJoiningDoes, read for
+// the question (main.ts `tools:joining`, a look and no pass) and again for the click, which turns nothing and asks again where
+// that changed. The band says what the pass after the click did (main.ts `tools:manage`, `did`). Cards are harnesspage.ts's.
 import { acting, busy, clickResumes, focusWhenDone, putHistory, rerender, setHome, state, tell } from './app.ts';
-import { button, h, infoMark, toggle } from './dom.ts';
+import { button, h, infoMark, toggle, type Child } from './dom.ts';
+import { itemFile, pagePlace, placePanel } from './filepanel.ts';
 import { plural } from './model.ts';
 import { pageOfPart } from './pluginstatus.ts';
 import type { DestinationResult, HarnessId, HomeView, JoinCounts, JoinItem } from './types.ts';
@@ -29,7 +30,7 @@ export function manageLocked(home: HomeView): string | undefined {
  * Every switch keeps its tool-named accessible label even when locked; the lock's reason comes from toggle's whyOff (title
  * and aria-description), with no card or question.
  */
-export function manageRow(home: HomeView, tool: HarnessId, showInfo = false): HTMLElement {
+export function manageRow(home: HomeView, tool: HarnessId, showInfo = false, fileMark?: HTMLElement): HTMLElement {
   const on = home.sync.managed.includes(tool), why = manageLocked(home), name = names[tool];
   const label = on ? `Manage ${name}: on. Click to leave ${name} out: Central Knot then writes nothing there until you turn it on again. Its copies stay, and every item stays as it is.`
     : `Manage ${name}: off. ${leftOutInfo(name)}`;
@@ -40,7 +41,7 @@ export function manageRow(home: HomeView, tool: HarnessId, showInfo = false): HT
       toggle({ on, label, id: `manage-${tool}`, disabled: why ?? acting(), onchange: next => void (next ? askManage(tool, CARD) : manageTool(tool, false, home.home)) }),
       h('span.harness-manage-label', {}, on ? 'Managed' : 'Not managed'),
       mark),
-    on ? null : manageQuestion(home, tool, CARD));
+    on ? null : manageQuestion(home, tool, CARD, fileMark));
 }
 
 /** Said behind Managed (?) on the first managed card. */
@@ -65,6 +66,23 @@ type Question = { tool: HarnessId; home: string; at: string; read?: Forecast | {
  */
 let question: Question | undefined;
 export const forgetManageQuestion = () => { question = undefined; };
+/** The open Manage question when it is showing for `tool` at `at` in `home` (present on a card, still left out, switch unlocked). */
+const openQuestion = (home: HomeView, tool: HarnessId, at: string) =>
+  question && question.tool === tool && question.at === at && question.home === home.home && !manageLocked(home)
+  && !home.sync.managed.includes(tool) && (at !== CARD || home.sync.present.includes(tool)) ? question : undefined;
+/** Harnesses as a file panel's place (filepanel.ts pagePlace): opens Central Knot's stored version alone. */
+const manageFiles = pagePlace('harnesses', { storedOnly: true });
+/**
+ * The open card question's file mark and open panel for Harnesses (called on every Harnesses draw so placePanel forgets closed
+ * marks; pass undefined when the list is not drawn, such as no home yet or a single harness's page).
+ */
+export function manageCardFile(home?: HomeView): { tool?: HarnessId; mark?: HTMLElement; panel?: HTMLElement } {
+  const open = home && question ? openQuestion(home, question.tool, CARD) : undefined;
+  const one = open?.read && 'counts' in open.read ? namedItem(open.read.counts) : undefined;
+  const mark = one && one.does !== 'keep' ? itemFile(manageFiles, pageOfPart[one.kind], one.key) : undefined;
+  const file = placePanel(manageFiles, [mark]);
+  return mark ? { tool: open!.tool, mark: mark.mark, panel: file?.panel } : {};
+}
 /** A part of a question by id (on a card `manage-<tool>-<part>`, on History `history-manage-<part>-<entry>`), and what opened it. */
 const partId = (open: Question, part: 'text' | 'cancel' | 'confirm' | 'close' | 'retry') => (open.at === CARD ? `manage-${open.tool}-${part}` : `history-manage-${part}-${open.at}`);
 const openerId = (open: Question) => (open.at === CARD ? `manage-${open.tool}` : `history-${open.at}`);
@@ -90,7 +108,10 @@ export async function askManage(tool: HarnessId, at: string) {
   show({ ...open, read: read ?? { failed: `Couldn’t read what managing ${names[tool]} would do. Nothing was changed.` } });
 }
 
-/** Cancel or Close, or Escape while one is open: the question closes, and the focus goes back to what opened it. */
+/**
+ * Cancel or Close, or Escape while one is open: the question closes, and the focus goes back to what opened it. On Harnesses,
+ * an open file panel under the question takes Escape first (filepanel.ts pagePlace); on History, the question takes Escape first.
+ */
 function closeQuestion() {
   const open = question;
   if (!open) return;
@@ -100,7 +121,8 @@ function closeQuestion() {
 }
 if (typeof document !== 'undefined') {
   document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || event.defaultPrevented || !question) return;
+    // Panel first on Harnesses (filepanel.ts window listener closes it); question first on History.
+    if (event.key !== 'Escape' || event.defaultPrevented || !question || (state.page === 'harnesses' && manageFiles.view.openFile)) return;
     event.preventDefault();
     closeQuestion();
   });
@@ -110,50 +132,59 @@ if (typeof document !== 'undefined') {
  * The open question's band where it was asked (`at`), while `tool` is still left out in `home` and its switch can turn; else
  * nothing. On History it names the tool first (a card is the tool's own); a read that failed offers Close and Try again.
  */
-export function manageQuestion(home: HomeView, tool: HarnessId, at: string): HTMLElement | null {
-  const open = question, read = open?.read, name = names[tool];
-  if (!open || open.tool !== tool || open.at !== at || open.home !== home.home || manageLocked(home) || home.sync.managed.includes(tool)) return null;
+export function manageQuestion(home: HomeView, tool: HarnessId, at: string, fileMark?: HTMLElement): HTMLElement | null {
+  const open = openQuestion(home, tool, at), read = open?.read, name = names[tool];
+  if (!open) return null;
   const failed = read && 'failed' in read ? read.failed : undefined;
-  const text = !read ? `Reading ${name}…` : 'failed' in read ? read.failed : joiningWords(home, tool, read, at !== CARD);
+  const text = !read ? `Reading ${name}…` : 'failed' in read ? read.failed : joiningWords(home, tool, read, at !== CARD, fileMark);
   const act = (part: 'cancel' | 'close' | 'retry' | 'confirm', label: string, onclick: () => void) =>
     button({ variant: part === 'confirm' ? 'primary' : 'outline', size: 'small', label, id: partId(open, part), disabled: part === 'confirm' && acting(), onclick });
-  return h('div.band.manage-question', { role: 'group', 'aria-labelledby': partId(open, 'text') },
-    h('span.band-text', { id: partId(open, 'text') }, open.changed ? h('strong.manage-question-changed', {}, 'Changed since this was read; nothing was written. ') : null,
-      at === CARD || !read || failed ? null : h('strong', {}, `Managing ${name}: `), text),
+  const line = h('span.band-text', { id: partId(open, 'text') }, open.changed ? h('strong.manage-question-changed', {}, 'Changed since this was read; nothing was written. ') : null,
+    at === CARD || !read || failed ? null : h('strong', {}, `Managing ${name}: `), text);
+  // With a file mark inside the text, name the group from the question's words alone so the mark's own label isn't read twice.
+  return h('div.band.manage-question', { role: 'group', ...(fileMark ? { 'aria-label': line.textContent ?? '' } : { 'aria-labelledby': partId(open, 'text') }) },
+    line,
     h('span.manage-question-actions', {}, failed ? [act('close', 'Close', closeQuestion), act('retry', 'Try again', () => void askManage(tool, at))]
       : [act('cancel', 'Cancel', closeQuestion), read && 'counts' in read ? act('confirm', `Manage ${name}`, () => void manageTool(tool, true, open.home, { read, at })) : null]));
 }
 
+function namedItem(counts: JoinCounts): JoinItem | undefined {
+  const acts = counts.changing.filter(item => item.does !== 'take');
+  return acts.length === 1 && acts[0]!.saves <= 1 ? acts[0] : undefined;
+}
 /**
  * What managing `tool` again does there, as its question says (types.ts JoinCounts, read when asked), in the order it happens:
  * the one item it changes by name, or each kind of change counted (copies saved, then written, then removed); what it takes in
  * and leaves as the tool's own; a kind it can't tell, as unknown, never as no change; the plugins it gets; Sync once with
  * Automatic sync off; and the Resume the click makes. `onHistory`: asked on History, where a saved copy can be restored.
  */
-function joiningWords(home: HomeView, tool: HarnessId, { counts, plugins }: Forecast, onHistory: boolean): string {
+function joiningWords(home: HomeView, tool: HarnessId, { counts, plugins }: Forecast, onHistory: boolean, mark?: HTMLElement): Child[] {
   const n = names[tool], { written, kept, removed, found, takenIn, unread } = counts;
   const restore = (them: boolean) => (onHistory ? `${them ? 'they' : 'it'} can be restored here` : `History can restore ${them ? 'them' : 'it'}`);
-  const acts = counts.changing.filter(item => item.does !== 'take');
-  const changes = acts.length === 1 && acts[0]!.saves <= 1 ? [oneChange(n, acts[0]!, restore(false))] : [
-    kept ? `Saves ${kept} of ${n}’s copies as ${kept === 1 ? 'a version' : 'versions'} (${restore(kept > 1)}).` : '',
-    written ? `Writes Central Knot’s version of ${plural(written, 'item')} in ${n}.` : '',
-    removed ? `Removes ${n}’s ${removed === 1 ? 'copy of 1 item that is off' : `copies of ${removed} items that are off`}.` : '',
-  ].filter(Boolean);
-  return [
-    changes.length || unread.length ? '' : `Changes no item in ${n}.`, ...changes,
+  const one = namedItem(counts), any = !!(one || kept || written || removed);
+  const rest = [
+    !one && kept ? `Saves ${kept} of ${n}’s copies as ${kept === 1 ? 'a version' : 'versions'} (${restore(kept > 1)}).` : '',
+    !one && written ? `Writes Central Knot’s version of ${plural(written, 'item')} in ${n}.` : '',
+    !one && removed ? `Removes ${n}’s ${removed === 1 ? 'copy of 1 item that is off' : `copies of ${removed} items that are off`}.` : '',
+    any || unread.length ? '' : `Changes no item in ${n}.`,
     takenIn ? `Takes ${takenIn} of ${n}’s items into the Library (Synchronize everything is on).` : '',
     // "Other" only after an item named or counted before it.
-    found ? `${found}${changes.length || takenIn ? ' other' : ''} ${found === 1 ? 'item stays' : 'items stay'} ${n}’s own: ${found === 1 ? 'it' : 'they'} will show under Found in the Library.` : '',
+    found ? `${found}${any || takenIn ? ' other' : ''} ${found === 1 ? 'item stays' : 'items stay'} ${n}’s own: ${found === 1 ? 'it' : 'they'} will show under Found in the Library.` : '',
     unread.length ? `${n}’s ${andList(unread.map(kind => kindNames[pageOfPart[kind]]))} couldn’t be read, so what it does to them isn’t known.` : '',
     plugins ? `${n} also gets each plugin that is on and not kept out of it.` : '', home.syncOn ? '' : SYNC_OFF,
-  ].filter(Boolean).join(' ') + resumeWords(home);
+  ].filter(Boolean).join(' ');
+  return [...(one ? oneChange(n, one, restore(false), mark) : []), `${one && rest ? ' ' : ''}${rest}${resumeWords(home)}`];
 }
 /** What it does to the one item it changes in tool `n`, by the name its plan gave (JoinCounts changing), one copy saved at most. */
-function oneChange(n: string, { name, does, saves }: JoinItem, restore: string) {
-  const save = `Saves ${n}’s copy of ${name} as a version (${restore})`;
-  if (does === 'write') return saves ? `${save}, then replaces it in ${n} with Central Knot’s version.` : `Writes Central Knot’s ${name} in ${n}.`;
-  if (does === 'remove') return saves ? `${save}, then removes it: ${name} is off.` : `Removes ${name} from ${n}: it is off.`;
-  return `${save}.`;
+function oneChange(n: string, { name, does, saves }: JoinItem, restore: string, mark?: HTMLElement): Child[] {
+  const saved = `Saves ${n}’s copy of ${name} as a version (${restore})`;
+  if (does === 'write') return saves
+    ? [`${saved}, then replaces it in ${n} with Central Knot’s `, mark ? h('span.manage-question-mark', {}, 'version', mark, '.') : 'version.']
+    : [`Writes Central Knot’s ${name}`, mark ?? null, ` in ${n}.`];
+  if (does === 'remove') return saves
+    ? [`${saved}, then removes it: ${name}`, mark ?? null, ' is off.']
+    : [`Removes ${name}`, mark ?? null, ` from ${n}: it is off.`];
+  return [`${saved}.`];
 }
 
 /**
