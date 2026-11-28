@@ -1,7 +1,7 @@
 // Words shared by the pages and by what the engines say: each tool's display name (toolNames), each kind's (kindNouns; the
 // rows of one result, of one kind or several: rowNouns, rowNames), the names of the pages called otherwise on screen
 // (pageNames), "Turn it on" (turnIt), where a copy was deleted (deletedIn), "a, b and c" lists, and a few sentences more than
-// one module says (a tool left out or not managed, through a plugin, a profile leaving use). A page's own words are its module's; a library row's are
+// one module says (a tool left out or not managed, through a plugin, a profile leaving use or `Everyday · changed`). A page's own words are its module's; a library row's are
 // libraryrow.ts libraryWords, a History entry's historyactions.ts and historypage.ts.
 import type { HomeKind } from './presence.ts';
 import type { NamedRow } from './itemrow.ts';
@@ -170,20 +170,37 @@ export const throughPlugin = (tool: HarnessId, given: { plugin: string; version?
 /** Shown in View source when a hook's declaring file or script cannot be read (hooksource.ts, hooksourceview.ts, main.ts). */
 export const HOOK_SOURCE_UNREADABLE = 'This file couldn’t be read.';
 
+/** What follows the name of the profile last switched to while no profile is in use, wherever it is named (profileplan.ts profileNow). */
+export const CHANGED = ' · changed';
+/** The profile last switched to, while no profile is in use, as every place names it: "Everyday · changed". */
+export const changedName = (name: string) => `${name}${CHANGED}`;
+/** The (?) beside `Everyday · changed` in a result (matrix.ts profileSpan), and the Profiles list's Changed mark: what the next switch does. */
+export const nextSwitchSets = (name: string) => `The next switch sets it as ${name} says.`;
+
 /**
- * Before an act that would end the profiles in use (matrix.ts endsOf; after it, in the same verb: profileLeftUse): "Everyday stays
- * saved but stops being the profile in use", `may`: "… but may stop …"; `short`: "would leave Everyday" ("might …"). profileBack: what puts it back.
+ * What an act would end of the profiles in use (matrix.ts endsOf): their names, `may` while other clicks still wait, and
+ * `changed`, the profile every place would then name `<Profile> · changed` (profileplan.ts changedAfter), where one would.
  */
-export function profileStops(names: readonly string[], may: boolean, short = false): string {
+export interface Ending { names: readonly string[]; may: boolean; changed?: string }
+/**
+ * Before an act that would end the profiles in use (matrix.ts endsOf), in the words said after it (app.ts profileEndedLine): where
+ * the one last switched to would then be named `Everyday · changed`, "the profile is then Everyday · changed" (`may`: "may then
+ * be"; `short`: "would be Everyday · changed", "might …"); else "Everyday stays saved but stops being the profile in use", `may`:
+ * "… but may stop …", `short`: "would leave Everyday" ("might …"). profileBack: what puts it back.
+ */
+export function profileStops({ names, may, changed }: Ending, short = false): string {
+  if (changed) return short ? `${may ? 'might' : 'would'} be ${changedName(changed)}` : `the profile ${may ? 'may then be' : 'is then'} ${changedName(changed)}`;
   const many = names.length > 1, who = andList([...names]);
   if (short) return `${may ? 'might' : 'would'} leave ${who}`;
   return `${who} ${many ? 'stay' : 'stays'} saved but ${may ? 'may stop' : many ? 'stop' : 'stops'} being the ${many ? 'profiles' : 'profile'} in use`;
 }
-export const profileBack = (names: readonly string[]) => `Undo, or switching to ${names.length > 1 ? 'one of them' : 'it'} again, puts it back in use.`;
+export const profileBack = ({ names, changed }: Ending) =>
+  `${changed ? `${changed} stays saved: ` : ''}Undo, or switching to ${!changed && names.length > 1 ? 'one of them' : 'it'} again, puts it back in use.`;
 
 /**
- * Says that profiles stopped being in use (after an act: app.ts profileEndedLine):
- * "Everyday stopped being the profile in use.", or for several "Everyday and Focus stopped being the profiles in use.".
+ * Says that profiles stopped being in use, after an act that ended them, where no profile is then named `<Profile> · changed`
+ * (none was last switched to, or another came into use: app.ts profileEndedLine; where one is, changedName): "Everyday stopped
+ * being the profile in use.", or for several "Everyday and Focus stopped being the profiles in use.".
  */
 export function profileLeftUse(names: readonly string[]): string {
   if (!names.length) return '';

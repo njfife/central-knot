@@ -1005,7 +1005,7 @@ if (wanted('profiles')) {
   await shot(a, 'skills-with-profile', 'The Library’s skills while Development is in use: each skill is On or Off in Central Knot, as Development has it; nothing marks a profile.');
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`); await a.settle();
   await a.click('#nav-profiles'); await openProfile('Development');
-  await atEverySize('after-hand-click', 'On the Library’s skills, turned standup off by hand, then came back: no profile is in use now (the status bar says No profile), and Development says what switching to it would turn back on', true);
+  await atEverySize('after-hand-click', 'On the Library’s skills, turned standup off by hand, then came back: no profile is in use now, and Development, the one last switched to, is named Development · changed (the status bar, its title; Changed in the list); it says what switching to it would turn back on', true);
   await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
   await a.click('#profile-new'); await name('On call');
   await a.click('#profile-from-now');

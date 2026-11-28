@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { capitalToolsPhrase, fewNames, pageNames, profileLeftUse, toolsPhrase, touchedTools } from '../src/words.ts';
+import { capitalToolsPhrase, changedName, fewNames, nextSwitchSets, pageNames, profileBack, profileLeftUse, profileStops, toolsPhrase, touchedTools } from '../src/words.ts';
 
 test('A page named otherwise on screen is spelled once, in words.ts pageNames: every other sentence, link and button reads it from there', () => {
   const src = new URL('../src/', import.meta.url);
@@ -36,6 +36,19 @@ test('the same phrase can start a label: "All 3 tools", or the names as they are
 test('many names in a sentence: four in full, then the first three and how many more', () => {
   const names = (count: number) => Array.from({ length: count }, (_, index) => `item${index + 1}`);
   assert.deepEqual([fewNames(names(4)), fewNames(names(40))], ['item1, item2, item3 and item4', 'item1, item2, item3 and 37 more']);
+});
+
+test('before an act that would end the profile in use, its words are those said after it: Everyday · changed where it is the one last switched to', () => {
+  const ending = { names: ['Everyday'], may: false, changed: 'Everyday' };
+  assert.deepEqual([changedName('Everyday'), nextSwitchSets('Everyday')], ['Everyday · changed', 'The next switch sets it as Everyday says.'], 'after it: the name and its (?)');
+  assert.deepEqual([profileStops(ending), profileStops(ending, true), profileBack(ending)],
+    ['the profile is then Everyday · changed', 'would be Everyday · changed', 'Everyday stays saved: Undo, or switching to it again, puts it back in use.']);
+  assert.deepEqual([profileStops({ ...ending, may: true }), profileStops({ ...ending, may: true }, true)], ['the profile may then be Everyday · changed', 'might be Everyday · changed'],
+    'while other clicks still wait');
+  // With none last switched to, as before: the sentence after it is profileLeftUse's.
+  const before = { names: ['Everyday', 'Focus'], may: false };
+  assert.deepEqual([profileStops(before), profileStops(before, true), profileBack(before)],
+    ['Everyday and Focus stay saved but stop being the profiles in use', 'would leave Everyday and Focus', 'Undo, or switching to one of them again, puts it back in use.']);
 });
 
 test('a profile leaving use: singular and plural', () => {

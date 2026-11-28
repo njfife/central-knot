@@ -20,8 +20,10 @@
 //   when a switchable Copilot CLI plugin copy covers a name, `pluginPlan` / `pluginUndo` owns it and `plugins.ts setPart` writes it;
 //   otherwise a standing rule rides on `LiveItem.copilotOff` (`switchPlan`, `inUse`, `switchPreview`, `copilotUndo`) and
 //   `profiles.ts runCopilotRules` writes it.
-// - `inUse` holds while a switch changes and holds nothing (never stored); `endedByChanges` says before a Library click which in use
-//   it would end (its changes projected over the live and plugin items: projected), by the rule its result says after it (`endedProfiles`);
+// - `inUse` holds while a switch changes and holds nothing (never stored); while none is, the one last switched to is named
+//   `Everyday · changed` (`lastSwitched`, from History, never stored either): `profileNow` is the one rule every place that names
+//   the profile in use asks. `endedByChanges` says before a Library click which in use it would end (its changes projected over the
+//   live and plugin items: projected), by the rule its result says after it (`endedProfiles`), and `changedAfter` that name after it;
 //   `listedPlugins` is the one rule for which plugin rows
 //   a profile lists and `listedChanges` gives each listed changing row once with its cell words (read by the header's short line,
 //   `Changes N`, its headings and every row's cell); `switchPreview` (`PLUGIN_ITEMS_STAY`, `pluginStayNote`) gives
@@ -42,10 +44,10 @@ import { loadsKind, pageOfPart, pluginOff, samePart } from './pluginstatus.ts';
 import { cantSwitch, hasOwnSwitch, itemOffNow, itemSaid, onNow, ownSwitch, type PluginItemAt } from './pluginswitch.ts';
 import { holds, takesPlugins } from './presence.ts';
 import { groupBy } from './model.ts';
-import { andList, byToolOrder, harnessIds, keptOutWords, kindNouns, orList, sameTools, toolNames } from './words.ts';
-import type { ExceptSwitched, HarnessId, HistoryEvent, HomeView, InstalledPlugin, LibraryFacts, PluginItem, PluginSwitched, Profile, Change } from './types.ts';
+import { andList, byToolOrder, changedName, harnessIds, keptOutWords, kindNouns, orList, sameTools, toolNames } from './words.ts';
+import type { ExceptSwitched, HarnessId, HistoryEvent, HomeView, InstalledPlugin, LibraryFacts, PluginItem, PluginSwitched, Profile, ProfilesView, Change } from './types.ts';
 
-/** What every screen calls the state where no profile is in use. */
+/** What every screen calls the state where no profile is in use and none was last switched to, or that one is gone (profileNow). */
 export const NO_PROFILE = 'No profile';
 
 /** A profile's name for a library item: its kind and key, `skill:notes`. */
@@ -554,17 +556,42 @@ export const switchable = (profile: Pick<Profile, 'items' | 'switchesPluginItems
 export const inUse = (profiles: Profile[], live: LiveItem[], plugins: PluginLive[]) =>
   profiles.filter(profile => unchanged(switchPlan(profile, live)) && pluginItemsAgree(profile, plugins));
 
-/** The names of the profiles in use, as the menus and the status bar say them ("Development and Incident"), or No profile. */
-export function inUseName(profiles: Profile[], live: LiveItem[], plugins: PluginLive[]): string {
-  const names = inUse(profiles, live, plugins).map(profile => profile.name);
-  return names.length ? andList(names) : NO_PROFILE;
+/**
+ * The profile last switched to (types.ts ProfilesView `last`), by id: the newest profile entry of `events` (History, newest last)
+ * that is not an Undo's own (`undoOf`) and was not undone (`undoneBy`), naming its profile by `toId`, else, written before
+ * switches kept it, by `toName`; undefined where that profile is gone or History holds none (its days, or unreadable: []). Never
+ * stored: an Undo of a switch marks it undone, so the switch before it is last again.
+ */
+export function lastSwitched(events: readonly HistoryEvent[], profiles: readonly Profile[]): string | undefined {
+  const entry = events.findLast(event => event.kind === 'profile' && !!event.profile && !event.profile.undoOf && !event.undoneBy)?.profile;
+  if (!entry) return undefined;
+  return (entry.toId ? profiles.find(profile => profile.id === entry.toId) : profiles.find(profile => profile.name === entry.toName))?.id;
 }
 
-/** The profiles in use in `home`, worked out from its live and plugin items as the status bar does. */
-export function inUseInHome(home: PluginHome | undefined): Profile[] {
-  if (!home?.profiles?.profiles?.length) return [];
+/** The profiles now, as profileNow gives them: those in use, else the one last switched to (`changed`), and the name every place says. */
+export interface ProfileNow { inUse: Profile[]; changed?: Profile; name: string }
+/**
+ * The profiles now, the one rule every place that names the profile in use asks (the status bar and its menu, the menu bar's
+ * Profile menu, the tray's tooltip and title, the Profiles list, picker, title and the profile it opens, Harnesses' line, an
+ * act's result and the Library's forecast of it): those in use, by name ("Development and Incident"); else, while none is, the
+ * one last switched to (`changed`: ProfilesView `last`, from History: lastSwitched), named `Everyday · changed` (words.ts
+ * changedName); else No profile.
+ */
+export function profileNow(view: Pick<ProfilesView, 'profiles' | 'last'>, live: LiveItem[], plugins: PluginLive[]): ProfileNow {
+  const now = inUse(view.profiles, live, plugins), changed = now.length ? undefined : view.profiles.find(profile => profile.id === view.last);
+  const name = now.length ? andList(now.map(profile => profile.name)) : changed ? changedName(changed.name) : NO_PROFILE;
+  return { inUse: now, ...(changed ? { changed } : {}), name };
+}
+/** One profile's name where profiles are listed (both menus, the picker, the open profile's title): `Everyday · changed` for profileNow's `changed`. */
+export const nameNow = (now: ProfileNow, profile: Profile) => (profile.id === now.changed?.id ? changedName(profile.name) : profile.name);
+/** What leads profileNow's name where a sentence says it (the status bar's hover, Harnesses' line): "Profile in use", or for `Everyday · changed` "Profile". */
+export const nowLead = (now: ProfileNow) => (now.changed ? 'Profile' : 'Profile in use');
+
+/** profileNow in `home` (its `inUse`: the profiles in use there), from its live and plugin items as the status bar works them out. */
+export function profileNowIn(home: PluginHome): ProfileNow {
+  if (!home.profiles?.profiles?.length) return { inUse: [], name: NO_PROFILE };
   const plugins = pluginLive(home);
-  return inUse(home.profiles.profiles, homeItems(home, plugins), plugins);
+  return profileNow(home.profiles, homeItems(home, plugins), plugins);
 }
 
 /** One item's change in a Library click, as libraryrow.ts rowClicks makes it (types.ts Change), with the item's kind. */
@@ -593,6 +620,16 @@ export function endedByChanges(home: PluginHome, changes: readonly ItemChange[])
   if (!home.profiles?.profiles?.length) return [];
   const plugins = pluginLive(home), live = homeItems(home, plugins), before = inUse(home.profiles.profiles, live, plugins), after = projected(home, live, plugins, changes);
   return endedProfiles(before, inUse(before, after.live, after.plugins));
+}
+
+/**
+ * The profile every place would name `<Profile> · changed` once a Library click's `changes` are made (profileNow over them
+ * projected; a click never changes which was last switched to), if one would: matrix.ts endsOf says it before the click.
+ */
+export function changedAfter(home: PluginHome, changes: readonly ItemChange[]): Profile | undefined {
+  if (!home.profiles?.profiles?.length) return undefined;
+  const plugins = pluginLive(home), after = projected(home, homeItems(home, plugins), plugins, changes);
+  return profileNow(home.profiles, after.live, after.plugins).changed;
 }
 
 /** Every profile in `before` when none of its ids still matches in `after` (even if another now matches), else empty. */

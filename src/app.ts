@@ -1,6 +1,6 @@
 // The page's state and most pages' actions (MAP.md, "The app's shell and Settings"): the open home's view and each page's own
 // state (`state`), the page shown (showPage), what is said after a click (tell, announce; profileEndedLine, via profilesBefore and
-// profileplan.ts endedProfiles, gives words.ts profileLeftUse when an act ended every profile in use, called by withProfileEnded and pluginstate.ts) and when a result goes by itself
+// profileplan.ts endedProfiles, gives `Everyday · changed` (profileplan.ts profileNow) or words.ts profileLeftUse when an act ended every profile in use, called by withProfileEnded and pluginstate.ts) and when a result goes by itself
 // (FADE_MS), the busy line (busy) and whether the page is acting (acting: busy, or a run of clicks: clicklist.ts); a click on an
 // item list sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick), one per kind as one
 // (applyByKind) or in its turn in the page's list (queueClick), its result kept for the page (lastResult), a run's said once
@@ -29,7 +29,7 @@ import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, heldWhole, keptBack } from './clickplan.ts';
 import { entriesNow, everythingAction, everythingDone, everythingPlan, libraryAction, libraryEntry, librarySentence, oneUndoCovers, restorePlan } from './historyactions.ts';
 import { asksWhichCopy, copiesDiffer, libraryWords, placeOf, stillReadWords } from './libraryrow.ts';
-import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, profileLeftUse, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
+import { andList, changedName, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, profileLeftUse, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform, shownFromHome } from './machine.ts';
 import { closeRun, endListNews, fadeRun, forgetResults, loadPlugins, overRun, resetMarket, retire, stillOnFromProfiles } from './pluginstate.ts';
@@ -39,7 +39,7 @@ import type { PluginEntry } from './pluginrecord.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
-import { changeWords, endedProfiles, filledWords, inUseInHome, leftLoadingAfter, stillLoadAfter, undoOffered, wholeCounts, wholeSaid } from './profileplan.ts';
+import { changeWords, endedProfiles, filledWords, leftLoadingAfter, profileNowIn, stillLoadAfter, undoOffered, wholeCounts, wholeSaid } from './profileplan.ts';
 import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, waysFrom, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { followView, type SigninChecks } from './mcpsignin.ts';
@@ -239,15 +239,20 @@ export interface ProfilesBefore { home: string; profiles: Profile[] }
 let actBefore: ProfilesBefore | undefined;
 /** Snapshots the open home and the profiles in use in it before an act starts (busy, queueClick, pluginstate.ts). */
 export function profilesBefore(): ProfilesBefore | undefined {
-  return state.home ? { home: state.home.home, profiles: inUseInHome(state.home) } : undefined;
+  return state.home ? { home: state.home.home, profiles: profileNowIn(state.home).inUse } : undefined;
 }
-/** Gives profileLeftUse when every profile in `before` (defaults to busy's `actBefore` when omitted/undefined) stopped being in use in `after` (same home), else undefined. */
+/**
+ * When every profile in `before` (defaults to busy's `actBefore` when omitted/undefined) stopped being in use in `after` (same
+ * home): `Everyday · changed` where `after` names the one last switched to so (profileplan.ts profileNow), else profileLeftUse;
+ * undefined when none ended.
+ */
 export function profileEndedLine(before: ProfilesBefore | undefined = actBefore, after: HomeView | undefined = state.home): string | undefined {
   if (!before || !after || after.home !== before.home) return undefined;
-  const ended = endedProfiles(before.profiles, inUseInHome(after));
-  return ended.length ? profileLeftUse(ended.map(profile => profile.name)) : undefined;
+  const now = profileNowIn(after), ended = endedProfiles(before.profiles, now.inUse);
+  if (!ended.length) return undefined;
+  return now.changed ? changedName(now.changed.name) : profileLeftUse(ended.map(profile => profile.name));
 }
-/** Appends profileLeftUse when an act in the same home ended every profile that was in use before it. */
+/** Appends profileEndedLine's words when an act in the same home ended every profile that was in use before it. */
 function withProfileEnded(outcome: Outcome, { checkProfile = true, before = actBefore }: { checkProfile?: boolean; before?: ProfilesBefore } = {}): Outcome {
   if (!checkProfile || outcome.refused || outcome.profileLine) return outcome;
   const profileLine = profileEndedLine(before);
@@ -1428,7 +1433,7 @@ export interface Outcome {
   settingsBand?: boolean;
   /** Shown as a band on History even without warn, reloads or profileLine: a tool's Manage click (managecard.ts, historypage.ts). */
   historyBand?: boolean;
-  /** Appended profileLeftUse sentence when an act ended every profile in use; keeps the result in a band (saidInStatusBar) and whole on Row 2 (matrix.ts listResult). */
+  /** Appended profileEndedLine words (`Everyday · changed`, or profileLeftUse's sentence) when an act ended every profile in use; keeps the result in a band (saidInStatusBar) and whole on Row 2 (matrix.ts listResult, profileSpan). */
   profileLine?: string;
   /** The band goes after a few seconds: an Undo's confirmation. */
   fade?: boolean;

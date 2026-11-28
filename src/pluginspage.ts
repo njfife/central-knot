@@ -374,7 +374,7 @@ export function pluginsResult(): HTMLElement[] {
   const of = last ?? app.outcome, whole = of !== undefined && app.shownWhole === of, hasAdvice = advice.items.length > 0;
   const run = runLine(last, here, lines, advice, elsewhere, whole);
   const chips = run && !whole ? reloadChips(advice, of) : null;
-  const profile = profileSpan(run && !whole ? last?.profileLine : undefined);
+  const profile = profileSpan(run && !whole ? last?.profileLine : undefined, 'plugins-profile-changed-info');
   const problems = problemBand(problem, lines, !run, hasAdvice, chips, profile, last);
   // With no problem line, Show all follows the sentence, for one the header cuts or whose reload sentences live under Show all.
   if (run && !problems) run.querySelector('.toolbar-result-text')!.after(wholeToggle(of, 0, hasAdvice));
