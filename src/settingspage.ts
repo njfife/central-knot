@@ -80,16 +80,14 @@ function showNewest(settings: AppPreferences | null | undefined, rank: number) {
   rerender();
 }
 
-/**
- * Reads the settings for the page: when it opens, and when main says they changed or the window comes back. An open shorten
- * question keeps its moment current, changed in place: a redraw here could swallow the click that focused the window.
- */
+/** Shared label for the History retention selector on both History and Settings. */
+const HISTORY_KEEP_LABEL = 'Keep history for';
+
+/** Reads the settings for the page: when it opens, and when main says they changed or the window comes back. */
 export async function loadSettings() {
   const rank = ++ranked;
   const settings = await window.centralKnot.getSettings();
   showNewest(settings, rank);
-  const question = document.getElementById('history-shorten-text');
-  if (shortening && question) question.textContent = shortenQuestion(shortening);
   return settings;
 }
 
@@ -219,10 +217,10 @@ function chooseHistoryDays(days: HistoryDays) {
   announce(shortenQuestion(days), true);
 }
 
-/** Where a window of `days` starts, as of now, in the person's own date and time format. */
+/** Where a window of `days` starts, as of now, in the person's own date and time format (for post-save notes). */
 const removedBefore = (days: HistoryDays) => new Date(Date.now() - days * DAY_MS).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const shortenQuestion = (days: HistoryDays) =>
-  `History before ${removedBefore(days)} will be removed and can’t be restored. Your other homes remove it too the next time they record a change.`;
+  `In every home, History entries older than ${days} days will be removed and can’t be restored.`;
 
 /**
  * What a shorter window did to older History, as main reports it. Only 'done' says anything was removed (with a check); the
@@ -269,11 +267,12 @@ function closeShortening() {
 }
 const cancelOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && shortening) { event.preventDefault(); closeShortening(); } };
 
-/** The row's question before a shorter window removes anything: from when, that it can't be undone, and that other homes follow later. */
+/** The row's question before a shorter window removes anything: age limit, that it can't be undone, and effect in any other home. */
 function shortenConfirmation(days: HistoryDays): HTMLElement {
-  return h('div.notice.notice-danger.setting-confirm', { id: 'setting-history-question', role: 'group', 'aria-labelledby': 'history-shorten-text', onkeydown: cancelOnEscape },
-    icon('circle-alert', 16, 'tone-danger'),
-    h('p.setting-confirm-text', { id: 'history-shorten-text' }, shortenQuestion(days)),
+  return h('div.setting-confirm', { id: 'setting-history-question', role: 'group', 'aria-labelledby': 'history-shorten-text', onkeydown: cancelOnEscape },
+    h('div.setting-confirm-body', {},
+      icon('circle-alert', 16, 'tone-danger'),
+      h('p.setting-confirm-text', { id: 'history-shorten-text' }, shortenQuestion(days))),
     h('div.setting-confirm-actions', {},
       button({ variant: 'danger', size: 'small', label: `Shorten to ${days} days`, id: 'history-shorten', onclick: () => void saveHistoryDays(days) }),
       // Says what it keeps: the saved window, which the select still shows.
@@ -288,12 +287,12 @@ const historySelect = (labelId: string): HTMLElement => h('span.select', {},
   icon('chevrons-up-down', 14));
 const historyNotice = (): RowMessage | undefined => (updatingHistory ? { text: 'Updating History…', tone: 'progress' } : undefined);
 
-/** History's own time control ("Keep [30 days ▾]"), sharing Settings' choices, warning, save and outcomes. */
+/** History's own time control ("Keep history for [30 days ▾]"), sharing Settings' label, choices, warning, save and outcomes. */
 export function historyWindowControl(): HTMLElement {
   const message = messages.get('history');
   const notice = historyNotice();
   return h('div.history-keep', { id: 'history-keep' },
-    h('div.history-keep-row', {}, h('label.history-keep-label', { id: 'history-keep-label', for: 'history-days' }, 'Keep'), historySelect('history-keep-label')),
+    h('div.history-keep-row', {}, h('label.history-keep-label', { id: 'history-keep-label', for: 'history-days' }, HISTORY_KEEP_LABEL), historySelect('history-keep-label')),
     message && messageLine(message, { id: 'setting-history-message' }),
     notice && messageLine(notice, { id: 'setting-history-notice', announce: true }),
     shortening && shortenConfirmation(shortening));
@@ -612,7 +611,7 @@ export function settingsPage(): HTMLElement {
     state.home ? settingsSection('home', 'This home', syncEverythingRow(), sessionCostsRow()) : null,
     settingsSection('plugins', 'Plugins', pluginUpdatesRow(), pluginTextRow()),
     settingsSection('history', 'History',
-      settingRow('history', 'Keep history for', undefined, historySelect('setting-history-title'), historyNotice(), shortening ? shortenConfirmation(shortening) : undefined)),
+      settingRow('history', HISTORY_KEEP_LABEL, undefined, historySelect('setting-history-title'), historyNotice(), shortening ? shortenConfirmation(shortening) : undefined)),
     // Help stays the last section, so the log's lines lengthen the page's own scroll.
     settingsSection('help', 'Help',
       settingRow('log', 'Log', undefined, logButtons('row'), undefined, undefined, 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t in it.'),
