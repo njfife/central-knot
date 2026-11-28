@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer as tcpServer } from 'node:net';
 import { dirname, join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
+import { inflateSync } from 'node:zlib';
 import { writeClaudeInstall, writeMarket, writeOldParts } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
 import { packagedApp } from './package-app.mjs';
@@ -1471,10 +1472,12 @@ async function harnessFlow() {
       const items = [...(body?.querySelectorAll('.legend-item') ?? [])].map(el => el.textContent.trim());
       const barBottom = document.querySelector('.toolbar').getBoundingClientRect().bottom;
       const bodyTop = body?.getBoundingClientRect().top ?? 0;
-      return { open: !!d?.open, belowToolbar: !!body && Math.abs(bodyTop - barBottom) <= 2, items };
+      const chev = d?.querySelector('.fold-chevron');
+      const m = chev ? new DOMMatrixReadOnly(getComputedStyle(chev).transform) : null;
+      return { open: !!d?.open, belowToolbar: !!body && Math.abs(bodyTop - barBottom) <= 2, chevronDown: !!m && m.b > 0.9, items };
     })()`);
-    same('opening What the marks mean groups keyWords by visual look right under the toolbar',
-      legendOpen, { open: true, belowToolbar: true, items: ['On there / Has the current version / Has it', 'No copy', 'Off: Central Knot keeps it'] });
+    same('opening What the marks mean uses Has a copy right under the toolbar with a downward chevron',
+      legendOpen, { open: true, belowToolbar: true, chevronDown: true, items: ['Has a copy', 'No copy', 'Off: Central Knot keeps it'] });
     await t.click('#mark-legend-toggle');
 
     // Plain "Jump to:" links on a long tool list at 860×528: all section names without counts, sticky heads stay in sight, landing heading flashes with an accent bar and clears under reduced motion.
@@ -1611,22 +1614,93 @@ async function harnessFlow() {
       const scr = scroller?.getBoundingClientRect(), fr = foot?.getBoundingClientRect(), sr = s?.getBoundingClientRect(), br = body?.getBoundingClientRect();
       const items = [...(body?.querySelectorAll('.legend-item') ?? [])];
       const labels = items.map(el => el.textContent.trim());
+      const chev = d?.querySelector('.fold-chevron');
+      const m = chev ? new DOMMatrixReadOnly(getComputedStyle(chev).transform) : null;
       const rows = [...document.querySelectorAll('.ov-row[data-key]')];
       const visibleRows = rows.filter(el => { const r = el.getBoundingClientRect(); return r.height > 0 && r.bottom > scr.top + 1 && r.top < scr.bottom - 1; }).length;
       scroller.scrollTop = scroller.scrollHeight;
       const last = rows[rows.length - 1]?.getBoundingClientRect();
       return {
         open: !!d?.open,
+        chevronUp: !!m && m.b < -0.9,
+        meetsFoot: !!scr && !!fr && Math.abs(fr.top - scr.bottom) <= 1,
         aboveToggle: !!foot && !!body && !!br && !!sr && !!fr && foot.contains(body) && br.top >= fr.top - 1 && br.bottom <= sr.top + 1,
-        grouped: labels.includes('On there / Has the current version / Has it') && items.length <= 5,
+        grouped: labels[0] === 'Has a copy' && !labels.some(l => l.includes(' / ')) && items.length <= 5,
         inViewBounds: !!fr && !!br && foot.scrollWidth <= foot.clientWidth + 1 && br.top >= 0 && br.bottom <= window.innerHeight
           && items.every(el => { const r = el.getBoundingClientRect(); return r.left >= fr.left - 1 && r.right <= fr.right + 1 && r.top >= br.top - 1 && r.bottom <= br.bottom + 1 && r.bottom <= window.innerHeight; }),
         showsRows: !!scr && scr.height >= 120 && visibleRows >= 2,
         lastRowScrollable: !!last && !!scr && last.top >= scr.top - 1 && last.bottom <= scr.bottom + 1,
       };
     })()`);
-    same('pressing What the marks mean on Library opens grouped key above toggle in view at 860×528 while list keeps rows and scrolls to the last row',
-      libOpen, { open: true, aboveToggle: true, grouped: true, inViewBounds: true, showsRows: true, lastRowScrollable: true });
+    same('pressing What the marks mean on Library opens key above toggle (scroller meets foot, upward chevron, plain Has a copy) in view at 860×528 while list keeps rows and scrolls to the last row',
+      libOpen, { open: true, chevronUp: true, meetsFoot: true, aboveToggle: true, grouped: true, inViewBounds: true, showsRows: true, lastRowScrollable: true });
+
+    // Key samples match row marks of the same look in computed styles and rendered pixel strength, in both light and dark themes.
+    const decodePng = buf => {
+      let pos = 8, w = 0, h = 0, ct = 0;
+      const chunks = [];
+      while (pos < buf.length) {
+        const len = buf.readUInt32BE(pos), type = buf.toString('ascii', pos + 4, pos + 8);
+        if (type === 'IHDR') { w = buf.readUInt32BE(pos + 8); h = buf.readUInt32BE(pos + 12); ct = buf[pos + 17]; }
+        if (type === 'IDAT') chunks.push(buf.subarray(pos + 8, pos + 8 + len));
+        pos += 12 + len;
+      }
+      const bpp = ct === 6 ? 4 : 3, raw = inflateSync(Buffer.concat(chunks)), stride = w * bpp + 1, out = Buffer.alloc(w * h * bpp);
+      for (let y = 0; y < h; y++) {
+        const f = raw[y * stride], rOff = y * stride + 1, dOff = y * w * bpp;
+        for (let x = 0; x < w * bpp; x++) {
+          const a = x >= bpp ? out[dOff + x - bpp] : 0, b2 = y > 0 ? out[dOff - w * bpp + x] : 0, c = (x >= bpp && y > 0) ? out[dOff - w * bpp + x - bpp] : 0;
+          let v = raw[rOff + x];
+          if (f === 1) v = (v + a) & 255;
+          else if (f === 2) v = (v + b2) & 255;
+          else if (f === 3) v = (v + ((a + b2) >> 1)) & 255;
+          else if (f === 4) { const p = a + b2 - c, pa = Math.abs(p - a), pb = Math.abs(p - b2), pc = Math.abs(p - c); v = (v + (pa <= pb && pa <= pc ? a : pb <= pc ? b2 : c)) & 255; }
+          out[dOff + x] = v;
+        }
+      }
+      return { w, h, bpp, data: out };
+    };
+    const strongestLum = (png, rect, scale, light) => {
+      const x0 = Math.max(0, Math.floor(rect.left * scale)), y0 = Math.max(0, Math.floor(rect.top * scale));
+      const x1 = Math.min(png.w, Math.ceil(rect.right * scale)), y1 = Math.min(png.h, Math.ceil(rect.bottom * scale));
+      let best = light ? 255 : 0;
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+        const i = (y * png.w + x) * png.bpp;
+        const lum = Math.round(0.299 * png.data[i] + 0.587 * png.data[i + 1] + 0.114 * png.data[i + 2]);
+        if (light ? lum < best : lum > best) best = lum;
+      }
+      return best;
+    };
+    for (const theme of ['light', 'dark']) {
+      await t.run(`document.activeElement?.blur(); window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+      await wait(120);
+      for (const [look, skillKey] of [['on', 'skill-01'], ['none', 'found-local'], ['off', 'off-one']]) {
+        const pair = await t.run(`(() => {
+          const rowMark = document.querySelector('.ov-row[data-key=${JSON.stringify(rowPart('', 'skills', skillKey))}] .tool-mark.mark-${look}[data-tool="codex-cli"]');
+          const keyMark = document.querySelector('#mark-legend-body .tool-mark.mark-${look}');
+          rowMark?.scrollIntoView({ block: 'center' });
+          const read = el => {
+            const svg = el?.querySelector('svg'), sr = svg?.getBoundingClientRect();
+            const cs = el ? getComputedStyle(el) : null, scs = svg ? getComputedStyle(svg) : null, aft = el ? getComputedStyle(el, '::after') : null;
+            return { color: cs?.color, opacity: scs?.opacity, filter: scs?.filter, strokeWidth: scs?.strokeWidth, w: sr ? Math.round(sr.width) : 0, slashW: aft ? parseFloat(aft.width) : 0, rect: sr ? { left: sr.left, top: sr.top, right: sr.right, bottom: sr.bottom } : null };
+          };
+          return { viewW: window.innerWidth, row: read(rowMark), key: read(keyMark) };
+        })()`);
+        await wait(60);
+        const png = decodePng(Buffer.from((await t.send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
+        const scale = png.w / pair.viewW;
+        const rowLum = strongestLum(png, pair.row.rect, scale, theme === 'light');
+        const keyLum = strongestLum(png, pair.key.rect, scale, theme === 'light');
+        const lumGap = Math.abs(rowLum - keyLum);
+        check(`Library key ${look} sample matches row mark colour, size, stroke, and rendered pixel strength in ${theme}`,
+          pair.key.color === pair.row.color && pair.key.opacity === pair.row.opacity && pair.key.filter === pair.row.filter
+            && pair.key.w === pair.row.w && pair.key.strokeWidth === pair.row.strokeWidth
+            && (look !== 'off' || Math.abs(pair.key.slashW - pair.row.slashW) <= 1) && lumGap <= 15,
+          { rowLum, keyLum, lumGap, row: pair.row, key: pair.key });
+      }
+    }
+    await t.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
     await t.click('#nav-overview');
     await t.click('#nav-library');
     same('re-entering Library forgets open What the marks mean state',

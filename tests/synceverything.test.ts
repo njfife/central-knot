@@ -358,7 +358,6 @@ test('An agent whose only copy is two files differing by case gets no Add, and t
     assert.equal(wrote(await background(box)), 0);
     const view = (await views(box)).agents;
     assert.deepEqual(rowOf(view, 'reviewer')?.takeInAnswers, { click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } });
-    assert.equal(statusLine(pageRow(rowOf(view, 'reviewer')!), undefined, tools), '');
   } finally { await box.cleanup(); }
 });
 

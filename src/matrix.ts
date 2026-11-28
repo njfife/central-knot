@@ -2426,10 +2426,10 @@ type MarkLook = 'on' | 'off' | 'none' | 'differs' | 'waits' | 'held';
 
 /** What a mark says in the key, by what it is (libraryrow.ts HarnessIs, and a plugin's item). */
 const keyWords = {
-  on: 'On there', 'plugin-off': 'Off there', none: 'No copy',
+  on: 'Has a copy', 'plugin-off': 'Off there', none: 'No copy',
   'will-sync': 'Gets a copy when sync runs next',
-  taken: 'Edited, becomes the current version', 'deleted-by-hand': 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs', own: 'Its own copy, not from Central Knot',
-  current: 'Has the current version', has: 'Has it', 'kept-out': 'Kept out', 'off-in-ck': 'Off: Central Knot keeps it', unseen: 'Left as it is (its line says why)', 'cannot-take': 'Can’t take it',
+  taken: 'Edited, becomes the current version', 'deleted-by-hand': 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs',
+  'kept-out': 'Kept out', 'off-in-ck': 'Off: Central Knot keeps it', unseen: 'Left as it is (its line says why)', 'cannot-take': 'Can’t take it',
   'with-plugin': 'Gets it with its plugin (its line installs it)',
   'another-way': 'Has it another way, not from Central Knot', switched: 'Switched off in its own settings',
 } as const;
@@ -2452,8 +2452,8 @@ function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; gl
 
 /** An item's mark for one harness: what the library's rule says of it (libraryrow.ts harnessIs), drawn with the page's looks. */
 const libraryMarks: Record<HarnessIs, { look: MarkLook; key: keyof typeof keyWords; glyph?: IconName }> = {
-  current: { look: 'on', key: 'current' },
-  'own-copy': { look: 'on', key: 'own' },
+  current: { look: 'on', key: 'on' },
+  'own-copy': { look: 'on', key: 'on' },
   'kept-out': { look: 'held', key: 'kept-out', glyph: 'circle-minus' },
   none: { look: 'none', key: 'none' },
   cannot: { look: 'held', key: 'cannot-take', glyph: 'circle-slash-2' },
@@ -2468,8 +2468,8 @@ function libraryMark(lib: LibraryPage, skill: ItemRow, tool: Tool): ReturnType<t
   const item = itemOf(skill), is = harnessIs(skill, item, tool);
   const line = lib.say.harnessLine(skill, item, tool, names[tool]) || 'No copy while it is off.';
   const words = `${names[tool]}: ${line.replace(/^./, first => first.toLowerCase())}`;
-  // Off, or found: a harness with no copy while Central Knot keeps the item is off there; a found item's own copy is simply on.
-  const drawn = is === 'none' && inLibrary(item) ? { look: 'off' as const, key: 'off-in-ck' as const } : is === 'own-copy' && !inLibrary(item) ? { look: 'on' as const, key: 'has' as const } : libraryMarks[is];
+  // Off: a harness with no copy while Central Knot keeps the item is off there.
+  const drawn = is === 'none' && inLibrary(item) ? { look: 'off' as const, key: 'off-in-ck' as const } : libraryMarks[is];
   // Loaded there, but that tool's own switch turns it off: a mark of its own, whoever set the switch (libraryrow.ts `switchedOff`).
   const switched = skill.switchedOff?.includes(tool) && drawn.look === 'on' ? { look: 'held' as const, key: 'switched' as const, glyph: 'circle-off' as IconName } : undefined;
   return { ...(switched ?? drawn), state: is, words };
@@ -2480,7 +2480,7 @@ function libraryMark(lib: LibraryPage, skill: ItemRow, tool: Tool): ReturnType<t
  * button. With no tool, a neutral sample for the key.
  */
 function toolMark(look: MarkLook, tool: Tool | undefined, glyph?: IconName, size = 14) {
-  return h(`span.tool-mark.mark-${look}`, { 'aria-hidden': 'true' }, glyph ? icon(glyph, size, look === 'differs' || look === 'waits' ? 'tone-warning' : look === 'held' ? 'tone-faint' : '') : tool ? brandMark(tool, size) : icon('blocks', size));
+  return h(`span.tool-mark.mark-${look}`, { 'aria-hidden': 'true' }, glyph ? icon(glyph, size, look === 'differs' || look === 'waits' ? 'tone-warning' : look === 'held' ? 'tone-faint' : '') : tool ? brandMark(tool, size) : icon('blocks', size, 'sample-mark'));
 }
 
 /** Which tools' marks a row or key draws: on a tool's tab, only that tool; elsewhere, every tool the kind uses. */
@@ -2512,7 +2512,7 @@ function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
   for (const row of plugins) for (const each of markTools(t, toolsFor(t, kindOf(row)))) if (row.copies[each as HarnessId]) seen.set(offIn(row, each as HarnessId) ? 'plugin-off' : 'on', { look: offIn(row, each as HarnessId) ? 'off' : 'on' });
   const entries = (Object.keys(keyWords) as (keyof typeof keyWords)[]).filter(key => seen.has(key)).map(key => ({ key, ...seen.get(key)! }));
   const shown = [...groupBy(entries, item => `${item.look}:${item.glyph ?? ''}`).values()].map(group => ({ ...group[0]!, label: group.map(item => keyWords[item.key]).join(' / ') }));
-  const keyed = h('div.legend', { 'aria-label': 'Key' }, shown.map(item => h('span.legend-item', {}, toolMark(item.look, t.tool, item.glyph, 12), item.label)));
+  const keyed = h('div.legend', { 'aria-label': 'Key' }, shown.map(item => h('span.legend-item', {}, toolMark(item.look, t.tool, item.glyph), item.label)));
   if (!keyed.childElementCount) return null;
   const toggle = fold({ id: 'mark-legend', toggleId: 'mark-legend-toggle', label: 'What the marks mean', open: t.view.legendOpen, controls: 'mark-legend-body', onToggle: open => { t.view.legendOpen = open; rerender(); } });
   const body = t.view.legendOpen ? h('div.legend-band', { id: 'mark-legend-body' }, keyed) : undefined;

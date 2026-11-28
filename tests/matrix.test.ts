@@ -307,7 +307,7 @@ test('tool tab places What the marks mean by the toolbar with one entry per visu
   const body = findById(openTree, 'mark-legend-body');
   assert.ok(body, 'opening What the marks mean draws #mark-legend-body below the toolbar');
   const legendItems = findAll(body, el => el.className.split(/\s+/).includes('legend-item')).map(el => textOf(el));
-  assert.deepEqual(legendItems, ['On there / Has the current version / Has it', 'No copy', 'Off: Central Knot keeps it']);
+  assert.deepEqual(legendItems, ['Has a copy', 'No copy', 'Off: Central Knot keeps it']);
   // Tool tab preserves open key across Files -> Back and across a home change in forgetOtherHomes (matching next).
   const prevPage = app.page, prevHarness = app.harness, prevTab = app.harnessTab, prevHome = app.home;
   app.page = 'harnesses';
@@ -392,12 +392,9 @@ test('Library and its Files view keep all tool marks, pin grouped What the marks
   assert.ok(body, 'opening Library What the marks mean draws #mark-legend-body in .legend-foot');
   assert.ok(openFoot.children.indexOf(body) < openFoot.children.indexOf(openFold), 'opened Library key renders above its toggle');
   const items = findAll(body, el => el.className.split(/\s+/).includes('legend-item')).map(el => textOf(el));
-  assert.deepEqual(items, ['On there / Has the current version / Has it', 'No copy', 'Kept out', 'Off: Central Knot keeps it', 'Has it another way, not from Central Knot']);
+  assert.deepEqual(items, ['Has a copy', 'No copy', 'Kept out', 'Off: Central Knot keeps it', 'Has it another way, not from Central Knot']);
 
-  // Every way into the Library forgets the open state: another visit, openKind, another home, and another segment.
-  app.visit += 1;
-  assert.equal(findById(libraryTable() as unknown as FakeNode, 'mark-legend-body'), undefined, 'another visit forgets open key');
-  openLibraryLegend();
+  // openKind, another home, and another segment forget the open key (re-entry visit is checked in e2e harnessFlow).
   openKind('skills');
   assert.equal(findById(libraryTable() as unknown as FakeNode, 'mark-legend-body'), undefined, 'openKind forgets open key');
   openLibraryLegend();
