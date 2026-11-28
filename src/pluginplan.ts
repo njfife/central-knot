@@ -331,6 +331,8 @@ export interface LastRun { done: PluginDone[]; undo: boolean; home: string; /** 
   unreached?: { source: string; plugin: string }[];
   /** Appended app.ts profileEndedLine words (`Everyday · changed`, or profileLeftUse's sentence) when the run ended every profile in use (pluginstate.ts, pluginspage.ts). */
   profileLine?: string;
+  /** Parts turned off with the plugin on Instructions (pluginswitch.ts installedImpact), for the band sentence. */
+  also?: string;
   /**
    * Set when a plugin's switch made the run (marketplaces.ts turn): the plugin's entry before it (null: none) and its Undo as main gave it (`back`).
    */
