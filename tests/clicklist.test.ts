@@ -4257,6 +4257,17 @@ test('Consequential uninstall/Undo shows irreversible completion without Undo qu
     assert.match(textOf(ordinary[1]), /\/reload-plugins/);
   }
 
+  // 3b. Plugin Update with reload advice (no Undo, no profileLine) keeps its "can't be undone" announcement visible in the status bar.
+  app.page = 'plugins';
+  market.nav = { ...market.nav, source: '/market', plugin: 'alpha' };
+  (api as Record<string, unknown>).updatePlugin = async () => ({
+    reports: [{ tool: 'claude-cli', outcome: 'updated', changed: true, version: '2.0.0', message: 'Updated.', runs: [], reloads: [{ tool: 'claude-cli', kind: 'plugin', on: true }] }],
+  });
+  t.after(() => { delete (api as Record<string, unknown>).updatePlugin; });
+  await applyPluginOps([{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'update' }]);
+  assert.equal(app.said.quiet, false, 'Update without Undo keeps its cannot-be-undone announcement visible in the status bar');
+  assert.match(app.said.text, /updated to 2\.0\.0 in Claude Code, which can’t be undone\./);
+
   // 4. Pressing plugin A's Undo from plugin B's page on Plugin marketplaces: header drops A's reload advice on B, so the status bar announces it instead of going quiet.
   app.page = 'plugins';
   market.nav = { ...market.nav, source: '/market', plugin: 'beta' };

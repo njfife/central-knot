@@ -329,7 +329,8 @@ function act(activity: MarketActivity, work: () => Promise<string | void>) {
       const last = runs.get(started);
       const profileLine = last?.done.some(step => succeeded(step.report)) ? profileEndedLine() : undefined;
       if (last && profileLine) last.profileLine = profileLine;
-      announce([said, profileLine].filter(Boolean).join(' '), showsPluginsResult(started) && !problems.get(started) && runDisplay(started).shown);
+      const display = runDisplay(started);
+      announce([said, profileLine].filter(Boolean).join(' '), showsPluginsResult(started) && !problems.get(started) && (undoOps(started).length > 0 || !!profileLine || (consequentialRun(last) && !display.elsewhere && display.shown)));
     } finally { market.activity = undefined; }
   });
 }

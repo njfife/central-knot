@@ -133,6 +133,12 @@ test('The toolbar counts three or more tools; the full sentence names them', () 
   assert.deepEqual(resultParts(lines, false, { short: true }), [{ plugin: 'pdf', source: 'anthropics/skills' }, ': installed in 3 tools', '.']);
   // On a plugin's own page its name is left out, but not where the sentence names another plugin too: each result said once, named.
   const two = resultLines([{ ...done[0]!, plugin: 'docs' }, done[0]!]);
+  const twoSame: ResultLine[] = [
+    { source: '/m', plugin: 'alpha', ok: true, text: 'its items put in OpenCode', short: 'its items put in OpenCode' },
+    { source: '/m', plugin: 'beta', ok: true, text: 'its items put in OpenCode', short: 'its items put in OpenCode' },
+  ];
+  assert.deepEqual(resultParts(twoSame, false, { short: true }), [{ plugin: 'alpha', source: '/m' }, ': its items put in OpenCode', '; ', { plugin: 'beta', source: '/m' }, ': its items put in OpenCode', '.']);
+  assert.deepEqual(resultParts(twoSame, false, { short: true, group: true }), [{ plugin: 'alpha', source: '/m' }, ' and ', { plugin: 'beta', source: '/m' }, ': its items put in OpenCode', '.']);
   assert.deepEqual(resultParts(two, false, { here: { plugin: 'pdf', source: 'anthropics/skills' } }).filter(part => typeof part !== 'string').map(part => (part as { plugin: string }).plugin), ['docs', 'pdf']);
 });
 

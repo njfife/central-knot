@@ -245,16 +245,16 @@ function updatedGroups(mine: PluginDone[], warn = true): Group[] {
  * open, named by its breadcrumb, so its lines leave its name out where it is the only plugin named): "document-tools: installed in Codex." or, for an Undo, "Undone:
  * document-tools removed from Codex." Each plugin is its own piece so the page can link it. Empty when nothing succeeded.
  */
-export function resultParts(lines: ResultLine[], undo: boolean, { short = false, here }: { short?: boolean; here?: { plugin: string; source: string } } = {}): (string | { plugin: string; source: string })[] {
+export function resultParts(lines: ResultLine[], undo: boolean, { short = false, here, group = false }: { short?: boolean; here?: { plugin: string; source: string }; group?: boolean } = {}): (string | { plugin: string; source: string })[] {
   const ok = lines.filter(line => line.ok);
   if (!ok.length) return [];
   const parts: (string | { plugin: string; source: string })[] = undo ? ['Undone: '] : [];
   // A sentence that names another plugin too names the open one as well, so each result is said once, by its plugin.
   if (ok.some(line => line.plugin !== here?.plugin || line.source !== here.source)) here = undefined;
-  // In the header (`short`), plugins sharing the exact same outcome group ("A and B: uninstalled from Claude Code.") so both stay visible beside Undo.
+  // On a tool's own Plugins tab (`group`), plugins sharing the exact same outcome group ("A and B: uninstalled from Claude Code.") so both stay visible beside Undo.
   const grouped: ResultLine[][] = [];
   for (const line of ok) {
-    const match = short && !line.skill && !line.part ? grouped.find(group => !group[0]!.skill && !group[0]!.part && group[0]!.short === line.short) : undefined;
+    const match = group && !line.skill && !line.part ? grouped.find(each => !each[0]!.skill && !each[0]!.part && (short ? each[0]!.short === line.short : each[0]!.text === line.text)) : undefined;
     if (match) match.push(line); else grouped.push([line]);
   }
   grouped.forEach((group, at) => {

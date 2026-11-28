@@ -432,7 +432,7 @@ function runLine(last: LastRun | undefined, place: RunPlace, lines: ResultLine[]
   const back = last ? undoButton() : null;
   const open = current()?.entry;
   const here = place === 'plugins' && open && market.nav.plugin ? { plugin: market.nav.plugin, source: open.source } : undefined;
-  const parts = last ? resultParts(lines, last.undo, { short: true, here }) : [];
+  const parts = last ? resultParts(lines, last.undo, { short: true, here, group: place !== 'plugins' }) : [];
   const label = pluginLabeler([...lines, ...(last?.done ?? [])]);
   // A run that left something undone counts it first, Undo or not (its reasons are the problem lines under it), so the cut never hides it.
   const short = last ? shortOf(lines, last.unreached, label) : { names: [], of: 0 }, failed = short.names;
