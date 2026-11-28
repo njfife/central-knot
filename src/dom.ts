@@ -278,9 +278,10 @@ export const section = (title: string, ...body: (Child | Child[])[]) => h('secti
 
 /**
  * What a crowded bar gives up, in order, until it fits: some padding, then the labels of its buttons and chips, then the
- * captions beside its menus (an item list's From and Sort), then its single line.
+ * captions beside its menus (a tool tab's From), then its single line. The Library's toolbar never folds words or captions.
  */
 const FIT_STEPS = ['bar-short', 'bar-icons', 'bar-captionless', 'bar-wrap'];
+const LIBRARY_STEPS = ['bar-short', 'bar-wrap'];
 
 /**
  * Whether anything in a bar reaches past its content box, into its padding or beyond, or a part of the bar holds more
@@ -301,15 +302,16 @@ function overflows(bar: HTMLElement): boolean {
  */
 export function fitBars(): void {
   for (const bar of document.querySelectorAll<HTMLElement>('.fit-bar')) {
+    const steps = bar.classList.contains('library-toolbar') ? LIBRARY_STEPS : FIT_STEPS;
     bar.classList.remove(...FIT_STEPS);
-    for (const step of FIT_STEPS) {
+    for (const step of steps) {
       if (!overflows(bar)) break;
       bar.classList.add(step);
     }
     // Wrapped, it takes back what it gave up, the last first (the captions, then the labels, then the padding), while that
     // adds no line: a step that would is kept, and the ones before it too.
     const height = bar.offsetHeight;
-    for (const step of bar.classList.contains('bar-wrap') ? FIT_STEPS.slice(0, -1).reverse() : []) {
+    for (const step of bar.classList.contains('bar-wrap') ? steps.slice(0, -1).reverse() : []) {
       bar.classList.remove(step);
       if (overflows(bar) || bar.offsetHeight > height) { bar.classList.add(step); break; }
     }

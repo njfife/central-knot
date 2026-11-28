@@ -722,7 +722,7 @@ async function backPlaceFlow() {
     // The Library on Skills, Find "skill", From on Any plugin: a plugin's skill opened, and its link to its plugin's page.
     await openKind(a, 'skills');
     await typeIn('find', 'skill');
-    if (await a.run(`document.querySelector('#item-from')?.value`) !== 'plugins') await chooseFrom(a, 'plugins');
+    if (await withFilter(a, () => a.run(`document.querySelector('#item-from')?.value`)) !== 'plugins') await chooseFrom(a, 'plugins');
     if (!(await a.exists(`${pluginSkillOpen}[aria-expanded="true"]`))) await a.click(pluginSkillOpen);
     await journey('the Library → a plugin’s page', library, () => scrollTo(library, 130, pluginSkill), () => a.click('[id^="open-whole-skills-"][id$="/plugin-skill-04"]'), 'plugins-scroll', () => readme(315));
     // Plugin marketplaces' list, Find "pack" and the examples chip: a plugin's page, by the keys; then back by its breadcrumb.
@@ -748,7 +748,7 @@ async function backPlaceFlow() {
       { viewBack: { find: '', chips: [], opened: [] } });
     // The Library on Skills, Find "sample", sample-16 opened → its Files: back by the window's Back, then by the Files view's own.
     await openKind(a, 'skills');
-    if (await a.run(`document.querySelector('#item-from')?.value`) !== 'anywhere') await chooseFrom(a, 'anywhere');
+    if (await withFilter(a, () => a.run(`document.querySelector('#item-from')?.value`)) !== 'anywhere') await chooseFrom(a, 'anywhere');
     await typeIn('find', 'sample');
     if (!(await a.exists(`#${rowPart('open', 'skills', 'sample-16')}[aria-expanded="true"]`))) await a.click(`#${rowPart('open', 'skills', 'sample-16')}`);
     const files = `#${rowPart('files', 'skills', 'sample-16')}`;
@@ -2547,8 +2547,25 @@ async function withSidebarOpen(a, width, height, fn) {
     if (rail && !(await a.run(`document.body.classList.contains('rail')`))) await a.click('#sidebar-toggle');
   }
 }
-/** Chooses `value` in the item list's From menu (matrix.ts fromChoice) as its menu chooses: a press opens a system menu on the Mac. */
+/** Opens the Library's Filter disclosure if it is on screen and closed; does nothing when already open or on a tool's tab. */
+async function openFilter(a) {
+  if (await a.exists('#library-filter[aria-expanded="false"]')) await a.click('#library-filter');
+}
+/** Closes the Library's Filter disclosure if open. */
+async function closeFilter(a) {
+  if (await a.exists('#library-filter[aria-expanded="true"]')) await a.click('#library-filter');
+}
+/** Runs `fn` with the Library's Filter disclosure open (no-op on a tool's tab), closing it again if it was closed before. */
+async function withFilter(a, fn) {
+  const wasOpen = await a.exists('#library-filter[aria-expanded="true"]');
+  await openFilter(a);
+  try { return await fn(); } finally {
+    if (!wasOpen) await closeFilter(a);
+  }
+}
+/** Chooses `value` in the item list's From menu (matrix.ts fromChoice), opening Library Filter first when present. */
 async function chooseFrom(a, value) {
+  await openFilter(a);
   await a.run(`(select => { select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })(document.querySelector('#item-from'))`);
   await a.settle();
 }
@@ -4346,8 +4363,10 @@ async function practiceFlow() {
   await a.click(`#${rowPart('open', 'mcp', 'docs')}`);
   await a.shot('practice-mcp-disabled');
   // The practice copy's tools keep no sessions, so every row would say "can't say": usage, collected as the home opened, draws no column.
-  for (let tries = 0; tries < 50 && !/^Collected /.test(await a.text('#usage-when') ?? ''); tries++) await wait(100);
-  same('usage collected on a home whose tools keep no sessions: no Used column, and beside the button the time and that there are no sessions yet', [await a.exists('.ov-used'), /^Collected .+ · no sessions yet$/.test(await a.text('#usage-when') ?? '')], [false, true]);
+  await withFilter(a, async () => {
+    for (let tries = 0; tries < 50 && !/^Collected /.test(await a.text('#usage-when') ?? ''); tries++) await wait(100);
+    same('usage collected on a home whose tools keep no sessions: no Used column, and beside the button the time and that there are no sessions yet', [await a.exists('.ov-used'), /^Collected .+ · no sessions yet$/.test(await a.text('#usage-when') ?? '')], [false, true]);
+  });
   // Full screen on a 1728×1117 display: the details dock beside the table, and a row's line, its tag and URL here, still shows whole.
   await sizeTo(a, 1728, 1117);
   same('docked at full screen, a closed row’s line is shortened only when it has no room', await a.all('.ov-row[data-key] .ov-name-about', 'e.scrollWidth <= e.clientWidth'), [true]);
@@ -12618,7 +12637,7 @@ esac
   const heading = () => a.text('[data-section="catalog"]');
   const enter = async () => { for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) }); await a.settle(); };
   const own = () => a.all('.ov-row[data-key]:not(.ov-catalog-row)', 'e.dataset.key');
-  const counts = () => a.run(`Object.fromEntries([...document.querySelectorAll('.kind-seg')].map(seg => [seg.id.replace('library-kind-', ''), seg.querySelector('.kind-seg-count').textContent]))`);
+  const counts = () => a.run(`Object.fromEntries([...document.querySelectorAll('.kind-seg')].map(seg => [seg.id.replace('library-kind-', ''), seg.querySelector('.kind-seg-count')?.textContent ?? '']))`);
   const coverage = () => a.text('#catalog-coverage');
   const follow = async at => { await a.run(`document.querySelectorAll('.ov-catalog-row .ov-name-text')[${at}].click()`); await a.settle(); };
   const opened = async () => { await until(() => a.exists('.crumb-here')); return [await a.text('#plugin-back'), await a.text('.crumb-here')]; };
@@ -12703,7 +12722,7 @@ esac
   await sizeTo(a, 860, 600);
   same('only catalog hits: no Results and no Nothing matches, the group: 28, ten rows, Show 10 more; the kind switch counts the Library’s rows alone',
     [await own(), await a.exists('[data-section="results"]'), await a.text('.empty-title'), await groupCount(), (await group()).length, await a.text('#catalog-more'), await counts()],
-    [[], false, null, '28', 10, 'Show 10 more', { all: '0', skills: '0', mcp: '0', agents: '0' }]);
+    [[], false, null, '28', 10, 'Show 10 more', { all: '0', skills: '0', mcp: '', agents: '' }]);
   same('nothing of his matches: one line says so above the group', await a.text('.catalog-none'), 'Nothing in your Library matches');
   await a.click('#catalog-more');
   await until(async () => (await group()).length === 20);
@@ -12715,12 +12734,14 @@ esac
   same('on Agents, where he has none, a word nothing has: Nothing matches, with Clear Find', [await a.text('.empty-title'), await a.exists('#find-clear')], ['Nothing matches', true]);
   await findText('rounds');
   await a.click('#library-kind-all');
-  const chips = await a.all('.chips .chip', 'e.id');
+  const chips = await withFilter(a, () => a.all('.toolbar .chip', 'e.id'));
   same('the chips offered: Copies differ, No use seen', chips, ['chip-attention', 'chip-unused']);
+  const pressChip = async chip => { if (chip === 'chip-unused') await openFilter(a); await a.click(`#${chip}`); };
+  const chipCount = chip => (chip === 'chip-unused' ? withFilter(a, () => a.text(`#${chip} .chip-count`)) : a.text(`#${chip} .chip-count`));
   for (const chip of chips) {
-    await a.click(`#${chip}`);
-    same(`${chip}, only catalog hits: it counts none, and the group shows under no chip`, [await a.text(`#${chip} .chip-count`), await groupCount(), await a.exists('#turn-unused-off')], ['0', null, false]);
-    await a.click(`#${chip}`);
+    await pressChip(chip);
+    same(`${chip}, only catalog hits: it counts none, and the group shows under no chip`, [await chipCount(chip), await groupCount(), await a.exists('#turn-unused-off')], ['0', null, false]);
+    await pressChip(chip);
   }
   // The group under From: on Anywhere and Any plugin only, never under Your own, kit (installed here) or a source, none of which an
   // item of a plugin not installed is; "Nothing in your Library matches" above it, "Nothing matches" in its place. The toolbar
@@ -12761,8 +12782,8 @@ esac
   await findText('waybill');
   same('a new text: the Library’s spare, and the group’s first ten again', [await own(), (await group()).length], [[rowPart('', 'skills', 'spare')], 10]);
   for (const chip of chips) {
-    await a.click(`#${chip}`);
-    const [count, drawn] = [await a.text(`#${chip} .chip-count`), await groupCount()];
+    await pressChip(chip);
+    const [count, drawn] = [await chipCount(chip), await groupCount()];
     same(`${chip}, with spare: its count is the Library’s rows’ alone, and the group shows under no chip`, [count, drawn], { 'chip-attention': ['0', null], 'chip-unused': ['1', null] }[chip]);
     if (chip === 'chip-unused') {
       const before = readFileSync(join(H.home, '.claude/plugins/installed_plugins.json'), 'utf8');
@@ -12775,7 +12796,10 @@ esac
       await done();
     }
     // Turn these off leaves the chip at 0, gone, and the list on All.
-    if (await a.run(`document.querySelector('#${chip}')?.getAttribute('aria-pressed') === 'true'`)) await a.click(`#${chip}`);
+    const pressedNow = chip === 'chip-unused'
+      ? await withFilter(a, () => a.run(`document.querySelector('#${chip}')?.getAttribute('aria-pressed') === 'true'`))
+      : await a.run(`document.querySelector('#${chip}')?.getAttribute('aria-pressed') === 'true'`);
+    if (pressedNow) await pressChip(chip);
   }
   // Twenty revealed, a row lower down followed and Back: the same twenty (the scroll place on Back is places.ts's, for every page).
   await findText('rounds');
@@ -13437,7 +13461,8 @@ async function overviewFlow() {
   await a.click(byId(rowPart('open', 'skills', 'notes')));
   const rowUsage = byId(rowPart('usage', 'skills', 'notes', 'claude-cli'));
   check('the skill’s row says why Claude Code can’t tell', /use unknown: 1 session file couldn’t be read/.test(await a.text(rowUsage) ?? ''), await a.text(rowUsage));
-  check('the toolbar makes no claim of no sessions', !(await a.text(byId('usage-when')))?.includes('no sessions'));
+  const usageWhen = await withFilter(a, () => a.text(byId('usage-when')));
+  check('the toolbar makes no claim of no sessions', !usageWhen?.includes('no sessions'), usageWhen);
   if (shots) {
     await sizeTo(a, 1280, 800);
     await a.run(`document.querySelector(${JSON.stringify(rowUsage)}).scrollIntoView({ block: 'center' })`);
@@ -14718,18 +14743,26 @@ async function usageFlow() {
   // Each skill's figure and hover, by its key (its row's data-key, the kind's prefix taken off).
   const figures = () => a.run(`Object.fromEntries([...document.querySelectorAll('.ov-row[data-key]')].map(row => [row.dataset.key.slice(${rowPart('', 'skills', '').length}), row.querySelector('.ov-used')?.textContent]))`);
   const titles = () => a.run(`Object.fromEntries([...document.querySelectorAll('.ov-row[data-key]')].map(row => [row.dataset.key.slice(${rowPart('', 'skills', '').length}), row.querySelector('.ov-used')?.getAttribute('title') ?? null]))`);
-  const collected = () => a.run(`/^Collected /.test(document.querySelector('#usage-when')?.textContent ?? '')`);
-  for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+  const collectNow = async () => { await openFilter(a); await a.click('#collect-usage'); };
+  const collected = () => withFilter(a, () => a.run(`/^Collected /.test(document.querySelector('#usage-when')?.textContent ?? '')`));
+  const waitCollected = (tries = 100) => withFilter(a, async () => {
+    for (let i = 0; i < tries; i++) {
+      if (await a.run(`/^Collected /.test(document.querySelector('#usage-when')?.textContent ?? '')`)) return true;
+      await wait(100);
+    }
+    return false;
+  });
+  await waitCollected();
   // Collected when the home opened, while the page took the clicks above: no click on the button, and no band.
   same('the home’s first opening collects usage by itself: the time beside Update usage statistics, empty cell with no hover under Name, no band',
-    [await collected(), (await a.text('#collect-usage'))?.trim(), await a.exists('#usage-line'), (await figures()).notes, (await titles()).notes],
+    [await collected(), await withFilter(a, async () => (await a.text('#collect-usage'))?.trim()), await a.exists('#usage-line'), (await figures()).notes, (await titles()).notes],
     [true, 'Update usage statistics', false, '', null]);
   // Copilot CLI left out with its Manage switch: its sessions are still read, and a use there still counts.
   await a.click('#nav-harnesses');
   await a.click('#manage-copilot-cli');
   for (let tries = 0; tries < 50 && (await a.run(`document.querySelector('#manage-copilot-cli')?.getAttribute('aria-checked')`)) !== 'false'; tries++) await wait(100);
   await openKind(a, 'skills');
-  await a.click('#collect-usage');
+  await collectNow();
   // The band holds its three sentences in one place, so its height never changes; the one on show is the one not marked unshown.
   const bandText = async () => (await a.text('#usage-line .band-text > :not(.band-unshown)') ?? '');
   for (let tries = 0; tries < 100 && !/^Usage statistics collected/.test(await bandText()); tries++) await wait(100);
@@ -14764,14 +14797,14 @@ async function usageFlow() {
     [{ notes: '2 days ago', idle: '3 days ago', standup: 'no use seen', fresh: 'no use seen', spare: 'no use seen' }, 'Used 2 days ago · 14 sessions. Open the row for each tool’s figure.']);
   // spare used just now: the reading that lands moves no row (its cell fills where it is); the next Sort draws the new order.
   lines(join(home, '.claude/projects/-work/s4.jsonl'), [skillCall('spare', 0)]);
-  await a.click('#collect-usage');
+  await collectNow();
   for (let tries = 0; tries < 100 && (await figures()).spare !== 'just now'; tries++) await wait(100);
   same('a reading that lands moves no row: spare, used just now, says so where it was; the band opened again by Update',
     [(await sectionsNow(a, 'skills'))[0][1], (await figures()).spare, await a.exists('#usage-line')], [['notes', 'idle', 'standup', 'fresh', 'spare'], 'just now', true]);
   await chooseOrder('name'); await chooseOrder('used');
   same('the next draw that may reorder (Sort chosen again) puts it first', (await sectionsNow(a, 'skills'))[0][1], ['spare', 'notes', 'idle', 'standup', 'fresh']);
   rmSync(join(home, '.claude/projects/-work/s4.jsonl'));
-  await a.click('#collect-usage');
+  await collectNow();
   for (let tries = 0; tries < 100 && (await figures()).spare !== 'no use seen'; tries++) await wait(100);
   await a.click('#usage-line-close');
   await a.click('#header-refresh');
@@ -14794,7 +14827,7 @@ async function usageFlow() {
   lines(mostTemp[0], [skillCall('spare', 5)]);
   lines(mostTemp[1], [skillCall('spare', 6)]);
   lines(mostTemp[2], [skillCall('fresh', 1.1)]);
-  await a.click('#collect-usage');
+  await collectNow();
   for (let tries = 0; tries < 100 && ((await figures()).spare !== '2 sessions' || (await figures()).fresh !== '1 session'); tries++) await wait(100);
   same('under Most used, a reading that lands moves no row, updates each figure in place, and offers Put in order',
     [(await sectionsNow(a, 'skills'))[0][1], (await figures()).spare, (await figures()).fresh, await a.exists('#put-in-order')],
@@ -14826,14 +14859,14 @@ async function usageFlow() {
   same('returning to the Library keeps Most used', await a.run(`document.querySelector('#item-order')?.value`), 'most-used');
   // Restore the five skills' original usage and Last used order for the existing checks that follow.
   for (const file of mostTemp) rmSync(file);
-  await a.click('#collect-usage');
+  await collectNow();
   for (let tries = 0; tries < 100 && ((await figures()).spare !== 'no use seen' || (await figures()).fresh !== 'no use seen'); tries++) await wait(100);
   await a.click('#usage-line-close');
   await chooseOrder('used');
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && (await sectionsNow(a, 'skills'))[0]?.[1]?.[0] !== 'notes'; tries++) { await wait(100); await a.settle(); }
   await sizeTo(a, 860, 600);
-  same('at 860×600 the button keeps its word, and its icon is not the chip’s', [(await a.run(`document.querySelector('#collect-usage').innerText.trim()`)).split(' ')[0], await a.exists('#collect-usage svg')], ['Update', false]);
+  same('at 860×600 the button keeps its word, and its icon is not the chip’s', await withFilter(a, async () => [(await a.run(`document.querySelector('#collect-usage').innerText.trim()`)).split(' ')[0], await a.exists('#collect-usage svg')]), ['Update', false]);
   same('the longest figure, "no use seen since Nov 29, 2025", is whole in a figure’s cell', await a.run(`(() => { const cell = document.querySelector('.ov-used'), was = [...cell.childNodes];
     cell.replaceChildren('no use seen since Nov 29, 2025');
     const whole = cell.scrollWidth <= cell.clientWidth + 1; cell.replaceChildren(...was); return whole; })()`), true);
@@ -14843,7 +14876,8 @@ async function usageFlow() {
   await fitsAtMinimum(a, 'Skills with usage collected and its figures');
   await a.shot('usage-read');
   // The chip: standup and spare, old enough with no use seen; fresh, 2 days old, left out and counted; idle, used in Copilot CLI, not in it.
-  same('after a reading, the chip counts what has no use seen in 30 days, old enough', await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), [['No use seen in 30 days', '2']]);
+  same('after a reading, the chip counts what has no use seen in 30 days, old enough', await withFilter(a, () => a.all('.toolbar .chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]')), [['No use seen in 30 days', '2']]);
+  await openFilter(a);
   await a.click('.chip[data-tip="No use seen in 30 days"]');
   same('with the chip on, the table holds standup and spare', await sectionsNow(a, 'skills'), [['on', ['standup', 'spare']]]);
   same('its band is one line with the count, disclosure closed, and Turn 2 off everywhere; opening the disclosure reveals coverage and exclusions',
@@ -14889,19 +14923,19 @@ async function usageFlow() {
   }
   await fullSize(a);
   same('Turn these off: one click removes Central Knot’s copies, leaves spare’s shared copy, says Codex still reads spare another way and Everyday stopped being in use, with one Undo; the chip, now at 0, is gone',
-    [await headerResultWords(a), (await a.text('#status-profile'))?.trim(), Object.entries(filesOf(['standup', 'spare'])).filter(([, body]) => body), (await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'spare')}"] .row-tag`))?.trim(), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
+    [await headerResultWords(a), (await a.text('#status-profile'))?.trim(), Object.entries(filesOf(['standup', 'spare'])).filter(([, body]) => body), (await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'spare')}"] .row-tag`))?.trim(), await withFilter(a, () => a.exists('.chip[data-tip="No use seen in 30 days"]'))],
     ['Turned off 2 skills with no use seen in the last 30 days: spare and standup. Codex still reads spare another way. Central Knot keeps them, and turning one on puts it back as it was. Everyday stopped being the profile in use.', 'No profile', [[join(shared, 'spare'), before[join(shared, 'spare')]]], 'another copy in Codex', false]);
   await a.click('#outcome-undo');
   for (let tries = 0; tries < 50 && JSON.stringify(filesOf(['standup', 'spare'])) !== JSON.stringify(before); tries++) await wait(100);
   same('its one Undo puts both back On, every file byte for byte, and the chip offers them again',
-    [filesOf(['standup', 'spare']), (await sectionsNow(a, 'skills'))[0][1], await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]')],
+    [filesOf(['standup', 'spare']), (await sectionsNow(a, 'skills'))[0][1], await withFilter(a, () => a.all('.toolbar .chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'))],
     [before, ['notes', 'idle', 'standup', 'fresh', 'spare'], [['No use seen in 30 days', '2']]]);
   // With the chip on, rows turned Off by their own switch stay listed where they were, and the chip stays on, until the list is
   // drawn afresh; then All again for what follows.
-  const chipNamed = name => a.run(`[...document.querySelectorAll('.chip')].find(chip => chip.dataset.tip === ${JSON.stringify(name)})?.click()`);
+  const chipNamed = async name => { if (name === 'No use seen in 30 days') await openFilter(a); await a.run(`[...document.querySelectorAll('.chip')].find(chip => chip.dataset.tip === ${JSON.stringify(name)})?.click()`); };
   await chipNamed('No use seen in 30 days'); await a.settle();
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
-  const chipOn = () => a.run(`document.querySelector('.chip-on')?.dataset.tip`);
+  const chipOn = () => withFilter(a, () => a.run(`document.querySelector('.chip-on')?.dataset.tip`));
   const afterOne = [await sectionsNow(a, 'skills'), await chipOn()];
   await a.clickInRun(`#${rowPart('switch', 'skills', 'spare')}`);
   same('spare, clicked soon after standup, joins its run: said once, with Everyday leaving use', await headerResultWords(a), '2 skills are off: standup and spare. Codex still reads spare another way. Everyday stopped being the profile in use.');
@@ -14922,10 +14956,11 @@ async function usageFlow() {
   const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
   if (main) {
     await main.failRequest('usage:read');
-    await a.click('#collect-usage');
+    await collectNow();
     for (let tries = 0; tries < 50 && !/couldn’t be collected/.test(await bandText()); tries++) await wait(100);
+    const [collectLabel, unusedShown] = await withFilter(a, async () => [(await a.text('#collect-usage'))?.trim(), await a.exists('.chip[data-tip="No use seen in 30 days"]')]);
     same('a reading that fails: the band says so, the button offers to collect again, and no figure or chip from the reading before stays',
-      [await bandText(), (await a.text('#collect-usage'))?.trim(), await a.exists('.ov-used'), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
+      [await bandText(), collectLabel, await a.exists('.ov-used'), unusedShown],
       ['Usage statistics couldn’t be collected: the tools’ session history couldn’t be read.', 'Collect usage statistics', false, false]);
     // One collected by itself (the home opened again) that fails opens no band, which would move the list: the status bar says it.
     await a.click('#usage-line-close');
@@ -14946,7 +14981,7 @@ async function usageFlow() {
   const kit = 'review-kit@ck-usage/checks';
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', kit)}"]`)); tries++) await wait(100);
-  await a.click('#collect-usage');
+  await collectNow();
   for (let tries = 0; tries < 50 && (await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', kit)}"] .ov-used')?.textContent`)) !== '4 days ago'; tries++) await wait(100);
   await a.click(byId(rowPart('open', 'skills', kit)));
   same('a plugin’s own row says its Sort’s figure with both figures on hover, and its opened row keeps Claude Code’s short line',
@@ -14962,7 +14997,7 @@ async function usageFlow() {
   lines(join(piDir, 'agent/sessions/--w--/p.jsonl'), [{ type: 'message', message: { role: 'user', content: [{ type: 'text', text: '<skill name="notes">' }] }, timestamp: ago(12).toISOString() }]);
   try {
     await a.click('#header-refresh');
-    await a.click('#collect-usage');
+    await collectNow();
     for (let tries = 0; tries < 80 && !/couldn’t be read/.test(await a.text(`${byId(rowPart('usage', 'skills', kit, 'codex-cli'))}`) ?? ''); tries++) await wait(100);
     same('absent plugin copy with wholly unread history stays visible instead of blank',
       (await a.text(`${byId(rowPart('usage', 'skills', kit, 'codex-cli'))}`))?.trim(), 'use unknown: its sessions couldn’t be read');
@@ -14983,8 +15018,8 @@ async function usageFlow() {
     rmSync(piDir, { recursive: true, force: true });
   }
   await a.click('#header-refresh');
-  await a.click('#collect-usage');
-  for (let tries = 0; tries < 80 && !(await collected()); tries++) await wait(100);
+  await collectNow();
+  await waitCollected(80);
   // Sort by Last used, kept from this launch to the next: the reading that comes by itself as the home opens moves no row.
   await chooseOrder('used');
   same('no page errors, usage', a.pageErrors, []);
@@ -14993,7 +15028,7 @@ async function usageFlow() {
   await openKind(a, 'skills');
   for (let tries = 0; tries < 50 && (await sectionsNow(a, 'skills'))[0]?.[1]?.length !== 5; tries++) { await wait(100); await a.settle(); }
   const firstDrawn = await sectionsNow(a, 'skills');
-  for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+  await waitCollected();
   same('the next launch keeps Sort by Last used, and the reading that comes by itself moves no row', [await a.run(`document.querySelector('#item-order').value`), await sectionsNow(a, 'skills')], ['used', firstDrawn]);
   // Sort by Most used, kept from this launch to the next: the reading that comes by itself moves no row; choosing another order clears it.
   await chooseOrder('most-used');
@@ -15004,7 +15039,7 @@ async function usageFlow() {
   await openKind(a, 'skills');
   for (let tries = 0; tries < 50 && (await sectionsNow(a, 'skills'))[0]?.[1]?.length !== 5; tries++) { await wait(100); await a.settle(); }
   const firstDrawnMost = await sectionsNow(a, 'skills');
-  for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+  await waitCollected();
   same('the next launch keeps Sort by Most used, and the reading that comes by itself moves no row',
     [await a.run(`document.querySelector('#item-order').value`), await sectionsNow(a, 'skills')], ['most-used', firstDrawnMost]);
 
@@ -15040,7 +15075,7 @@ async function usageFlow() {
     return collected();
   };
   {
-    const lead = () => a.text('#usage-when');
+    const lead = () => withFilter(a, () => a.text('#usage-when'));
     await chooseOrder('name');
     same('choosing Name clears Most used’s flag and keeps Name',
       await a.run(`[localStorage.getItem('ck-items-by-most-used'), document.querySelector('#item-order').value]`), [null, 'name']);
@@ -15054,7 +15089,7 @@ async function usageFlow() {
     await a.click(`#${rowPart('open', 'skills', 'alpha')}`);
     const collectingLines = await a.all('.details-usage', 'e.textContent.trim()'), openTops = await tops();
     await letGo();
-    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+    await waitCollected();
     await a.settle();
     same('an opened row (details under it) says Collecting… on each tool’s line while the reading runs, and when the reading lands no row moves',
       [collectingLines.length > 0 && collectingLines.every(line => line === 'Collecting usage statistics…'), await tops()], [true, openTops]);
@@ -15064,11 +15099,11 @@ async function usageFlow() {
     // Update's band, 900 wide, with five tools' history: the same height while it collects and once the reading lands.
     await sizeTo(a, 900, 760);
     const bandHeight = () => a.run(`document.querySelector('#usage-line')?.getBoundingClientRect().height ?? 0`);
-    await a.click('#collect-usage');
+    await collectNow();
     for (let tries = 0; tries < 50 && !(await a.exists('#usage-line')); tries++) await wait(50);
     const [whileHeight, whileTops] = [await bandHeight(), await tops()];
     await letGo();
-    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+    await waitCollected();
     await a.settle();
     same('the band an Update opens keeps its height when the reading lands (five tools, 900 wide), so no row moves', [await bandHeight(), await tops()], [whileHeight, whileTops]);
     await a.click('#usage-line-close');
@@ -15081,15 +15116,15 @@ async function usageFlow() {
     await chipNamed('No use seen in 30 days'); await a.settle();
     same('the chip holds the three On skills with no use seen, and no rows are held', [(await sectionsNow(a, 'skills'))[0]?.[1], await a.exists('#put-in-order')], [['bravo', 'charlie', 'delta'], false]);
     lines(join(real, '.claude/projects/-work/r2.jsonl'), [skillCall('charlie', 0)]);
-    await a.click('#collect-usage');
+    await collectNow();
     // Measured once the click's band has opened (its own height is the click's), while the reading waits on the pipe.
     for (let tries = 0; tries < 100 && !reading(); tries++) await wait(25);
     const chipTops = await tops();
     await letGo();
-    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+    await waitCollected();
     await a.settle();
     same('Sort by name, the chip on: charlie, used just now, says its recency where it was when the reading lands, no row moves, the chip counts what Turn these off would turn off, and Put in order is offered',
-      [(await sectionsNow(a, 'skills'))[0][1], await tops(), (await figures()).charlie, (await titles()).charlie, await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), await a.exists('#put-in-order')],
+      [(await sectionsNow(a, 'skills'))[0][1], await tops(), (await figures()).charlie, (await titles()).charlie, await withFilter(a, () => a.all('.toolbar .chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]')), await a.exists('#put-in-order')],
       [['bravo', 'charlie', 'delta'], chipTops, 'just now', 'Used just now · 1 session. Open the row for each tool’s figure.', [['No use seen in 30 days', '2']], true]);
     await a.click('#put-in-order');
     same('Put in order lets the held rows go: charlie leaves the chip’s list, and the link goes', [(await sectionsNow(a, 'skills'))[0][1], await a.exists('#put-in-order')], [['bravo', 'delta'], false]);
@@ -15097,11 +15132,11 @@ async function usageFlow() {
     // Sort by Last updated, the chip on: an Update lands, and no row moves, with nothing to put in order.
     await chooseOrder('updated');
     const updatedOrder = (await sectionsNow(a, 'skills'))[0][1];
-    await a.click('#collect-usage');
+    await collectNow();
     for (let tries = 0; tries < 100 && !reading(); tries++) await wait(25);
     const updatedTops = await tops();
     await letGo();
-    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+    await waitCollected();
     await a.settle();
     same('Sort by Last updated, the chip on: an Update lands and no row moves, with nothing to put in order', [updatedOrder, (await sectionsNow(a, 'skills'))[0][1], await tops(), await a.exists('#put-in-order')],
       [['delta', 'bravo'], ['delta', 'bravo'], updatedTops, false]);
@@ -15112,7 +15147,7 @@ async function usageFlow() {
     // toolbar still says Collecting…; then the reading lands and nothing moves.
     const bravoCopies = () => [realSkills, join(real, '.codex/skills')].map(folder => readNow(join(folder, 'bravo/SKILL.md')));
     const copiesBefore = bravoCopies();
-    await a.click('#collect-usage');
+    await collectNow();
     for (let tries = 0; tries < 100 && !reading(); tries++) await wait(25);
     // Not a.click, which waits for the page to be idle; the header's result is closed first, as a.click does for a row's switch.
     await a.run(`(() => { document.querySelector('#outcome-dismiss, #report-dismiss')?.click(); document.querySelector('#${rowPart('switch', 'skills', 'bravo')}').click(); })()`);
@@ -15121,7 +15156,7 @@ async function usageFlow() {
     for (let tries = 0; tries < 300 && !(await carriedOut()); tries++) await wait(100);
     const whileHeld = [await switchOn(a, 'skills', 'bravo'), await a.text('#header [data-outcome] .band-text'), bravoCopies(), await lead()], heldTops = await tops();
     await letGo();
-    for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+    await waitCollected();
     await a.settle();
     same('a switch clicked while a reading is held is carried out before the reading lands: bravo Off, said, its copies gone, the toolbar still collecting; when it lands nothing moves',
       [copiesBefore.every(copy => copy !== ''), whileHeld, [await switchOn(a, 'skills', 'bravo'), bravoCopies(), await tops()]],
@@ -15195,11 +15230,11 @@ async function usageFlow() {
   const allRows = await a.all('.ov-row[data-key]', 'e.dataset.key');
   const expectedUnused = [...['delta', ...extraUnusedSkills].map(key => rowPart('', 'skills', key)), ...extraUnusedAgents.map(key => rowPart('', 'agents', key))].sort();
   same('the combined unused link opens Library on All with the No use seen chip active and all 8 matching rows',
-    [await a.run(`document.querySelector('#library-kind-all')?.getAttribute('aria-pressed')`), await a.run(`document.querySelector('.chip-on')?.dataset.tip`), [...allRows].sort()],
-    ['true', 'No use seen in 30 days', expectedUnused]);
+    [await a.run(`document.querySelector('#library-kind-all')?.getAttribute('aria-pressed')`), await a.exists('#library-filter.filter-on'), await withFilter(a, () => a.run(`document.querySelector('.chip-on')?.dataset.tip`)), [...allRows].sort()],
+    ['true', true, 'No use seen in 30 days', expectedUnused]);
   await a.click('#nav-overview');
   await a.click('#overview-skills-top-1');
-  same('a most used name opens its row on Skills, under All', [await a.run(`document.querySelector('.chip-on')?.dataset.tip ?? 'All'`), await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'echo')}"]')?.getAttribute('aria-expanded')`)], ['All', 'true']);
+  same('a most used name opens its row on Skills, under All', [await withFilter(a, () => a.run(`document.querySelector('.chip-on')?.dataset.tip ?? 'All'`)), await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'echo')}"]')?.getAttribute('aria-expanded')`)], ['All', 'true']);
   // His kept Sort: Last updated. Most used, a link with its arrow, shows the list by most used and leaves that choice as it was.
   await a.click('#nav-library');
   await a.run(`(select => { select.value = 'updated'; select.dispatchEvent(new Event('change')); })(document.querySelector('#item-order'))`);
@@ -15301,7 +15336,8 @@ async function usageFlow() {
 
     a = await launch(uxData, [], uxReal);
     await openKind(a, 'all');
-    check('ux1a: usage collected and chip shows 8', await uxUntil(async () => (await a.text('#chip-unused .chip-count'))?.trim() === '8'));
+    check('ux1a: usage collected and chip shows 8', await withFilter(a, () => uxUntil(async () => (await a.text('#chip-unused .chip-count'))?.trim() === '8')));
+    await openFilter(a);
     await a.click('#chip-unused');
     const bandMetrics = () => a.run(`(() => {
       const band = document.querySelector('#unused-band');
@@ -15433,7 +15469,7 @@ async function usageFlow() {
     const codexSessions = join(uxHome, '.codex/sessions');
     try {
       chmodSync(codexSessions, 0o000);
-      await a.click('#collect-usage');
+      await collectNow();
       await uxUntil(async () => /Use in Codex not counted\./.test((await a.text('#unused-band .usage-lead')) ?? ''), 5000);
       if (await a.exists('#usage-line-close')) await a.click('#usage-line-close');
       same('ux1a: unreadable managed Codex history is cued on the band line',
@@ -15446,7 +15482,7 @@ async function usageFlow() {
     } finally {
       chmodSync(codexSessions, 0o755);
     }
-    await a.click('#collect-usage');
+    await collectNow();
     check('ux1a: cue clears once Codex history is readable again', await uxUntil(async () => (await a.text('#unused-band .usage-lead')) === '8 with no use seen in 30 days.', 5000));
     if (await a.exists('#usage-line-close')) await a.click('#usage-line-close');
 
@@ -15485,11 +15521,11 @@ async function usageFlow() {
     await a.run(`(() => { const i = document.querySelector('#find'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
     await a.settle();
     check('ux1a: clearing Find restores band', await uxUntil(() => a.exists('#unused-band')));
+    await openFilter(a);
     await a.run(`(() => { const s = document.querySelector('#item-from'); const opt = [...s.options].find(o => o.value.startsWith('plugin:')); s.value = opt.value; s.dispatchEvent(new Event('change')); })()`);
     await a.settle();
     same('ux1a: From miss shows no unused band', await a.exists('#unused-band'), false);
-    await a.run(`(() => { const s = document.querySelector('#item-from'); s.value = 'anywhere'; s.dispatchEvent(new Event('change')); })()`);
-    await a.settle();
+    await chooseFrom(a, 'anywhere');
     await a.click('#turn-unused-off');
     await uxDone(a);
     check('ux1a: turning off the last unused skill leaves the emptied-kind band', await uxUntil(() => a.exists('#unused-show-other'), 3000));
@@ -15504,7 +15540,7 @@ async function usageFlow() {
     const allPluginRows = await skippedRowsState();
     same('ux1a: Show Agents switches to Agents, keeps the unused chip on, lists both agents marked from a plugin, shows own-row wording with no Turn button, and writes nothing',
       [await a.run(`document.querySelector('#library-kind-agents')?.getAttribute('aria-pressed')`),
-        await a.run(`document.querySelector('#chip-unused')?.getAttribute('aria-pressed')`),
+        await withFilter(a, () => a.run(`document.querySelector('#chip-unused')?.getAttribute('aria-pressed')`)),
         (await a.all('.ov-row[data-key]', 'e.dataset.key')).sort(),
         await a.text('#unused-band .usage-lead'),
         await a.exists('#turn-unused-off'),
@@ -15520,9 +15556,11 @@ async function usageFlow() {
 
     // Two other kinds: turn quiet-srv On so MCP servers (1) and Agents (2) both have unused items, then visit Skills -> Show all 3.
     await a.click('#library-kind-mcp');
+    await openFilter(a);
     await a.click('#chip-unused');
     await a.click(`#${rowPart('switch', 'mcp', 'quiet-srv')}`);
     await uxDone(a);
+    await openFilter(a);
     await a.click('#chip-unused');
     await a.click('#library-kind-skills');
     check('ux1a: two other kinds offer Show all 3', await uxUntil(async () => (await a.text('#unused-show-other'))?.trim() === 'Show all 3', 3000));
@@ -15533,7 +15571,7 @@ async function usageFlow() {
     if (await a.exists('#unused-show-other')) await a.click('#unused-show-other');
     same('ux1a: Show all 3 switches to All, keeps the unused chip on, shows all 3 items and writes nothing',
       [await a.run(`document.querySelector('#library-kind-all')?.getAttribute('aria-pressed')`),
-        await a.run(`document.querySelector('#chip-unused')?.getAttribute('aria-pressed')`),
+        await withFilter(a, () => a.run(`document.querySelector('#chip-unused')?.getAttribute('aria-pressed')`)),
         (await a.all('.ov-row[data-key]', 'e.dataset.key')).sort(),
         [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('mcp'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
       ['true', 'true', [rowPart('', 'agents', 'plug-audit'), rowPart('', 'agents', 'plug-triage'), rowPart('', 'mcp', 'quiet-srv')].sort(), beforeAll]);
@@ -15562,7 +15600,7 @@ async function usageFlow() {
     writeFileSync(uxRecord('mcp'), JSON.stringify(mcpRec, null, 2));
     await a.click('#header-refresh');
     await uxDone(a);
-    check('ux1a: three-digit count reaches 128 on All', await uxUntil(async () => (await a.text('#chip-unused .chip-count'))?.trim() === '128', 8000));
+    check('ux1a: three-digit count reaches 128 on All', await withFilter(a, () => uxUntil(async () => (await a.text('#chip-unused .chip-count'))?.trim() === '128', 8000)));
     same('ux1a: three-digit band text and button',
       [await a.text('#unused-band .usage-lead'), (await a.text('#turn-unused-off'))?.trim()],
       ['128 with no use seen in 30 days.', 'Turn 126 off everywhere']);
@@ -15577,7 +15615,7 @@ async function usageFlow() {
   a = await launch(data, ['--hidden'], real);
   await openKind(a, 'skills');
   await wait(2000);
-  same('started with no window, it collects nothing until the window shows', [reading(), await a.text('#usage-when')], [false, 'Collecting…']);
+  same('started with no window, it collects nothing until the window shows', [reading(), await withFilter(a, () => a.text('#usage-when'))], [false, 'Collecting…']);
   // Same clean launcher as launch() (spawnApp/appEnv): no inherited ELECTRON_RUN_AS_NODE, both tempPlaces, and registered in scratch.ts launched.
   const again = spawnApp([...(flag('--electron') ? [root] : []), `--user-data-dir=${data}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], real, {}, 'ignore');
   await new Promise(done => again.once('exit', done));
@@ -16987,7 +17025,7 @@ async function libraryFlow() {
   const done = async a => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
   const until = async (test, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
   // The kind switch's counts, and the rows of each kind the list shows (a plugin's own rows too).
-  const counts = a => a.run(`Object.fromEntries([...document.querySelectorAll('.kind-seg')].map(seg => [seg.id.replace('library-kind-', ''), seg.querySelector('.kind-seg-count').textContent]))`);
+  const counts = a => a.run(`Object.fromEntries([...document.querySelectorAll('.kind-seg')].map(seg => [seg.id.replace('library-kind-', ''), seg.querySelector('.kind-seg-count')?.textContent ?? '']))`);
   const listed = async a => { const ids = await a.all('.ov-row[data-key]', 'e.dataset.key'); return Object.fromEntries(['skills', 'mcp', 'agents'].map(kind => [kind, ids.filter(id => id.startsWith(rowPart('', kind, ''))).length])); };
   // Find typed, and the list drawn once main has answered (matrix.ts askFind).
   const find = async (a, text) => { await a.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle(); };
@@ -17055,16 +17093,21 @@ async function libraryFlow() {
   await find(a, 'review');
   same('Find across kinds: each segment counts what it leaves, MCP servers at 0 still there', [await listed(a), await counts(a)], [{ skills: 1, mcp: 0, agents: 2 }, { all: '3', skills: '1', mcp: '0', agents: '2' }]);
   await find(a, '');
-  check('usage is collected when the home opens, and the No use seen chip shows', await until(() => a.exists('#chip-unused')));
-  await a.click('#chip-unused');
+  const collectUsage = async () => { await openFilter(a); await a.click('#collect-usage'); };
+  const pressUnused = async () => { await openFilter(a); await a.click('#chip-unused'); };
+  check('usage is collected when the home opens, and the No use seen chip shows', await withFilter(a, () => until(() => a.exists('#chip-unused'))));
+  await pressUnused();
   same('with the chip on, each segment counts what it leaves: three skills, a server and two agents', [await listed(a), await counts(a)], [{ skills: 3, mcp: 1, agents: 2 }, { all: '6', skills: '3', mcp: '1', agents: '2' }]);
   // A reading that lands moves no row: spare, used now, stays where it was, kept by its pin; neither the switch nor its heading
   // counts it.
   writeFileSync(join(A.home, '.claude/projects/-work/s2.jsonl'), `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'spare' } }] }, timestamp: ago(1).toISOString() })}\n`);
-  await a.click('#collect-usage');
+  await collectUsage();
   check('the new reading says spare was used', await until(() => a.run(`(cell => cell?.textContent === 'yesterday' && /^Used /.test(cell.title))(document.querySelector('${row('skills', 'spare')} .ov-used'))`)), await a.text(row('skills', 'spare')));
   same('spare stays listed by its pin, and the switch and the On heading both count five', [await a.exists(row('skills', 'spare')), (await counts(a)).all, await a.text('.ov-section[data-section="on"] .ov-section-count')], [true, '5', '5']);
-  const letGo = async chip => { if (await a.exists(`#chip-${chip}[aria-pressed="true"]`)) await a.click(`#chip-${chip}`); };
+  const letGo = async chip => {
+    if (chip === 'unused') { await withFilter(a, async () => { if (await a.exists('#chip-unused[aria-pressed="true"]')) await a.click('#chip-unused'); }); return; }
+    if (await a.exists(`#chip-${chip}[aria-pressed="true"]`)) await a.click(`#chip-${chip}`);
+  };
   await letGo('unused');
   // The chip stays on whatever the segment: on MCP servers, where nothing differs, the list says so; on All, clash again.
   await a.click('#chip-attention');
@@ -17127,7 +17170,7 @@ async function libraryFlow() {
   await a.click(`#${rowPart('switch', 'skills', 'notes')}`);
   await done(a);
   // 9b: Turn these off across kinds, the MCP record damaged just before the click.
-  await a.click('#chip-unused');
+  await pressUnused();
   check('its band counts the five in one line (spare is used now)', (await a.text('#unused-band .usage-lead') ?? '') === '5 with no use seen in 30 days.', await a.text('#unused-band'));
   await pictures(a, 'unused-across-kinds');
   // Copilot CLI refuses to let go of either tidy (its folders can't be written), and the MCP record is damaged.
@@ -17205,7 +17248,7 @@ async function libraryFlow() {
   same('its Undo puts tidy back; idle stays off', [existsSync(join(A.claude, 'tidy')), existsSync(join(A.claude, 'idle'))], [true, false]);
   // A reading that says tidy was used lands: tidy, out of the chip now, stays where it was, as Find lists it.
   writeFileSync(join(A.home, '.claude/projects/-work/s3.jsonl'), `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'tidy' } }] }, timestamp: ago(1).toISOString() })}\n`);
-  await a.click('#collect-usage');
+  await collectUsage();
   check('the new reading says tidy was used', await until(() => a.run(`(cell => cell?.textContent === 'yesterday' && /^Used /.test(cell.title))(document.querySelector('${row('skills', 'tidy')} .ov-used'))`)), await a.text(row('skills', 'tidy')));
   same('a reading that lands with Find holding text moves no row: tidy stays listed by its pin, and nothing counts it', [await a.all('.ov-row[data-key]', 'e.dataset.key'), (await counts(a)).all], [[rowPart('', 'skills', 'tidy')], '0']);
   await letGo('unused');
@@ -17215,7 +17258,7 @@ async function libraryFlow() {
   const zuluUse = `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'kit:zulu' } }] }, timestamp: ago(1).toISOString() })}\n`;
   for (const session of ['s4', 's5']) writeFileSync(join(A.home, `.claude/projects/-work/${session}.jsonl`), zuluUse);
   await find(a, '');
-  await a.click('#collect-usage');
+  await collectUsage();
   check('the new reading says zulu was used', await until(() => a.run(`(cell => cell?.textContent === '' && !cell.hasAttribute('title'))(document.querySelector('${row('skills', 'kit@local-market/zulu')} .ov-used'))`)), await a.text(row('skills', 'kit@local-market/zulu')));
   await find(a, 'body');
   await a.click('#nav-overview');
@@ -19260,7 +19303,7 @@ async function selectFlow() {
   same('the Library has Select on its toolbar, and no bar and no tick until it is clicked',
     [await word(), await a.exists('#select-bar'), await a.exists('.ov [role="checkbox"]')], ['Select', false, false]);
   same('From’s and Sort’s menus have nothing of Select’s bar: no padding, no line under them, as on next',
-    await a.run(`[...document.querySelectorAll('.ov-page .toolbar .select')].map(each => { const look = getComputedStyle(each); return [look.paddingLeft, look.paddingRight, look.borderBottomWidth]; })`), [['0px', '0px', '0px'], ['0px', '0px', '0px']]);
+    await withFilter(a, () => a.run(`[...document.querySelectorAll('.ov-page .toolbar .select')].map(each => { const look = getComputedStyle(each); return [look.paddingLeft, look.paddingRight, look.borderBottomWidth]; })`)), [['0px', '0px', '0px'], ['0px', '0px', '0px']]);
   await pictures('off');
   // 13. The toolbar's lines with Select and without it (hidden by a rule a redraw keeps), where it fits on a line it already has.
   const toolbarLines = () => a.run(`(() => { const middles = [...document.querySelector('.ov-page .toolbar').children].filter(part => part.offsetWidth).map(part => { const box = part.getBoundingClientRect(); return (box.top + box.bottom) / 2; }).sort((x, y) => x - y);
@@ -19377,8 +19420,10 @@ async function selectFlow() {
   await a.press('Escape');
   same('Escape with the question open closes it, the mode kept', [(await bar())[0], await word()], ['1 selected', 'Done']);
   // 11. A redraw keeps the ticks, and a press on a tick that a redraw replaces before its release, with Shift, ticks the run.
+  await openFilter(a);
   await a.click('#collect-usage');
-  for (let tries = 0; tries < 100 && await a.exists('#collect-usage:disabled'); tries++) await wait(100);
+  for (let tries = 0; tries < 100 && !(await a.run(`/^Usage statistics collected/.test(document.querySelector('#usage-line .band-text > :not(.band-unshown)')?.textContent ?? '')`)); tries++) await wait(100);
+  if (await a.exists('#usage-line-close')) await a.click('#usage-line-close');
   same('usage collected: the ticks are kept', await ticked(), [id('alpha')]);
   const at = await a.run(`(box => [box.x + box.width / 2, box.y + box.height / 2])(document.querySelector('${tick('delta')}').getBoundingClientRect())`);
   await a.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: at[0], y: at[1], button: 'left', buttons: 1, clickCount: 1, modifiers: 8 });
@@ -19706,7 +19751,7 @@ async function selectFlow() {
   await sizeTo(l, 1316, 819); await lightOpen(true);
   const folded = await selectNow();
   console.log(`selectFlow: libraryFlow's toolbar home at 1316×819, the sidebar open, not selecting: ${JSON.stringify(folded)}`);
-  same('at 1316 with the sidebar open, past the icons step, Select is its icon, named Select, and the toolbar one line', [folded.icon, folded.word, folded.title, folded.steps.includes('bar-icons'), folded.lines], [true, false, 'Select', true, 1]);
+  same('at 1316 with the sidebar open, Select is always its word with no icon or bar-icons, and the toolbar one line', [folded.icon, folded.word, folded.steps.includes('bar-icons'), folded.lines], [false, true, false, 1]);
   await lightShots('light-off');
   await l.click('#library-select');
   for (const name of ['alpha', 'gamma', 'zeta']) await l.click(`#${rowPart('tick', 'skills', name)}`);
@@ -19719,7 +19764,7 @@ async function selectFlow() {
     await sizeTo(l, width, height); await lightOpen(open);
     const there = await selectNow();
     console.log(`selectFlow: libraryFlow's toolbar home at ${width}×${height}${open ? '' : ' on its rail'}: ${JSON.stringify(there)}`);
-    same(`at ${width}×${height}${open ? '' : ' on its rail'}, Select is its word unless the bar is at the icons step, then its icon`, [there.word, there.icon], [!there.steps.includes('bar-icons'), there.steps.includes('bar-icons')]);
+    same(`at ${width}×${height}${open ? '' : ' on its rail'}, Select stays a word with no icon and no bar-icons`, [there.word, there.icon, there.steps.includes('bar-icons')], [true, false, false]);
   }
   same('at 2560 Select is its word', (await selectNow()).word, true);
   await fullSize(l);
@@ -21099,7 +21144,7 @@ async function headerResultFlow() {
   const asBefore = (name, before) => { const now = files(); same(name, [...new Set([...Object.keys(before), ...Object.keys(now)])].filter(path => before[path] !== now[path]), []); };
   /** The result's Undo, pressed once the run is over and it can be (a click still running holds it off), then the page settled. */
   const undo = async () => { await until(() => a.run(`(undo => !!undo && !undo.disabled)(document.querySelector('#outcome-undo'))`)); await pressOn('#outcome-undo'); };
-  const toolbarInView = async () => { const seen = []; for (const control of ['#library-kind-skills', '#find', '#item-from', '#item-order']) seen.push(await inView(control)); return seen; };
+  const toolbarInView = async () => { const seen = []; for (const control of ['#library-kind-skills', '#find', '#library-filter', '#item-order']) seen.push(await inView(control)); return seen; };
   /** The words of an opened result that can't be read: a text running past its box sideways (its first words, to name it). */
   const hidden = () => a.run(`[...document.querySelectorAll('#header .result-whole :is(.band-text, .problem-text, .problem-text > *, .toolbar-result-text)')].filter(node => node.scrollWidth > node.clientWidth + 1).map(node => node.textContent.slice(0, 40))`);
   /** Whether Show less ends the last words the opened result shows, as it does on a problem card and on a success card alike. */
@@ -21374,7 +21419,7 @@ async function headerResultFlow() {
     // From and Sort open a menu of the system's on the Mac, which a press would leave open over the checks: in view (above), and
     // chosen as their menus choose, then put back.
     await chooseFrom(a, 'plugins');
-    const fromChosen = await a.run(`document.querySelector('#item-from').value`);
+    const fromChosen = await withFilter(a, () => a.run(`document.querySelector('#item-from').value`));
     await chooseFrom(a, 'anywhere');
     const sortBy = async value => { await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })()`); await a.settle(); };
     const [sortWas, sortOther] = await a.run(`(select => [select.value, [...select.options].find(option => !option.selected).value])(document.querySelector('#item-order'))`);
@@ -21565,7 +21610,7 @@ async function fromFlow() {
   const served = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' };
   const row = (kind, key) => `.ov-row[data-key="${rowPart('', kind, key)}"]`;
   const listed = a => a.all('.ov-row[data-key]', 'e.dataset.key');
-  const fromIs = a => a.run(`document.querySelector('#item-from')?.value ?? null`);
+  const fromIs = a => withFilter(a, () => a.run(`document.querySelector('#item-from')?.value ?? null`));
   const find = async (a, text) => { await a.run(`(i => { i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); })(document.querySelector('#find'))`); await a.settle(); };
   const done = async a => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
   const mouseBack = async a => { for (const [type, buttons] of [['mousePressed', 8], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: 400, y: 28, button: 'back', buttons, clickCount: 1 }); await a.settle(); };
@@ -21609,7 +21654,7 @@ async function fromFlow() {
   await a.click(`#source-library-${await a.run(`document.querySelector('.source-row').dataset.source`)}`);
   same('Show in the Library: All, From the source, its two skills, Off', [await a.run(`document.querySelector('.kind-seg[aria-pressed="true"]')?.id`), await fromIs(a), (await listed(a)).sort()],
     ['library-kind-all', `source:${ledger}`, [id('skills', 'ledger-check'), id('skills', 'shared')]]);
-  const menu = await a.run(`[...document.querySelector('#item-from').children].map(each => each.tagName === 'OPTGROUP' ? [each.label, [...each.children].map(option => option.textContent)] : each.textContent)`);
+  const menu = await withFilter(a, () => a.run(`[...document.querySelector('#item-from').children].map(each => each.tagName === 'OPTGROUP' ? [each.label, [...each.children].map(option => option.textContent)] : each.textContent)`));
   same('From offers Anywhere, Your own, each review told apart by its marketplace, and the source by its short label', menu,
     ['Anywhere', 'Your own', ['Plugins', ['Any plugin', 'review (market-one)', 'review (market-two)']], ['Library sources', ['Any source', 'github.com/team/ledger-skills']]]);
   await chooseFrom(a, 'plugin:review@market-one');
@@ -21647,9 +21692,10 @@ async function fromFlow() {
   same('the word under Any plugin: lint and shared, once', (await listed(a)).sort(), [id('skills', 'review@market-one/lint'), id('skills', 'shared')]);
   await chooseFrom(a, `source:${ledger}`);
   same('then the source: its two', (await listed(a)).sort(), [id('skills', 'ledger-check'), id('skills', 'shared')]);
-  check('usage is read and the No use seen chip shows', await until(() => a.exists('#chip-unused')));
+  check('usage is read and the No use seen chip shows', await withFilter(a, () => until(() => a.exists('#chip-unused'))));
+  await openFilter(a);
   await a.click('#chip-unused');
-  same('the chip counts within Find and From', await a.text('#chip-unused .chip-count'), '2');
+  same('the chip counts within Find and From', await withFilter(a, () => a.text('#chip-unused .chip-count')), '2');
   await a.click('#turn-unused-off');
   await done(a);
   // shared, which the plugins also bring, is left to its own row (usagerow.ts leftToItsRow); notes and tidy, which Find and the
@@ -21659,7 +21705,8 @@ async function fromFlow() {
   await done(a);
   check('Undo turns it back on', await until(() => onNow('ledger-check')), ['shared', 'ledger-check', 'notes', 'tidy'].map(onNow));
   await find(a, '');
-  same('Find cleared, the chip still counts within From: the source’s two, not notes and tidy', await a.text('#chip-unused .chip-count'), '2');
+  same('Find cleared, the chip still counts within From: the source’s two, not notes and tidy', await withFilter(a, () => a.text('#chip-unused .chip-count')), '2');
+  await openFilter(a);
   await a.click('#chip-unused');
 
   // ---------- (a) review from market-one, from its row on Plugin marketplaces; another kind; one Back ----------
@@ -21696,36 +21743,34 @@ async function fromFlow() {
   await a.click('#source-open-library');
   same('it lands on All, From the source, Find let go: its skill, agent and server', [await fromIs(a), await a.run(`document.querySelector('#find').value`), (await listed(a)).sort()],
     [`source:${mixed}`, '', [id('agents', 'kit-agent'), id('mcp', 'kit-server'), id('skills', 'kit-skill')]]);
-  // The source's long link, shortened to its repository's name, shows whole on From, the bar wrapping first where it must.
+  // The source's long link, shortened to its repository's name, shows whole on From inside Filter, the bar wrapping first where it must.
   // Find keeps room for two short words (style.css: 140 px), the bar wrapping first, with Automatic sync on and (below) off.
-  const fromWhole = () => a.run(`(select => { const font = getComputedStyle(select), words = select.options[select.selectedIndex].text, measure = document.createElement('canvas').getContext('2d');
-    measure.font = font.font; return [words, measure.measureText(words).width + parseFloat(font.paddingLeft) + parseFloat(font.paddingRight) <= select.clientWidth + 1, document.querySelector('.ov-page .find').clientWidth >= 138, document.querySelector('.ov-page .toolbar').hasAttribute('data-overflows')]; })(document.querySelector('#item-from'))`);
+  const fromWhole = () => withFilter(a, () => a.run(`(select => { const font = getComputedStyle(select), words = select.options[select.selectedIndex].text, measure = document.createElement('canvas').getContext('2d');
+    measure.font = font.font; return [words, measure.measureText(words).width + parseFloat(font.paddingLeft) + parseFloat(font.paddingRight) <= select.clientWidth + 1, document.querySelector('.ov-page .find').clientWidth >= 138, document.querySelector('.ov-page .toolbar').hasAttribute('data-overflows')]; })(document.querySelector('#item-from'))`));
   const sizes = [[860, 600, 'rail'], [860, 600, 'open'], [1316, 819, 'open'], [1316, 819, 'rail']];
   const sizedTo = async (width, height, sidebar) => { await sizeTo(a, width, height); if (await a.run(`document.body.classList.contains('rail')`) !== (sidebar === 'rail')) await a.click('#sidebar-toggle'); return `at ${width}×${height}, the sidebar ${sidebar === 'rail' ? 'a rail' : 'open'}`; };
   for (const [width, height, sidebar] of sizes) {
     const at = await sizedTo(width, height, sidebar);
     same(`${at}, From shows the source’s name whole, Find keeps room for two short words, and the bar fits`, await fromWhole(), ['shared-agent-skills-for-the-whole-company', true, true, false]);
   }
-  // The chips' words fold first, then the captions of From and Sort (dom.ts fitBars): narrowing the window, there is a width
-  // where only the first have, and none where only the second have.
+  // On the Library toolbar, no word or Sort caption ever folds (never bar-icons or bar-captionless) from 1600 down to 860.
   const folds = [];
-  for (let width = 1600; width >= 860; width -= 16) { await sizeTo(a, width, 819); folds.push(await a.run(`[[...document.querySelectorAll('.chip-label')].every(label => !label.offsetWidth), !document.querySelector('.from-word').offsetWidth, !document.querySelector('.order-word').offsetWidth]`)); }
-  same('narrowing the window, the chips’ words fold before the captions of From and Sort, never after', [folds.some(([chips, from, sort]) => chips && !from && !sort), folds.some(([chips, from, sort]) => (from || sort) && !chips)], [true, false]);
+  for (let width = 1600; width >= 860; width -= 16) { await sizeTo(a, width, 819); folds.push(await a.run(`(bar => [bar.classList.contains('bar-icons'), bar.classList.contains('bar-captionless'), !bar.querySelector('.order-word')?.offsetWidth])(document.querySelector('.ov-page .toolbar'))`)); }
+  same('narrowing the window, the Library toolbar never enters bar-icons or bar-captionless and always keeps Sort’s caption', folds.some(row => row.some(Boolean)), false);
   await fullSize(a);
-  // At one width the toolbar has one height, whatever From, a chip or Find holds: no click moves the list. Where the bar wraps and
-  // has room, From keeps its caption; its box has a chip's on look while it narrows the list.
-  // Each state's height, and the widths of the bar's parts but Find (which takes the room left): the counts hold theirs too.
-  const barHeight = () => a.run(`(bar => [bar.getBoundingClientRect().height, ...[...bar.children].filter(part => !part.matches('.find')).map(part => part.getBoundingClientRect().width)].map(Math.round).join(' '))(document.querySelector('.ov-page .toolbar'))`);
+  // At one width the toolbar has one height, whatever From, a chip or Find holds: no click moves the list. Filter looks on while
+  // From narrows, and From inside Filter keeps its caption and on look.
+  const barHeight = () => a.run(`(bar => [bar.getBoundingClientRect().height, bar.querySelector('.toolbar-group').getBoundingClientRect().width].map(Math.round).join(' '))(document.querySelector('.ov-page .toolbar'))`);
   for (const [width, height, sidebar] of [[1316, 819, 'open'], [860, 600, 'rail']]) {
     const at = await sizedTo(width, height, sidebar), heights = {};
     for (const from of ['anywhere', 'yours', 'plugins', 'plugin:review@market-one', 'sources', `source:${ledger}`, `source:${mixed}`]) { await chooseFrom(a, from); heights[from] = await barHeight(); }
     await chooseFrom(a, 'anywhere');
-    await a.click('#chip-unused'); heights.chip = await barHeight(); await a.click('#chip-unused');
+    await openFilter(a); await a.click('#chip-unused'); heights.chip = await barHeight(); await openFilter(a); await a.click('#chip-unused');
     await find(a, 'ledger'); heights.find = await barHeight(); await find(a, '');
     check(`${at}, the toolbar has one height, and its parts their widths, whatever From, a chip or Find holds`, new Set(Object.values(heights)).size === 1, heights);
-    const looks = [await a.run(`document.querySelector('.from-word').offsetWidth > 0`), await a.exists('.from-select.from-on')];
+    const looks = [await a.exists('#library-filter.filter-on'), ...await withFilter(a, () => a.run(`[document.querySelector('.from-word').offsetWidth > 0, !!document.querySelector('.from-select.from-on')]`))];
     await chooseFrom(a, 'yours');
-    same(`${at}, the bar wrapped with room, From keeps its caption, and its box looks on only while it narrows the list`, [...looks, await a.exists('.from-select.from-on')], [true, false, true]);
+    same(`${at}, Filter and From inside it look on only while narrowing the list, and From keeps its caption`, [...looks, await a.exists('#library-filter.filter-on'), await withFilter(a, () => a.exists('.from-select.from-on'))], [false, true, false, true, true]);
   }
   await fullSize(a);
   await chooseFrom(a, `source:${mixed}`);
@@ -21835,9 +21880,9 @@ esac
   await chooseFrom(a, 'anywhere');
   seen.anywhere = [kitEnd, await placeOf()];
   same('the plugin’s list scrolled to its end, Anywhere again: the whole list from the top', [kitEnd > 0, seen.anywhere[1], await headIn()], [true, 0, true]);
-  check('usage is read, and No use seen is offered', await until(() => a.exists('#chip-unused')));
-  seen.chipOn = await madeDeep(() => a.click('#chip-unused'));
-  seen.chipOff = await madeDeep(() => a.click('#chip-unused'));
+  check('usage is read, and No use seen is offered', await withFilter(a, () => until(() => a.exists('#chip-unused'))));
+  seen.chipOn = await madeDeep(async () => { await openFilter(a); await a.click('#chip-unused'); });
+  seen.chipOff = await madeDeep(async () => { await openFilter(a); await a.click('#chip-unused'); });
   same('a chip pressed, and let go: each list from the top', [seen.chipOn, seen.chipOff], [[1600, 0], [1600, 0]]);
   seen.findTyped = await madeDeep(async () => { await find(a, 'own'); await until(async () => (await listed(a)).length === 60); });
   seen.findEscaped = await madeDeep(async () => { await escapeFind(); await until(async () => (await listed(a)).length === 84); });
@@ -21955,7 +22000,7 @@ async function fromPictures({ md, put, repo, served, until, done }) {
     await theme('light'); await fullSize(g);
   };
   await openKind(g, 'all');
-  await until(() => g.exists('#chip-unused'));
+  await withFilter(g, () => until(() => g.exists('#chip-unused')));
   await pictures('anywhere');
   await chooseFrom(g, `source:${links[1]}`);
   await pictures('long-source');
@@ -21964,9 +22009,9 @@ async function fromPictures({ md, put, repo, served, until, done }) {
   // Your own; No use seen on; and Nothing matches under a From choice (review from market-one has no agent), named.
   await chooseFrom(g, 'yours');
   await pictures('yours', ['860', '1316-open']);
-  await chooseFrom(g, 'anywhere'); await g.click('#chip-unused');
+  await chooseFrom(g, 'anywhere'); await openFilter(g); await g.click('#chip-unused');
   await pictures('chip-on', ['860', '1316-open']);
-  await g.click('#chip-unused'); await chooseFrom(g, 'plugin:review@market-one'); await g.click('#library-kind-agents');
+  await openFilter(g); await g.click('#chip-unused'); await chooseFrom(g, 'plugin:review@market-one'); await g.click('#library-kind-agents');
   await pictures('nothing-matches', ['860', '1316-open']);
   await g.click('#library-kind-all');
   // Automatic sync off, with a change waiting: the toolbar holds the waiting count too.
@@ -25234,7 +25279,7 @@ async function skillFileFlow() {
     await filePictures(pictures, openFile);
 
     // Task 7: Sort by Most used, then open the top skill's file in 1 click from the closed row.
-    await until(() => a.run(`/^Collected /.test(document.querySelector('#usage-when')?.textContent ?? '')`), 150);
+    await withFilter(a, () => until(() => a.run(`/^Collected /.test(document.querySelector('#usage-when')?.textContent ?? '')`), 150));
     await a.run(`(() => { const s = document.querySelector('#item-order'); s.value = 'most-used'; s.dispatchEvent(new Event('change')); })()`);
     await a.settle();
     const topKey = await a.run(`document.querySelector('.ov-row[data-key]')?.dataset.key ?? null`);
@@ -26824,8 +26869,228 @@ async function pluginItemSwitchesFlow() {
   await a.quit();
 }
 
+/**
+ * The Library's toolbar words, two-group fit (1316 one row, 860 two rows, quiet and busiest), Filter disclosure with real
+ * native picker Escape/click/Tab/outside-click/Select-Escape rules, empty-kind segments without 0, Sort/Put in order swap with
+ * held room, Select/Done width, and a tool tab keeping its bar as before. With --shots, captures the toolbar states.
+ */
+async function libraryToolbarFlow() {
+  const H = homeWith('library-toolbar-words');
+  const old = new Date(Date.now() - 40 * DAY);
+  const md = (name, body) => `---\nname: ${name}\ndescription: ${body}\n---\n\n${body}\n`;
+  const age = folder => { for (const p of [join(folder, 'SKILL.md'), folder]) utimesSync(p, old, old); };
+  const put = (root, files) => { for (const [p, body] of Object.entries(files)) { mkdirSync(dirname(join(root, p)), { recursive: true }); writeFileSync(join(root, p), body); } };
+  const until = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await wait(100); } return false; };
+  const done = async a => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  for (let i = 1; i <= 14; i++) age(skill(H.claude, `workflow-${String(i).padStart(2, '0')}`, md(`workflow-${String(i).padStart(2, '0')}`, `Run workflow ${i}.`)));
+  skill(H.claude, 'api-docs', md('api-docs', 'Generate OpenAPI docs (Claude).'));
+  skill(H.copilot, 'api-docs', md('api-docs', 'Generate OpenAPI docs (Copilot).'));
+  const marketDir = join(scratch, 'l2b-market');
+  const pluginFiles = { 'skills/incident-triage/SKILL.md': md('incident-triage', 'Triage live incidents.') };
+  put(marketDir, {
+    '.claude-plugin/marketplace.json': JSON.stringify({ name: 'team-market', owner: { name: 'Team' }, plugins: [{ name: 'varo-incident-response', source: './plugins/varo-incident-response', description: 'Incident response.' }] }),
+    ...Object.fromEntries(Object.entries(pluginFiles).map(([p, body]) => [`plugins/varo-incident-response/${p}`, body])),
+  });
+  writeClaudeInstall(H.home, 'team-market', 'varo-incident-response', '1.0.0', pluginFiles);
+  put(H.home, {
+    '.claude/plugins/known_marketplaces.json': JSON.stringify({ 'team-market': { source: { source: 'directory', path: marketDir }, installLocation: marketDir } }),
+    '.claude/projects/-work/s1.jsonl': `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'workflow-01' } }] }, timestamp: new Date(Date.now() - 2 * DAY).toISOString() })}\n`,
+  });
+  writeFileSync(join(H.data, 'marketplaces.json'), JSON.stringify([marketDir]));
+  const a = await launch(H.data, [], H.real);
+  await a.click('#nav-overview');
+  await a.click('#setup-yes');
+  await done(a);
+  await openKind(a, 'all');
+  await until(() => a.exists(`#${rowPart('switch', 'skills', 'workflow-01')}`));
+  await withFilter(a, () => until(() => a.exists('#chip-unused')));
+
+  const measureBar = () => a.run(`(() => {
+    const bar = document.querySelector('.ov-page .toolbar');
+    const br = bar.getBoundingClientRect();
+    const cs = getComputedStyle(bar);
+    const inner = br.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const groups = [...bar.children].map(g => {
+      const r = g.getBoundingClientRect();
+      return { cls: g.className, left: Math.round(r.left - br.left), right: Math.round(r.right - br.left), top: Math.round(r.top - br.top), width: Math.round(r.width) };
+    });
+    const rows = groups.map(g => g.top).filter((t, i, arr) => !i || Math.abs(t - arr[i - 1]) > 8).length;
+    const ctrls = [...bar.querySelectorAll('.kind-seg, .find, .chip, #library-filter, .order-word, #item-order, #library-select, .apply-waiting')]
+      .filter(el => !el.closest('#library-filter-panel') && el.offsetWidth > 0)
+      .map(el => { const r = el.getBoundingClientRect(); return { id: el.id || el.className, left: r.left, right: r.right, top: r.top, bottom: r.bottom, text: (el.innerText || el.value || '').trim() }; });
+    let overlaps = [];
+    for (let i = 0; i < ctrls.length; i++) for (let j = i + 1; j < ctrls.length; j++) {
+      const x = ctrls[i], y = ctrls[j];
+      if (Math.min(x.right, y.right) - Math.max(x.left, y.left) > 1 && Math.min(x.bottom, y.bottom) - Math.max(x.top, y.top) > 1) overlaps.push([x.id, y.id]);
+    }
+    const find = bar.querySelector('.find').getBoundingClientRect();
+    const kinds = bar.querySelector('.kind-switch').getBoundingClientRect();
+    return {
+      inner: Math.round(inner), rows, steps: [...bar.classList].filter(c => c.startsWith('bar-')),
+      overflows: bar.hasAttribute('data-overflows'), groups, overlaps,
+      findSameRowAsKinds: Math.abs(find.top - kinds.top) <= 6,
+      findWidth: Math.round(find.width),
+      fromOnBar: !!bar.querySelector('#item-from') && !bar.querySelector('#item-from').closest('#library-filter-panel'),
+      sortCaption: bar.querySelector('.order-word')?.innerText?.trim() ?? null,
+      sortCaptionShown: (bar.querySelector('.order-word')?.offsetWidth ?? 0) > 0,
+      waitingText: bar.querySelector('.apply-waiting')?.innerText?.trim() ?? null,
+      selectText: bar.querySelector('#library-select')?.innerText?.trim() ?? null,
+      selectSvg: !!bar.querySelector('#library-select svg'),
+      differSvg: !!bar.querySelector('#chip-attention svg'),
+      differText: bar.querySelector('#chip-attention')?.innerText?.replace(/\\s+/g, ' ').trim() ?? null,
+    };
+  })()`);
+  const setTheme = async theme => { await a.run(`document.activeElement?.blur(); window.centralKnot.setAppearance(${JSON.stringify(theme)})`); await wait(120); };
+  const snap = async (name, w, h, theme, prep) => {
+    if (!shots) return;
+    await withSidebarOpen(a, w, h, async () => { await setTheme(theme); if (prep) await prep(); await a.shot(name); });
+    await setTheme('system');
+  };
+
+  // 1. Quiet bar: 1316×819 one row (all words, no icon-only, MCP & Agents faint without 0); 860×528 two rows (whole second group).
+  let q1316, q860;
+  await withSidebarOpen(a, 1316, 819, async () => {
+    q1316 = await measureBar();
+    same('quiet 1316: nothing cut off', [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+  });
+  await withSidebarOpen(a, 860, 528, async () => {
+    q860 = await measureBar();
+    same('quiet 860×528: nothing cut off', [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+  });
+  console.log(`l2b quiet 1316=${JSON.stringify(q1316)} 860=${JSON.stringify(q860)}`);
+  same('quiet 1316 (sidebar open): 1 row, words whole, no icon-only, no overlaps, no glyphs',
+    [q1316.rows, q1316.overflows, q1316.overlaps, q1316.steps.includes('bar-icons'), q1316.steps.includes('bar-captionless'), q1316.fromOnBar, q1316.sortCaptionShown, q1316.selectSvg, q1316.differSvg, q1316.differText],
+    [1, false, [], false, false, false, true, false, false, 'Copies differ 1']);
+  same('quiet 860×528 (sidebar open): 2 rows, Find shares row 1 with kinds, From off bar, Sort has caption, no overlaps',
+    [q860.rows, q860.overflows, q860.overlaps, q860.findSameRowAsKinds, q860.fromOnBar, q860.sortCaptionShown, q860.sortCaption],
+    [2, false, [], true, false, true, 'Sort']);
+  same('kinds with nothing: word alone, faint, no 0, still buttons',
+    await a.run(`['mcp', 'agents'].map(k => { const b = document.getElementById('library-kind-' + k); return [b.tagName, b.innerText.trim(), b.classList.contains('kind-seg-empty'), !b.querySelector('.kind-seg-count'), getComputedStyle(b).color !== getComputedStyle(document.getElementById('library-kind-skills')).color]; })`),
+    [['BUTTON', 'MCP servers', true, true, true], ['BUTTON', 'Agents', true, true, true]]);
+  await snap('toolbar-quiet-860-light', 860, 528, 'light');
+  await snap('toolbar-quiet-1316-dark', 1316, 819, 'dark');
+
+  // 2. Filter disclosure: real native select Escape, choice, Tab order, From line + combined band, outside click, Select Escape.
+  await withSidebarOpen(a, 1316, 819, async () => {
+    await a.click('#library-filter');
+    same('Filter opens panel with From, unused chip, and usage controls, and nothing cut off',
+      [await a.run(`document.getElementById('library-filter')?.getAttribute('aria-expanded')`), await a.exists('#library-filter-panel #item-from'), await a.exists('#library-filter-panel #chip-unused'), await a.exists('#library-filter-panel #collect-usage'), await a.run(CUT_OFF)],
+      ['true', true, true, true, []]);
+    // Normal Tab order through the three controls inside the disclosure panel.
+    await a.run(`document.getElementById('library-filter').focus()`);
+    const tabbed = [];
+    for (let i = 0; i < 4; i++) { await a.press('Tab', 'Tab'); tabbed.push(await a.run(`document.activeElement?.id`)); }
+    same('Tab walks From, No use seen, Update usage statistics, then Sort', tabbed, ['item-from', 'chip-unused', 'collect-usage', 'item-order']);
+    // Real native picker: open From select with Alt+ArrowDown, first Escape closes picker keeping focus on From & panel open, second Escape closes panel & focuses Filter.
+    await a.run(`document.getElementById('item-from').focus()`);
+    for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40, modifiers: 1 });
+    await wait(120);
+    await a.press('Escape');
+    same('first Escape with native select open closes the select only: focus stays on From and panel stays open',
+      [await a.run(`document.activeElement?.id`), await a.exists('#library-filter-panel')], ['item-from', true]);
+    await a.press('Escape');
+    same('second Escape closes Filter panel and returns focus to Filter',
+      [await a.exists('#library-filter-panel'), await a.run(`document.activeElement?.id`)], [false, 'library-filter']);
+    // Press elsewhere closes panel and keeps target & focus.
+    await a.click('#library-filter');
+    const findPt = await a.run(`(r => ({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }))(document.getElementById('find').getBoundingClientRect())`);
+    for (const [type, buttons] of [['mousePressed', 1], ['mouseReleased', 0]]) await a.send('Input.dispatchMouseEvent', { type, x: findPt.x, y: findPt.y, button: 'left', buttons, clickCount: 1 });
+    await a.settle();
+    same('outside click closes Filter and keeps focus on Find', [await a.exists('#library-filter-panel'), await a.run(`document.activeElement?.id`)], [false, 'find']);
+    // Escape on Filter does not close Select's bar or Delete question.
+    await a.click('#library-select');
+    const selW = await a.run(`document.getElementById('library-select').offsetWidth`);
+    await a.click(`#${rowPart('tick', 'skills', 'workflow-01')}`);
+    await a.click('#select-delete');
+    await a.click('#library-filter');
+    await a.press('Escape');
+    same('Escape on open Filter leaves Select bar and Delete question open, returning focus to Filter',
+      [await a.exists('#library-filter-panel'), await a.exists('#select-delete-now'), await a.run(`document.activeElement?.id`), await a.run(`document.getElementById('library-select').offsetWidth`)],
+      [false, true, 'library-filter', selW]);
+    await a.press('Escape');
+    await a.press('Escape');
+  });
+  await snap('filter-open-860-light', 860, 528, 'light', () => openFilter(a));
+  await snap('filter-open-1316-dark', 1316, 819, 'dark', () => openFilter(a));
+  await closeFilter(a);
+  // Choose From: plugin closes panel, focuses Filter, turns Filter on, shows From band with From anywhere.
+  await chooseFrom(a, 'plugin:varo-incident-response@team-market');
+  same('From chosen: panel closes, focus on Filter, Filter on, From band names source with From anywhere',
+    [await a.exists('#library-filter-panel'), await a.run(`document.activeElement?.id`), await a.exists('#library-filter.filter-on'), (await a.text('#from-band'))?.trim(), (await a.text('#from-clear'))?.trim()],
+    [false, 'library-filter', true, 'From: varo-incident-responseFrom anywhere', 'From anywhere']);
+  await snap('from-narrowed-860-light', 860, 528, 'light');
+  await snap('from-narrowed-1316-dark', 1316, 819, 'dark');
+  // Combine From: Your own + No use seen: ONE line for both, From anywhere clears From and keeps unused band intact.
+  await chooseFrom(a, 'yours');
+  await openFilter(a);
+  await a.click('#chip-unused');
+  same('From + No use seen combine into one #unused-band with From anywhere, disclosure and Turn off',
+    [await a.exists('#from-band'), await a.exists('#unused-band #from-clear'), await a.exists('#unused-band #unused-counted-toggle'), await a.exists('#unused-band #turn-unused-off'), (await a.text('#unused-band'))?.includes('From: Your own')],
+    [false, true, true, true, true]);
+  await snap('from-combined-860-light', 860, 528, 'light');
+  await a.click('#from-clear');
+  same('From anywhere clears From and preserves unused band and Filter on state',
+    [await a.exists('#from-clear'), await a.exists('#unused-band'), await a.exists('#library-filter.filter-on')], [false, true, true]);
+  await openFilter(a);
+  await a.click('#chip-unused');
+
+  // 3. Busiest bar: every kind with items, Copies differ, changes waiting, rows held out of order (#put-in-order on Sort caption).
+  put(H.home, {
+    '.claude.json': JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example.test/mcp' }, linear: { type: 'http', url: 'https://linear.example.test/mcp' } } }),
+    '.claude/agents/reviewer.md': md('reviewer', 'Reviews pull requests.'),
+    '.claude/agents/planner.md': md('planner', 'Plans work.'),
+  });
+  await a.click('#header-refresh');
+  await done(a);
+  await a.click('#sync-switch');
+  same('with sync off and nothing waiting, Nothing waiting · sync off does not stand on Library bar',
+    (await a.text('.ov-page .toolbar') ?? '').includes('Nothing waiting'), false);
+  // Edit one skill + switch one skill off (refused in Claude Code -> waiting + rows held out of order, moving no row!).
+  await withSidebarOpen(a, 1316, 819, async () => {
+    const sortWBefore = await a.run(`Math.round(document.querySelector('.order-word').getBoundingClientRect().width)`);
+    const topBefore = await a.run(`Math.round(document.querySelector('.ov-row[data-key]').getBoundingClientRect().top)`);
+    writeFileSync(join(H.claude, 'workflow-01/SKILL.md'), md('workflow-01', 'Edited with sync off.'));
+    await a.click('#header-refresh');
+    await until(() => a.exists('.apply-waiting'));
+    await a.click(`#${rowPart('switch', 'skills', 'workflow-02')}`);
+    await done(a);
+    const topAfter = await a.run(`Math.round(document.querySelector('.ov-row[data-key]').getBoundingClientRect().top)`);
+    const putInfo = await a.run(`(b => b && ({ tag: b.tagName, text: b.innerText.trim(), aria: b.getAttribute('aria-label'), title: b.title, underline: getComputedStyle(b).textDecorationLine.includes('underline'), width: Math.round(b.getBoundingClientRect().width) }))(document.getElementById('put-in-order'))`);
+    same('switch introducing waiting + held order moves no row, and Put in order swaps in Sort caption’s exact width',
+      [topAfter, putInfo], [topBefore, { tag: 'BUTTON', text: 'Sort', aria: 'Sort: Put in order', title: 'Put in order', underline: true, width: sortWBefore }]);
+  });
+  let b1316, b860;
+  await withSidebarOpen(a, 1316, 819, async () => {
+    b1316 = await measureBar();
+    same('busiest 1316: nothing cut off', [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+  });
+  await withSidebarOpen(a, 860, 528, async () => {
+    b860 = await measureBar();
+    same('busiest 860×528: nothing cut off', [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+  });
+  console.log(`l2b busiest 1316=${JSON.stringify(b1316)} 860=${JSON.stringify(b860)}`);
+  same('busiest 1316 (sidebar open): still 1 row, short waiting words, no overflow, no overlaps',
+    [b1316.rows, b1316.overflows, b1316.overlaps, /^\d+ waiting$/.test(b1316.waitingText ?? '') || /^\d+ changes? waiting$/.test(b1316.waitingText ?? '')],
+    [1, false, [], true]);
+  same('busiest 860×528 (sidebar open): still 2 rows, full waiting words, no overflow, no overlaps',
+    [b860.rows, b860.overflows, b860.overlaps, b860.findSameRowAsKinds, /^\d+ changes? waiting$/.test(b860.waitingText ?? '')],
+    [2, false, [], true, true]);
+  await snap('toolbar-busiest-860-light', 860, 528, 'light');
+  await snap('toolbar-busiest-1316-dark', 1316, 819, 'dark');
+
+  // 4. A tool's own tab keeps its bar as on next.
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-skills');
+  same('tool tab keeps its bar as on next: no Filter door, From on bar, Copies differ glyph',
+    [await a.exists('#library-filter'), await a.exists('.toolbar #item-from'), await a.exists('#chip-attention .chip-icon')],
+    [false, true, true]);
+  same('no page errors, library toolbar', a.pageErrors, []);
+  await a.quit();
+}
+
 const groups = [
-  [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, selectFlow, sessionStripFlow, hookRunFlow, fromFlow, claudeWholeFlow],
+  [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, libraryToolbarFlow, selectFlow, sessionStripFlow, hookRunFlow, fromFlow, claudeWholeFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow, sessionsFlow, keepSessionCostsFlow, sessionsWeekFlow],
   [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginPageSaysLessFlow, pluginItemSwitchesFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
   [backFlow, backPlaceFlow, libraryLinesFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, mcpSigninPiOpenCodeFlow, firstSetupFlow, skillFileFlow, crashFlow],

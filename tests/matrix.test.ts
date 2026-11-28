@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { dayWords, DAY_MS } from '../src/model.ts';
 import { newItem, type LibraryItem } from '../src/library.ts';
-import type { RowOrder } from '../src/itemrow.ts';
+import { pin, type RowOrder } from '../src/itemrow.ts';
 import { reloadAdvice } from '../src/reload.ts';
 import type { Outcome } from '../src/app.ts';
 import { pluginLink } from '../src/sourcelink.ts';
@@ -18,7 +18,7 @@ const { dispatch } = installDom({
 });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first, before matrix.ts.
 await import('../src/settingspage.ts');
-const { oweHomeRead, readHomeOnce, setRenderer, state, unpin } = await import('../src/app.ts');
+const { drawPage, oweHomeRead, pinnedRows, readHomeOnce, setRenderer, state, unpin } = await import('../src/app.ts');
 const { runAfterLayout } = await import('../src/dom.ts');
 const { backFromFiles, headerNotices, itemsTable, libraryTable, listResult, noticeKindsShown, openFiles, openKind, reloadChips, reloadLines, rowByKey, skillsBrowser, unshownReloadRows, usedCellWords } = await import('../src/matrix.ts');
 const { pluginsResult, runBand } = await import('../src/pluginspage.ts');
@@ -487,7 +487,11 @@ function makeHome(homePath: string, skills: Record<string, unknown>[], library: 
 }
 
 const fromSelect = (tree: unknown, value: string) => {
-  const select = findById(tree, 'item-from') as (FakeNode & { onchange?: (event: unknown) => void }) | undefined;
+  let select = findById(tree, 'item-from') as (FakeNode & { onchange?: (event: unknown) => void }) | undefined;
+  if (!select) {
+    (findById(tree, 'library-filter') as FakeNode | undefined)?.click();
+    select = findById(libraryTable(), 'item-from') as (FakeNode & { onchange?: (event: unknown) => void }) | undefined;
+  }
   assert.ok(select?.onchange, 'From select is drawn');
   select.onchange({ target: { value } });
 };
@@ -656,5 +660,109 @@ test('openKind with a key not yet in state.home awaits the owed home read and op
     assert.equal(findById(missing, 'open-skills-from-plugin'), undefined, 'From: Your own stays untouched when the owed read does not hold the requested row');
   } finally {
     nextRefresh = undefined;
+  }
+});
+
+test('Library toolbar groups controls, drops glyphs/sync-off/empty-kind zeros, swaps Sort for Put in order, and keeps tool tab bar as before', () => {
+  const { onSkill, library } = installFiveToolFixture();
+  const differing = makeFact('clash', {
+    copies: { 'claude-cli': makeCopy('clash', 'h1'), 'copilot-cli': makeCopy('clash', 'h2') },
+    takeInAnswers: { click: { wait: 'choice' }, rule: { wait: 'choice' } },
+  });
+  const home = makeFiveToolHome([onSkill, differing, makeFact('off-one')], { alpha: library.alpha, 'off-one': library['off-one'] });
+  home.syncOn = false;
+  home.agents = { ...home.agents, unread: ['claude-cli'] };
+  app.home = home;
+  Object.assign(app, { page: 'library', libraryKind: 'all', libraryView: 'list', visit: 40 });
+  openKind('all');
+  let libTree!: FakeNode;
+  drawPage(() => { libTree = libraryTable() as unknown as FakeNode; });
+  const bar = findAll(libTree, el => el.className.split(/\s+/).includes('library-toolbar'))[0];
+  assert.ok(bar, 'Library draws .library-toolbar');
+  assert.deepEqual(bar.children.map(c => (c as FakeNode).className), ['toolbar-lead', 'toolbar-group']);
+  assert.equal(findAll(findById(libTree, 'chip-attention'), el => el.tag === 'svg').length, 0, 'Library Copies differ has no ± glyph');
+  const selectBtn = findById(libTree, 'library-select')!;
+  assert.equal(findAll(selectBtn, el => el.tag === 'svg').length, 0, 'Select has no tick icon');
+  assert.equal(selectBtn.className.split(/\s+/).includes('collapsible'), false, 'Select never collapses to icon');
+  assert.equal(textOf(bar).includes('Nothing waiting · sync off'), false, 'Nothing waiting · sync off leaves the Library bar');
+  // Known-empty MCP shows no 0 and is faint; unread Agents keeps 0?; non-empty Skills keeps count.
+  const mcpSeg = findById(libTree, 'library-kind-mcp')!;
+  assert.equal(mcpSeg.tag, 'button');
+  assert.equal(mcpSeg.className.split(/\s+/).includes('kind-seg-empty'), true);
+  assert.equal(textOf(mcpSeg), 'MCP servers');
+  assert.equal(textOf(findById(libTree, 'library-kind-agents')!), 'Agents0?');
+  // Put in order swaps in place of Sort caption with accessible name while select keeps Sort by.
+  pin(pinnedRows(app.pinned.list), 'skills-off-one', 'on');
+  const heldTree = libraryTable() as unknown as FakeNode;
+  const putBtn = findById(heldTree, 'put-in-order')!;
+  assert.equal(putBtn.tag, 'button');
+  assert.equal(textOf(putBtn), 'Sort');
+  assert.equal(putBtn.attrs['aria-label'], 'Sort: Put in order');
+  assert.equal(putBtn.attrs.title, 'Put in order');
+  assert.equal(findById(heldTree, 'item-order')?.attrs['aria-label'], 'Sort by');
+  unpin();
+  // Tool tab keeps From on bar, Copies differ glyph, Nothing waiting · sync off, and no Filter door.
+  const tabTree = itemsTable('skills', 'claude-cli') as unknown as FakeNode;
+  assert.equal(findById(tabTree, 'library-filter'), undefined);
+  assert.ok(findById(tabTree, 'item-from'), 'tool tab keeps From directly on bar');
+  assert.ok(findAll(findById(tabTree, 'chip-attention'), el => el.tag === 'svg').length > 0, 'tool tab keeps ± glyph');
+  assert.ok(textOf(findAll(tabTree, el => el.className.split(/\s+/).includes('toolbar'))[0]).includes('Nothing waiting · sync off'));
+});
+
+test('Library Filter disclosure opens three controls, derives on-state, combines From with unused band, and resets on visit/home/Escape without leaving Select', () => {
+  const { onSkill, library } = installFiveToolFixture();
+  const home = makeFiveToolHome([onSkill], { alpha: library.alpha });
+  const prevUsage = app.usage;
+  app.home = home;
+  app.usage = { state: 'ready', gen: 1, data: { at: '2026-11-28T08:44:00.000Z', tools: [{ tool: 'claude-cli', sessions: 3, recent: 3, from: OLD_AT, tells: { skill: 'sure', mcp: 'sure', agent: 'sure' }, used: [] }] } };
+  Object.assign(app, { page: 'library', libraryKind: 'all', libraryView: 'list', visit: 41 });
+  openKind('all');
+  try {
+    const closed = libraryTable() as unknown as FakeNode;
+    const door = findById(closed, 'library-filter')!;
+    assert.equal(door.attrs['aria-expanded'], 'false');
+    assert.equal(findById(closed, 'library-filter-panel'), undefined);
+    assert.equal(findById(closed, 'item-from'), undefined);
+    door.click();
+    const opened = libraryTable() as unknown as FakeNode;
+    assert.equal(findById(opened, 'library-filter')?.attrs['aria-expanded'], 'true');
+    const panel = findById(opened, 'library-filter-panel')!;
+    assert.ok(findById(panel, 'item-from') && findById(panel, 'chip-unused') && findById(panel, 'usage-when') && findById(panel, 'collect-usage'));
+    // Choosing From closes panel, turns Filter on, and shows #from-band with From anywhere.
+    (findById(panel, 'item-from') as FakeNode & { onchange: (e: unknown) => void }).onchange({ target: { value: 'yours' } });
+    const fromOn = libraryTable() as unknown as FakeNode;
+    assert.equal(findById(fromOn, 'library-filter-panel'), undefined, 'From choice closes panel');
+    assert.equal(findById(fromOn, 'library-filter')?.className.split(/\s+/).includes('filter-on'), true);
+    assert.ok(textOf(findById(fromOn, 'from-band')).includes('From: Your own'));
+    assert.equal(textOf(findById(fromOn, 'from-clear')), 'From anywhere');
+    // Adding No use seen combines both into one #unused-band while keeping disclosure and actions; From anywhere clears From only.
+    findById(fromOn, 'library-filter')!.click();
+    findById(libraryTable(), 'chip-unused')!.click();
+    const both = libraryTable() as unknown as FakeNode;
+    assert.equal(findById(both, 'from-band'), undefined, 'combined band replaces standalone from-band');
+    const uBand = findById(both, 'unused-band')!;
+    assert.ok(textOf(uBand).includes('From: Your own') && findById(uBand, 'from-clear') && findById(uBand, 'unused-counted-toggle') && findById(uBand, 'turn-unused-off'));
+    findById(uBand, 'from-clear')!.click();
+    const unusedOnly = libraryTable() as unknown as FakeNode;
+    assert.equal(findById(unusedOnly, 'from-clear'), undefined, 'From anywhere cleared From');
+    assert.ok(findById(unusedOnly, 'unused-band'), 'unused filter and band stay intact');
+    assert.equal(findById(unusedOnly, 'library-filter')?.className.split(/\s+/).includes('filter-on'), true);
+    // Escape closes open Filter without leaving Select mode; visit/home change also closes Filter.
+    findById(unusedOnly, 'library-select')!.click();
+    findById(libraryTable(), 'library-filter')!.click();
+    assert.ok(findById(libraryTable(), 'library-filter-panel') && findById(libraryTable(), 'select-bar'));
+    dispatch('keydown', { key: 'Escape', target: { id: 'library-filter' } });
+    const afterEsc = libraryTable() as unknown as FakeNode;
+    assert.equal(findById(afterEsc, 'library-filter-panel'), undefined, 'Escape closes Filter');
+    assert.ok(findById(afterEsc, 'select-bar'), 'Escape leaves Select mode open');
+    findById(afterEsc, 'library-select')!.click();
+    findById(libraryTable(), 'library-filter')!.click();
+    app.visit = 42;
+    assert.equal(findById(libraryTable(), 'library-filter-panel'), undefined, 'new Library visit closes Filter');
+    findById(libraryTable(), 'library-filter')!.click();
+    app.home = { ...home, home: '/other-filter-home' };
+    assert.equal(findById(libraryTable(), 'library-filter-panel'), undefined, 'new home closes Filter');
+  } finally {
+    app.usage = prevUsage;
   }
 });
