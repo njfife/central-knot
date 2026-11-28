@@ -5,9 +5,9 @@
 // engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
 import { noteMove, KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
 import { manageLocked, manageRow } from './managecard.ts';
-import { MARK_WORDS, installsIn, pluginsInstalled, takenItems, takesItemsOnly, viewStopped, type InstalledMarketPlugin } from './pluginstatus.ts';
+import { MARK_WORDS, installId, installsIn, marketTitle, pluginsInstalled, takenItems, takesItemsOnly, viewStopped, type InstalledMarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
-import { pluginTitle, uninstallControl } from './pluginparts.ts';
+import { boxDoes, pluginTitle, uninstallControl } from './pluginparts.ts';
 import { button, emptyState, h, icon, infoMark, pathText, section, toggle, type Child } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
 import { andList, coworkWords, fileName, kindNouns, pageNames, toolNames as names } from './words.ts';
@@ -18,7 +18,7 @@ import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from 
 import { caughtUpBand, resetTablesForHarness, itemsTable, differingIn, emptyList, showFiltered } from './matrix.ts';
 import { kindSource } from './itemrow.ts';
 import { aboutInstructions, instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
-import { browse, lineBox, loadPlugins, market, pluginBusy, turnPlugin } from './pluginstate.ts';
+import { browse, clickOn, lineBox, loadPlugins, market, pluginBusy, titleShared, turnPlugin } from './pluginstate.ts';
 import { nowLead, profileNowIn } from './profileplan.ts';
 import { copyButton, fact, kindEmpty, noToolsState, notRead } from './pages.ts';
 
@@ -335,22 +335,33 @@ function instructionsTab(tool: HarnessId) {
   return h('div.page', {}, instructionBands(), h('div.scroll.harness-scroll', { id: 'harness-body' }, body));
 }
 
-/** One installed plugin: its name, the tool's recorded version (if any), its box line or off state, Its page, Uninstall…, and that tool's switch (pluginstate.ts lineBox). */
+/** One installed plugin: its name (with marketplace whenever another listed catalog shares its title), recorded version, live click or state line (with an accessible info mark when held/stuck), Uninstall…, quiet Its page, and that tool's switch (pluginstate.ts lineBox). */
 function pluginRow({ entry, plugin, version }: InstalledMarketPlugin, tool: HarnessId) {
-  const note = [entry.name, plugin.description].filter(Boolean).join(' · ');
-  const { box, mark } = lineBox(plugin.name, entry.name, entry.source, tool);
+  const showMarket = titleShared(entry.source, plugin.name);
+  const named = showMarket ? `${pluginTitle(plugin)} (${marketTitle(entry)})` : pluginTitle(plugin);
+  const { box, mark, words } = lineBox(plugin.name, entry.name, entry.source, tool);
   const own = typeof box === 'object' ? box : undefined;
-  const stateText = own ? own.line ?? (mark === 'kept-off' ? MARK_WORDS['kept-off'] : undefined) : undefined;
-  const pageLink = button({ variant: 'link', size: 'small', label: 'Its page', name: `Open ${pluginTitle(plugin)} in ${pageNames.plugins}`, id: `harness-plugin-${entry.name}-${plugin.name}`,
+  const note = [marketTitle(entry), plugin.description, own?.line ? own.off : undefined].filter(Boolean).join(' · ');
+  const live = clickOn(entry.source, plugin.name);
+  const pending = live && live.state !== 'ended' ? live : undefined;
+  const liveText = pending ? (pending.state === 'waiting' ? pending.said.waiting : pending.said.running) : undefined;
+  const liveRow = pending && (!pending.tool || pending.tool === tool) ? h('span.plugin-click', { 'data-click': pending.state }, pending.state === 'waiting' ? icon('clock', 12) : icon('refresh-cw', 12, 'spin'), h('span', {}, liveText)) : null;
+  const stateText = own ? own.line ?? (mark && (mark === 'kept-off' || mark === 'stays' || own.held) ? MARK_WORDS[mark] : undefined) : undefined;
+  const stateTip = own?.line && own.off ? (mark === 'kept-off' ? `${words} ${own.off}` : own.off) : words;
+  const stateWhy = stateText && own?.line && own.off ? infoMark(`harness-plugin-why-${entry.name}-${plugin.name}`, `${named}: ${stateText}`, own.off) : null;
+  const stateRow = stateText ? (stateWhy ? h('span.harness-plugin-state-line', {}, h('span.harness-plugin-state', { title: stateTip }, stateText), stateWhy) : h('span.harness-plugin-state', { title: stateTip }, stateText)) : null;
+  const does = own && mark && market.view ? boxDoes(market.view, entry, plugin.name, tool, mark, own.ticked, true, named) : undefined;
+  const disabled = own?.off || liveText || state.busy || pluginBusy(entry.source, plugin.name);
+  const pageLink = button({ variant: 'ghost', size: 'small', label: 'Its page', name: `Open ${named} in ${pageNames.plugins}`, id: `harness-plugin-${entry.name}-${plugin.name}`,
     onclick: () => { showPage('plugins'); browse({ source: entry.source, plugin: plugin.name, tab: 'plugins', find: '', category: undefined, hookTool: tool }); } });
-  const control = own ? toggle({ on: own.ticked, label: `${pluginTitle(plugin)} in ${names[tool]}`, disabled: own.off || pluginBusy(entry.source, plugin.name),
+  const control = own ? toggle({ on: own.ticked, label: `${named} in ${names[tool]}`, disabled, attrs: does ? { title: does, 'aria-description': does } : {},
     id: `harness-plugin-switch-${entry.name}-${plugin.name}`, onchange: () => turnPlugin(entry, plugin.name, own.ticked ? 'keep-out' : 'let-in', tool) }) : null;
-  const [uninstall, question] = own ? uninstallControl(entry, plugin, tool, `harness-plugin-uninstall-${entry.name}-${plugin.name}`, own) : [null, null];
+  const [uninstall, question] = own ? uninstallControl(entry, plugin, tool, `harness-plugin-uninstall-${entry.name}-${plugin.name}`, own, showMarket) : [null, null];
   return h('div.harness-plugin', { role: 'listitem', title: note || undefined },
     h('div.harness-plugin-text', {},
-      h('strong', {}, pluginTitle(plugin), version ? h('span.harness-plugin-version', {}, ` ${version}`) : null),
-      stateText ? h('span.harness-plugin-state', { title: own?.off }, stateText) : null),
-    pageLink, uninstall, control, question);
+      h('strong', {}, pluginTitle(plugin), version ? h('span.harness-plugin-version', {}, ` ${version}`) : null, showMarket ? h('span.harness-plugin-market', {}, ` · ${marketTitle(entry)}`) : null),
+      liveRow ?? stateRow),
+    uninstall, pageLink, control, question);
 }
 
 function pluginsTab(tool: HarnessId) {
@@ -367,8 +378,9 @@ function pluginsTab(tool: HarnessId) {
   const unsure = [...plugins.unknown.map(({ plugin, reason }) => `${pluginTitle(plugin)}: ${reason}`), ...plugins.unreadable.map(name => `${name} could not be read.`)];
   const unsureNote = unsure.length ? h('p.tools-note', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span', {}, `Not known for ${plural(unsure.length, 'plugin')}: ${unsure.join(' ')} `,
     button({ variant: 'link', size: 'micro', label: `Open ${pageNames.plugins}`, id: 'harness-plugins-unsure', onclick: () => showPage('plugins') }))) : null;
-  // Counted too (pluginstatus.ts pluginsInstalled), with no page on the Plugins page: those the tool records from a marketplace no tool lists.
-  const unlisted = (state.home?.pluginItems ?? []).filter(install => install.tool === tool && !install.listed);
+  // Counted too (pluginstatus.ts pluginsInstalled), with no page on the Plugins page: those the tool records from a marketplace no tool lists, excluding real installs already shown above (e.g. Anthropic Directory matches).
+  const shownIds = new Set(plugins.installed.map(item => item.installId));
+  const unlisted = (state.home?.pluginItems ?? []).filter(install => install.tool === tool && !install.listed && !shownIds.has(installId(install.plugin, install.marketName)));
   const unlistedNote = unlisted.length ? h('p.tools-note', { id: 'harness-plugins-unlisted' }, icon('info', 14, 'tone-muted'),
     `Installed from a marketplace not on ${pageNames.plugins}: ${andList(unlisted.map(install => `${install.plugin} (${install.marketName})`))}.`) : null;
   // Where the tool's own record can't be read, what it has isn't known: never "No plugins".

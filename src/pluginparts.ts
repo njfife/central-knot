@@ -8,7 +8,7 @@ import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginKey, resultLines, succeeded, type PluginOp } from './pluginplan.ts';
 import { applyPluginOps, clickOn, market, openLink, pluginBusy, readAgainNow, shownDetail, turnPlugin, type PluginClick } from './pluginstate.ts';
-import { addWords, boxOf, cantUninstall, copyStale, foundIn, inUseIn, itemsAllIn, itemsIn, offersUninstall, outdated, switchPartial, switchWords, toolMark, uninstallAsk, uninstallFacts, updateTools, versionToCompare, viewStopped, type ToolMark } from './pluginstatus.ts';
+import { addWords, boxOf, cantUninstall, copyStale, foundIn, inUseIn, itemsAllIn, itemsIn, marketTitle, offersUninstall, outdated, switchPartial, switchWords, toolMark, uninstallAsk, uninstallFacts, updateTools, versionToCompare, viewStopped, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginTurn, PluginView, PluginsView } from './types.ts';
 import { takesPlugins } from './presence.ts';
@@ -118,7 +118,7 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
  * its two buttons together under its words. Cancel has the focus; it and Escape close the question, the focus back on Uninstall…;
  * its confirm is the tool's own uninstall (turnPlugin `uninstall`).
  */
-export function uninstallControl(entry: MarketplaceView, plugin: PluginView, tool: HarnessId, id: string, box: { off?: string }): [HTMLElement | null, HTMLElement | null] {
+export function uninstallControl(entry: MarketplaceView, plugin: PluginView, tool: HarnessId, id: string, box: { off?: string }, showMarket = false): [HTMLElement | null, HTMLElement | null] {
   if (!offersUninstall(entry, plugin.name, tool, box)) return [null, null];
   const key = pluginKey(entry.source, plugin.name), asks = `${key}\u0000${tool}`, busy = pluginBusy(entry.source, plugin.name);
   // Opened, the question reads the plugin as it is now (pluginstate.ts readAgainNow): the copy compared, what the tool keeps for
@@ -134,24 +134,26 @@ export function uninstallControl(entry: MarketplaceView, plugin: PluginView, too
   const confirm = button({ variant: 'outline', size: 'small', label: `Uninstall from ${names[tool]}`, id: `${id}-confirm`, disabled: busy || detail === undefined,
     onclick: () => { market.asking = undefined; turnPlugin(entry, plugin.name, 'uninstall', tool); } });
   confirm.classList.add('delete-now');
+  const title = showMarket ? `${pluginTitle(plugin)} (${marketTitle(entry)})` : pluginTitle(plugin);
   return [null, h('div.band.uninstall-ask', { role: 'alert', onkeydown: (event: KeyboardEvent) => { if (event.key === 'Escape') ask(false); } },
-    h('span.band-text', {}, uninstallAsk(pluginTitle(plugin), tool, facts)),
+    h('span.band-text', {}, uninstallAsk(title, tool, facts)),
     h('span.uninstall-ask-actions', {}, button({ variant: 'outline', size: 'small', label: 'Cancel', id: `${id}-cancel`, onclick: () => ask(false) }), confirm))];
 }
 
-/** What a click on a tool's box does there, and its Undo, in the state it is drawn in (pluginrecord.ts A TOOL'S BOX and row 9). */
-function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, mark: ToolMark, ticked: boolean): string {
+/** What a click on a tool's box (or its switch on a tool's Plugins tab when `asSwitch`) does there, and its Undo, in the state it is drawn in (pluginrecord.ts A TOOL'S BOX and row 9). */
+export function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, mark: ToolMark, ticked: boolean, asSwitch = false, named = plugin): string {
   // In a tool that takes items one by one a tick lets every item in, one kept out there by its own switch too (pluginlibrary.ts clickOn).
-  const what = takesPlugins(tool) ? plugin : `all of ${plugin}’s items`;
+  const what = takesPlugins(tool) ? named : `all of ${named}’s items`;
   const where = names[tool];
   const sw = entry.switches?.[plugin];
   const on = !!sw?.entry?.on;
-  if (ticked && takesPlugins(tool)) return `Click to turn ${what} off in ${where}, kept installed: it stays off until you tick it again. Undo turns it on again.`;
-  if (ticked) return `Click to take ${what} out of ${where}: it stays out until you tick it again. Undo puts it back.`;
+  const act = asSwitch ? 'turn it on' : 'tick it';
+  if (ticked && takesPlugins(tool)) return `Click to turn ${what} off in ${where}, kept installed: it stays off until you ${act} again. Undo turns it on again.`;
+  if (ticked) return `Click to take ${what} out of ${where}: it stays out until you ${act} again. Undo puts it back.`;
   if (on && mark !== 'kept-off') return `Click to put ${what} in ${where}. Undo takes it out again.`;
   // A tick on an Off plugin turns it On where another tool has it in use too (marketplaces.ts turnedEntry): "alone" only where none does.
   const alone = on || view.tools.some(other => other !== tool && inUseIn(entry, plugin, other)) ? '' : ' alone';
-  return `Click to turn ${plugin} on in ${where}${alone}. Undo ${mark === 'kept-off' ? 'turns it off' : 'takes it out'} again.`;
+  return `Click to turn ${named} on in ${where}${alone}. Undo ${mark === 'kept-off' ? 'turns it off' : 'takes it out'} again.`;
 }
 
 /**
