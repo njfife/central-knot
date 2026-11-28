@@ -11,7 +11,7 @@
 import { acting, applyBaseChange, closeDraftPick, draftFile, startDraft, draftStale, draftable, openDraftPick, savingOff, startTakeOut, stopDraft, baseDraftTyped, baseSaveDoesSomething, loadBaseVersion, ownText, rerender, showPage, toolDraftTyped, shownPath, startBaseEdit, state, type BaseEdit, type DraftPick } from './app.ts';
 import { baseAction, draftedOwn, fileWithBase, linesNotCarried, readersOfFile, sameBase, splitBase } from './basetext.ts';
 import { lineDiff } from './diff.ts';
-import { button, checkbox, h, icon, lockAttrs as lockAttrsFor, pathText } from './dom.ts';
+import { button, checkbox, h, icon, lockAttrs as lockAttrsFor, pathText, scrollIntoBox } from './dom.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
 import { brandMark } from './matrix.ts';
 import { fileName, lineCount, toolList, toolNames } from './words.ts';
@@ -432,7 +432,7 @@ export function baseStrip(file: InstructionFile, lockedWhy?: string) {
       goTo ? button({ variant: 'link', size: 'micro', label: base.state === 'edited' ? 'Choose what to do…' : 'Update…', id: `ins-base-go-${file.tool}`, disabled: !!goWhy, attrs: lockAttrsFor(goWhy), onclick: () => {
         // On a harness's Instructions tab the Base instructions card isn't on the page: the choice is made on Instructions.
         if (!document.getElementById(goTo)) showPage('instructions');
-        const target = document.getElementById(goTo); target?.scrollIntoView({ block: 'center' }); target?.focus();
+        const target = document.getElementById(goTo); scrollIntoBox(target); target?.focus({ preventScroll: true });
       } }) : null,
       // Not on the list any more: its block (an edited copy the list change left) can be taken out here, after a review.
       // Hidden under its own open review, so that review is the one decision on screen.

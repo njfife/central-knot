@@ -12,7 +12,7 @@ import { acting, announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabSh
 import { baseCard, baseStrip, baseWaiting } from './basecard.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
 import { fileName, lineCount, toolNames } from './words.ts';
-import { button, h, icon, infoMark, lockAttrs, pathText, rereadBand } from './dom.ts';
+import { button, h, icon, infoMark, lockAttrs, pathText, rereadBand, scrollIntoBox } from './dom.ts';
 import { noToolsState } from './pages.ts';
 import { brandMark, openPlugin, outcomeBand } from './matrix.ts';
 import { inlineMarkdown } from './markdown.ts';
@@ -325,7 +325,7 @@ export function instructionsPage() {
   const waiting = baseWaiting(files);
   const goBase = state.base ? button({ variant: 'link', size: 'micro', label: waiting ? `Base instructions · ${waiting} ↓` : 'Base instructions ↓', id: 'ins-go-base', onclick: () => {
     const card = document.getElementById('base-card');
-    card?.scrollIntoView({ block: 'start' });
+    scrollIntoBox(card);
     const target = card?.querySelector<HTMLElement>('#base-text:not(:disabled), #base-save:not(:disabled), #base-edit:not(:disabled), #base-write:not(:disabled)')
       ?? card?.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, [tabindex="0"]')
       ?? card;
