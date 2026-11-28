@@ -7137,7 +7137,7 @@ async function dockedListFlow() {
   await sidebarOpen(false);
   same('across the dock’s breakpoint and back, the opened row stays open, where it was in its table', [under, await place()], [['under its row', top, offset], ['docked', top, offset]]);
   // Long filename + hittable file icon win over description when docked on both the tool tab and Library.
-  const longDocked = 'quarterly-platform-engineering-changelog-summary-doc';
+  const longDocked = 'quarterly-platform-engineering-release-doc';
   skill(claude, longDocked, text(longDocked, 'Summarises quarterly platform engineering changes and release milestones.'));
   await a.click('#header-refresh');
   for (let tries = 0; tries < 40 && !(await a.exists(`#${rowPart('add', 'skills', longDocked)}`)); tries++) await wait(100);
@@ -7151,7 +7151,7 @@ async function dockedListFlow() {
       return { nameWhole: !!(text && text.scrollWidth <= text.clientWidth + 1), nameCut: !!cell?.classList.contains('name-cut'),
         btnHit: !!(br && cr && br.width >= ${minBtn} && br.height >= ${minBtn} && br.right <= cr.right + 1 && br.bottom <= cr.bottom + 1) };
     })()`);
-    same(`${where} docked at 1260 px prioritizes the 52-letter filename and hittable file icon over description`, got, { nameWhole: true, nameCut: false, btnHit: true });
+    same(`${where} docked at 1260 px prioritizes the 42-letter filename and hittable file icon over description`, got, { nameWhole: true, nameCut: false, btnHit: true });
   };
   await checkDockedLong('Claude Code’s Skills tab', 26);
   for (const selector of ['#nav-library', '#library-kind-all']) await a.click(selector);
