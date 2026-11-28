@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { batches, resultLines, strayHolds, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
-import { alongWords, cantSwitch, click, clickWords, copilotByName, itemSaid, onNow, standing, turnEvery, wholeWords, type PluginItemAt } from '../src/pluginswitch.ts';
+import { alongWords, cantSwitch, click, clickWords, copilotByName, installedImpact, itemSaid, onNow, standing, turnEvery, wholeWords, type PluginItemAt } from '../src/pluginswitch.ts';
 import { statusLine } from '../src/libraryrow.ts';
 import { newItem } from '../src/library.ts';
 import { owedTo } from '../src/pluginrecord.ts';
@@ -312,4 +312,11 @@ test('a main switch never falls back to the whole plugin where the item’s own 
     [['copilot-cli plugin-off'], undefined, 'In Copilot CLI, which has no switch for one agent of a plugin, it turns off everything full brings there.']);
   // Codex held while Copilot CLI's live copy switches: only Codex is left.
   assert.deepEqual(turnEvery([item(held, 'skill', 'one'), ...live], false).left, ['Still on in Codex: Codex’s skills.config is written inline.']);
+});
+
+test('installedImpact counts only parts on in that tool now and its hooks, leaving out parts already off', () => {
+  const hook = { declaredIn: 'hooks/hooks.json', event: 'SessionStart', at: 0 };
+  const claude = installed('claude-cli', { serversOff: ['wiki'], agentsOff: ['helper'], hooks: [hook, { ...hook, at: 1 }] });
+  assert.equal(installedImpact(claude).words, '2 skills, 1 MCP server and 2 hooks');
+  assert.equal(installedImpact(installed('claude-cli', { items: [] })).words, '');
 });

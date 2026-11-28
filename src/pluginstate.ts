@@ -132,6 +132,9 @@ export function pluginsResultPlace(): RunPlace | undefined {
   return tab === 'plugins' ? app.harness : tab === 'instructions' ? `instructions:${app.harness!}` : undefined;
 }
 const placeNow = (): RunPlace => pluginsResultPlace() ?? 'plugins';
+const isInstructions = (place: RunPlace) => place === 'instructions' || place.startsWith('instructions:');
+/** Stable id of a listed plugin group’s Turn off button on Instructions, surviving redraws for focus after Undo. */
+export const sessionOffId = (tool: HarnessId, source: string, plugin: string) => `session-off-${tool}-${[source, plugin].map(part => part.replace(/[^a-zA-Z0-9]/g, ch => `_${ch.codePointAt(0)!.toString(16)}_`)).join('-')}`;
 const showsPluginsResult = (place?: RunPlace) => {
   const here = pluginsResultPlace();
   return place !== undefined ? here === place : !!here;
@@ -297,6 +300,7 @@ export function browse(patch: Partial<typeof market.nav>): void {
  * The page says it is reading meanwhile, and anything else can go on: an action keeps its own activity and result.
  */
 export async function loadPlugins(fresh = false, readId?: number): Promise<void> {
+  if (readId !== undefined) viewFor = readId;
   const reading = readPageData(market.read, () => api().plugins(fresh, readId));
   rerender();
   const result = await reading;
@@ -449,10 +453,12 @@ export const usePlugins = (entry: MarketplaceView, plugin: string, tool: Harness
 
 /** What each tool now has changed: the page and the item lists read again, once for the action (app.ts readHomeOnce). */
 async function readAgain(): Promise<void> {
-  showView(await api().plugins().catch(() => null));
+  const view = await api().plugins().catch(() => null);
+  showView(view);
   // The item lists show what plugins bring, each with its switch in each tool, and a plugin's items in Pi, OpenCode and Antigravity: every
   // plugin change is seen there (and where it came from) at once.
   await readHomeOnce();
+  if (view) viewFor = app.home?.readId;
   readShown();
 }
 
@@ -492,7 +498,7 @@ export function turnPlugin(entry: MarketplaceView, plugin: string, what: PluginT
   if (market.view) pin(pinnedPlugins(entry), plugin, pluginPlace(market.view, entry, plugin));
   // The control clicked waits until it is read back; Add gives way to the switch then. The focus goes back to it at the
   // list's end if nothing else took it; after Uninstall…, whose control goes with the copy, to the result's Undo (pluginspage.ts undoButton).
-  clickedLast = what === 'uninstall' ? 'plugins-undo' : document.activeElement?.id.replace(/^padd/, 'pswitch');
+  clickedLast = what === 'uninstall' || isInstructions(place) ? 'plugins-undo' : document.activeElement?.id.replace(/^padd/, 'pswitch');
   join(click);
   rerender();
 }
@@ -534,7 +540,7 @@ function runEnded(): void {
   if (here && document.activeElement === document.body && clickedLast) {
     // Undo was drawn off while the list ran, and the list's last draw comes after this: drawn usable first, so it takes the focus.
     if (clickedLast === 'plugins-undo') rerender();
-    document.getElementById(clickedLast)?.focus({ preventScroll: true });
+    (document.getElementById(clickedLast) ?? (clickedLast === 'plugins-undo' ? document.getElementById('plugins-result') : null))?.focus({ preventScroll: true });
   }
 }
 
@@ -618,7 +624,9 @@ const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act
   // The focus goes to the plugin it undid, on the list, on its page, or on a tool's Plugins tab, as Undo itself may go: its switch, or its Add again.
   const entry = market.view?.marketplaces.find(each => each.source === last.turn.source);
   const at = entry ? market.view!.marketplaces.indexOf(entry) : -1;
-  const id = place !== 'plugins' && entry ? `harness-plugin-switch-${entry.name}-${last.turn.plugin}` : `pswitch-${market.nav.plugin ? 'page-' : ''}${at}-${last.turn.plugin}`;
+  const tool = back[0]?.tool ?? (place.startsWith('instructions:') ? place.slice(13) as HarnessId : undefined);
+  const id = isInstructions(place) && tool ? sessionOffId(tool, last.turn.source, last.turn.plugin)
+    : place !== 'plugins' && entry ? `harness-plugin-switch-${entry.name}-${last.turn.plugin}` : `pswitch-${market.nav.plugin ? 'page-' : ''}${at}-${last.turn.plugin}`;
   if (showsPluginsResult(place)) focusWhenDone(document.getElementById(id) ? id : id.replace(/^pswitch/, 'padd'));
   return problems.get(place) ?? (resultSentence(resultLines(done, true), true) || 'Nothing changed.');
 });
@@ -695,7 +703,7 @@ export function lineBox(plugin: string, marketName: string, source: string | und
   const named = view.marketplaces.filter(each => each.name === marketName && each.plugins.some(item => item.name === plugin));
   if (entry.source !== source && named.length > 1) return { box: 'ambiguous' as const };
   const marked = toolMark(view, entry, plugin, tool, entry.switches?.[plugin]?.tools[tool]);
-  return { box: boxOf(view, entry, plugin, tool, marked), mark: marked.mark, words: marked.words, source: entry.source, parts: entry.plugins.find(item => item.name === plugin)?.components };
+  return { box: boxOf(view, entry, plugin, tool, marked), mark: marked.mark, words: marked.words, source: entry.source, entry, parts: entry.plugins.find(item => item.name === plugin)?.components };
 }
 
 /** The read of the home this page's view was last asked for by the Library (wantView); another home starts over (resetMarket). */
@@ -706,6 +714,7 @@ export const viewCurrent = () => market.read.state === 'ready' && viewFor === ap
 export function wantView(readId: number | undefined): void {
   if (viewFor === readId || app.page === 'plugins') return;
   viewFor = readId;
+  market.read.state = 'reading';
   // Asked while the page is drawn: the read starts after the drawing.
   queueMicrotask(() => void loadPlugins(false, readId));
 }

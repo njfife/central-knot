@@ -18150,14 +18150,18 @@ async function sessionStripFlow() {
   for (const [cli, version] of [['copilot', 'GitHub Copilot CLI 1.0.113.'], ['codex', 'codex-cli 0.169.1'], ['pi', '1.5.2']]) writeFileSync(join(bin, cli), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
   mkdirSync(join(tools, '.opencode/bin'), { recursive: true });
   writeFileSync(join(tools, '.opencode/bin/opencode'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.19.6" && exit 0\nexit 9\n', { mode: 0o755 });
-  // Claude Code's stand-in turns release-helper off as its own disable does (enabledPlugins in its settings), and refuses anything
+  // Claude Code's stand-in turns release-helper off or back on as its own disable/enable does (enabledPlugins in its settings), and refuses anything
   // else. Central Knot runs it with HOME set to the home it shows, so its log is there.
   const record = join(home, '.claude/plugins/installed_plugins.json');
   writeFileSync(join(bin, 'claude'), `#!/bin/sh
 [ "$1" = "--version" ] && echo "2.1.327 (Claude Code)" && exit 0
 echo "$*" >> "$HOME/claude-calls.txt"
-[ "$*" = "plugin disable release-helper@${name} --scope user" ] || exit 9
-"${process.execPath}" -e "const fs = require('fs'), f = '${join(home, '.claude/settings.json')}', now = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}; now.enabledPlugins = { ...now.enabledPlugins, 'release-helper@${name}': false }; fs.writeFileSync(f, JSON.stringify(now))"
+case "$*" in
+  "plugin disable release-helper@${name} --scope user") val=false ;;
+  "plugin enable release-helper@${name} --scope user") val=true ;;
+  *) exit 9 ;;
+esac
+"${process.execPath}" -e "const fs = require('fs'), f = '${join(home, '.claude/settings.json')}', now = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}; now.enabledPlugins = { ...now.enabledPlugins, 'release-helper@${name}': $val }; fs.writeFileSync(f, JSON.stringify(now))"
 `, { mode: 0o755 });
   const long = `"\${CLAUDE_PLUGIN_ROOT}/hooks/start.sh" --with-a-very-long-option-name=${'x'.repeat(120)} --from /${'deep-folder/'.repeat(14)}notes.md`;
   const hooks = (event, matcher, ...commands) => JSON.stringify({ hooks: { [event]: [{ matcher, hooks: commands }], PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo checked' }] }] } });
@@ -18252,8 +18256,16 @@ echo "$*" >> "$HOME/claude-calls.txt"
       await a.run(`[...document.querySelectorAll('.session-hook')].some(hook => /known only/.test(hook.textContent))`),
       await a.run(`(() => { const text = document.querySelector('#instructions-scroll')?.textContent ?? ''; const strip = [...document.querySelectorAll('.base-strip')].some(el => el.textContent.includes('matches the base')); return [...['shown as they are, not changed here', 'Only that tool reads these.'].filter(phrase => text.includes(phrase)), ...(strip ? ['matches the base'] : [])]; })()`)],
     ['Hooks that can add text', [], false, []]);
-  same('your own hooks say the file that holds them; a plugin’s link says what it is for', [await a.text('#session-claude-cli .session-in'), await a.run(`document.querySelector('#session-claude-cli .session-in .path-text')?.title`),
-    [...new Set(await a.all('#session-claude-cli .session-head button', 'e.textContent'))]], [`in …${join(home, '.claude/settings.json').slice(home.length)}`, join(home, '.claude/settings.json'), ['Plugin’s page: turn it off there']]);
+  const headBtn = (stripId, groupName) => a.run(`(() => { const b = [...document.querySelectorAll('#${stripId} .session-group')].find(g => g.querySelector('.session-name')?.textContent === ${JSON.stringify(groupName)})?.querySelector('.session-head button'); return b ? { id: b.id, text: b.textContent, title: b.title, disabled: b.disabled } : null; })()`);
+  for (let tries = 0; tries < 100 && (await headBtn('session-claude-cli', 'release-helper'))?.disabled !== false; tries++) await wait(100);
+  const helperHead = await headBtn('session-claude-cli', 'release-helper'), vanishedHead = await headBtn('session-claude-cli', 'vanished');
+  same('your own hooks say the file that holds them; a plugin’s button names the act and its parts on hover, and a plugin that can’t be turned off is disabled with its reason',
+    [await a.text('#session-claude-cli .session-in'), await a.run(`document.querySelector('#session-claude-cli .session-in .path-text')?.title`),
+      helperHead?.text, helperHead?.title, vanishedHead?.text, vanishedHead?.disabled, /not where it records them/.test(vanishedHead?.title ?? ''),
+      await a.run(`[...document.querySelectorAll('#session-claude-cli .session-head button')].some(b => /Plugin’s page/.test(b.textContent))`)],
+    [`in …${join(home, '.claude/settings.json').slice(home.length)}`, join(home, '.claude/settings.json'),
+      'Turn off release-helper in Claude Code', 'Turns release-helper off in Claude Code, with its 3 hooks. Undo turns it on again.',
+      'Turn off vanished in Claude Code', true, true, false]);
   same('on the card: the file, the base strip, the files read with it, this strip, then Earlier versions', await a.run(`(() => { const card = document.querySelector('article[aria-label="Claude Code instructions"]');
     const parts = ['.ins-body > :first-child', '.base-strip', '#ins-parts-claude-cli', '#session-claude-cli', 'details.ins-versions'].map(selector => card.querySelector(selector));
     return [parts.map(part => !!part), parts.every((part, at) => at === 0 || (parts[at - 1].compareDocumentPosition(part) & Node.DOCUMENT_POSITION_FOLLOWING))]; })()`), [[true, true, true, true, true], true]);
@@ -18405,11 +18417,12 @@ echo "$*" >> "$HOME/claude-calls.txt"
     await pictures('hook-source-instructions-plugin', '#session-claude-cli .session-group:has(.hook-source)', atTwo);
     await a.click(byId(styleHookBtn));
   }
-  // Its link opens release-helper's page; Back returns to the Instructions page with its strips.
-  const helperLink = await a.run(`[...document.querySelectorAll('#session-claude-cli .session-group')].find(group => group.querySelector('.session-name').textContent === 'release-helper').querySelector('button').id`);
-  await a.click(byId(helperLink));
+  // Open release-helper's page on Plugins to check marketplace-copy hook View source.
+  await a.click('#nav-plugins');
+  for (let tries = 0; tries < 100 && !(await a.exists('#popen-0-release-helper')); tries++) await wait(100);
+  await a.click('#popen-0-release-helper');
   for (let tries = 0; tries < 100 && (await a.text('.crumb-here')) !== 'release-helper'; tries++) await wait(100);
-  same('the link opens the plugin’s page', await a.text('.crumb-here'), 'release-helper');
+  same('release-helper’s plugin page opens', await a.text('.crumb-here'), 'release-helper');
   for (let tries = 0; tries < 50 && !(await a.exists('.plugin-parts li.with-source button[data-hook-source]')); tries++) await wait(100);
   const pluginHookBtns = await a.run(`[...document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]')].map(b => b.id)`);
   check('on the plugin’s page every hook row has View source (both session-text hooks and other hooks)', pluginHookBtns.length === 3, pluginHookBtns);
@@ -18440,33 +18453,62 @@ echo "$*" >> "$HOME/claude-calls.txt"
       !/No script file found/.test(otherSrc ?? '') && /Declared in .*hooks\/hooks\.json · the marketplace’s copy · PreToolUse/.test(otherSrc ?? '') && /echo checked/.test(otherSrc ?? ''), otherSrc);
     await a.click(byId(pluginHookBtns[2]));
   }
-  const back = async () => { await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.settle(); await showStrips(); };
-  await back();
-  same('Back returns to the Instructions page with the same strips', [await a.run(`document.querySelector('.nav-row[aria-current=page]')?.id`), (await names('claude-cli')).length, (await names('codex-cli')).length], ['nav-instructions', 15, 1]);
-  // Turned off in Claude Code on its page (its box unticked; kept installed), it leaves Claude Code's strip; Codex's group stays.
-  await a.click(byId(helperLink));
-  // Its box for Claude Code, on its page (the marketplace is the first listed); drawn once the page has read the tools' copies.
-  const box = '#pbox-0-release-helper-claude-cli';
-  const boxIs = () => a.run(`(() => { const b = document.querySelector('${box}'); return b ? [b.getAttribute('aria-checked'), b.disabled, b.dataset.state] : null; })()`);
-  for (let tries = 0; tries < 100 && (await boxIs())?.[2] !== 'installed'; tries++) await wait(100);
-  check('on its page, its box for Claude Code is ticked: it is there', JSON.stringify(await boxIs()) === JSON.stringify(['true', false, 'installed']),
-    [await boxIs(), await a.run(`document.querySelector('${box}')?.title`)]);
-  await a.click(box);
-  for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
+  await a.click('#nav-instructions');
+  await showStrips();
+  same('Instructions keeps the same strips on return', [await a.run(`document.querySelector('.nav-row[aria-current=page]')?.id`), (await names('claude-cli')).length, (await names('codex-cli')).length], ['nav-instructions', 15, 1]);
+  // Turn off release-helper in Claude Code right from its group: band with Undo appears above cards (focused), Codex keeps its group; leaving and returning keeps Undo; Undo brings it back and restores focus.
+  const helperOffId = (await headBtn('session-claude-cli', 'release-helper'))?.id;
+  await a.click(byId(helperOffId));
+  for (let tries = 0; tries < 300 && (await a.run(`document.body.dataset.busy === 'true'`) || (await names('claude-cli')).includes('release-helper') || !(await a.exists('#plugins-undo'))); tries++) await wait(100);
   await a.settle();
-  same('its own disable ran in Claude Code alone', readNow(join(home, 'claude-calls.txt')).trim().split('\n'), [`plugin disable release-helper@${name} --scope user`]);
-  await back();
-  for (let tries = 0; tries < 100 && (await names('claude-cli')).includes('release-helper'); tries++) await wait(100);
-  same('turned off in Claude Code, its group leaves Claude Code’s strip, and Codex’s stays', [(await names('claude-cli')).includes('release-helper'), (await names('claude-cli')).length, await names('codex-cli')], [false, 14, ['release-helper']]);
-  // The box's result is Plugin marketplaces' own (pluginstate.ts pluginsResultPlace): Instructions draws none of it, above its cards or under a strip.
-  same('the box’s result and its Undo stay off Instructions', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
-  // A tool's own Instructions tab under Harnesses has the same strip.
+  same('turning off from Claude Code’s card runs disable alone, removes Claude Code’s group while Codex’s stays, shows the band with Undo and focuses Undo',
+    [readNow(join(home, 'claude-calls.txt')).trim().split('\n'), (await names('claude-cli')).includes('release-helper'), (await names('claude-cli')).length, await names('codex-cli'),
+      /release-helper: turned off in Claude Code\./.test(await a.text('#plugins-result') ?? ''), await a.run(`document.activeElement?.id`)],
+    [[`plugin disable release-helper@${name} --scope user`], false, 14, ['release-helper'], true, 'plugins-undo']);
+  const pluginSnapshot = () => [readNow(join(home, '.claude/settings.json')), readNow(join(home, '.central-knot/plugins.json'))];
+  const fromInstructions = pluginSnapshot();
+  await a.click('#nav-overview');
+  await a.click('#nav-instructions');
+  await showStrips();
+  same('leaving Instructions before Undo and coming back keeps the band and Undo', [await a.exists('#plugins-result'), await a.exists('#plugins-undo')], [true, true]);
+  await a.click('#plugins-undo');
+  for (let tries = 0; tries < 300 && (await a.run(`document.body.dataset.busy === 'true'`) || !(await names('claude-cli')).includes('release-helper')); tries++) await wait(100);
+  await a.settle();
+  same('Undo puts release-helper back on Claude Code’s strip and returns focus to its button',
+    [(await names('claude-cli')).includes('release-helper'), await a.run(`document.activeElement?.id`)], [true, helperOffId]);
+  // Compare the files written by Instructions with one press of Claude Code's Plugins tab switch, then leave it off as the rest of this flow expects.
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-plugins');
+  const tabSw = `#harness-plugin-switch-${name}-release-helper`;
+  for (let tries = 0; tries < 100 && !(await a.exists(tabSw)); tries++) await wait(100);
+  await a.click(tabSw);
+  for (let tries = 0; tries < 300 && (await a.run(`document.body.dataset.busy === 'true'`) || (await a.run(`document.querySelector(${JSON.stringify(tabSw)})?.getAttribute('aria-checked')`)) !== 'false'); tries++) await wait(100);
+  await a.settle();
+  same('turning off from Instructions leaves the exact same files as the Plugins tab switch', fromInstructions, pluginSnapshot());
+  await a.click('#nav-instructions');
+  await showStrips();
+  same('a Plugins tab turn’s result and Undo stay off Instructions', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
+  // A tool's own Instructions tab under Harnesses has the same strip and Turn off / Undo in place.
   await a.click(byId('nav-harnesses'));
   await a.click(byId('harness-codex-cli'));
   await a.click(byId('harness-tab-instructions'));
   for (let tries = 0; tries < 100 && !(await a.exists('#session-codex-cli')); tries++) await wait(100);
   same('Codex’s Instructions tab has its strip without standing prose', [(await groups('codex-cli'))[0]?.[1].length, await a.exists('#session-codex-cli .session-about')], [2, false]);
-  same('nor does Codex’s Instructions tab, a place of its own', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
+  same('nor does Codex’s Instructions tab carry another place’s result', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
+  for (let tries = 0; tries < 100 && (await headBtn('session-codex-cli', 'release-helper'))?.disabled !== false; tries++) await wait(100);
+  const codexOffId = (await headBtn('session-codex-cli', 'release-helper'))?.id;
+  await a.click(byId(codexOffId));
+  for (let tries = 0; tries < 300 && (await a.run(`document.body.dataset.busy === 'true'`) || !(await a.exists('#plugins-undo'))); tries++) await wait(100);
+  await a.settle();
+  same('turning off on Codex’s Instructions tab removes its group, shows the band with Undo and focuses Undo',
+    [await a.exists('#session-codex-cli'), /release-helper: turned off in Codex\./.test(await a.text('#plugins-result') ?? ''), await a.run(`document.activeElement?.id`)],
+    [false, true, 'plugins-undo']);
+  await a.click('#plugins-undo');
+  for (let tries = 0; tries < 300 && (await a.run(`document.body.dataset.busy === 'true'`) || !(await a.exists('#session-codex-cli'))); tries++) await wait(100);
+  await a.settle();
+  same('Undo on Codex’s Instructions tab brings the group back and focuses its button',
+    [(await names('codex-cli')).includes('release-helper'), await a.run(`document.activeElement?.id`)], [true, codexOffId]);
   const codexTabBtn = await hookBtnIn('session-codex-cli', 'release-helper', 'remind.mjs');
   const codexTabSource = codexTabBtn && await openSource(codexTabBtn, '#session-codex-cli .hook-source');
   check('a tool’s own Instructions tab opens View source from that tool’s installed copy', /Declared in .*hooks\/hooks\.json/.test(codexTabSource ?? '') && /installed in Codex/.test(codexTabSource ?? '') && !/marketplace’s copy/.test(codexTabSource ?? ''), codexTabSource);
@@ -19093,12 +19135,10 @@ async function hookRunFlow() {
   await a.click('#nav-overview');
   await steady();
   const pluginMarkerBefore = pluginMarkerCount();
-  // Click 1: Overview -> Instructions.
-  await a.click('#nav-instructions');
-  await waitFor(`!!document.querySelector('#session-claude-cli .session-group')`);
-  await steady();
-  // Click 2: Instructions (Claude Code) -> release-helper's own page.
-  await a.run(`[...document.querySelectorAll('#session-claude-cli .session-group')].find(g => g.querySelector('.session-name')?.textContent === 'release-helper')?.querySelector('button')?.click()`);
+  // Click 1: Overview -> Plugin marketplaces, Click 2: release-helper's own page.
+  await a.click('#nav-plugins');
+  await waitFor(`!!document.querySelector('#popen-0-release-helper')`);
+  await a.click('#popen-0-release-helper');
   await waitFor(`document.querySelector('.crumb-here')?.textContent === 'release-helper'`);
   await waitFor(`!!document.querySelector('#plugin-session-hooks button[data-hook-run]')`);
   await steady();
@@ -19190,10 +19230,12 @@ async function hookRunFlow() {
   check('Run it as Codex on plugin page runs Codex installed hook with executed tool and plugin version and trust note',
     /^Would add as Codex, plugin 0\.4\.1, run in ~, /.test(codexPageRes) && codexPageRes.includes(`codex-root=${codexPluginRoot}`)
     && codexPageRes.includes('Codex adds it only once trusted in /hooks.'), codexPageRes);
-  // Arriving from Codex's strip on Instructions selects As Codex directly.
-  await a.click('#nav-instructions');
-  await waitFor(`!!document.querySelector('#session-codex-cli .session-group')`);
-  await a.run(`[...document.querySelectorAll('#session-codex-cli .session-group')].find(g => g.querySelector('.session-name')?.textContent === 'release-helper')?.querySelector('button')?.click()`);
+  // Arriving from Codex's Plugins tab selects As Codex directly.
+  await a.click('#nav-harnesses');
+  await a.click('#harness-codex-cli');
+  await a.click('#harness-tab-plugins');
+  await waitFor(`!!document.querySelector('#harness-plugin-${marketName}-release-helper')`);
+  await a.click(`#harness-plugin-${marketName}-release-helper`);
   await waitFor(`document.querySelector('.crumb-here')?.textContent === 'release-helper' && document.getElementById('plugin-hook-tool')?.value === 'codex-cli'`);
   same('arriving from Codex selects As Codex', await a.run(`document.getElementById('plugin-hook-tool')?.value`), 'codex-cli');
   // Marketplace-only plugin (document-tools) and off plugin (off-plugin) keep View source alone and explain why in actual home.

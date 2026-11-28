@@ -83,12 +83,18 @@ function hasIt(item: PluginItemAt, { box, marketName }: LineFacts): LineControl 
   if (held) return { control: 'switch', sentence: held };
   if (!whole) return { control: 'switch', sentence: '' };
   if (!bringsMore(item)) return { control: 'switch', sentence: 'Whole plugin' };
-  if (box === 'unlisted') return none(marketName === DIRECTORY ? FROM_DIRECTORY : `${capital(unlisted(marketName))}, so it can’t be turned off from here.`);
-  if (box === 'ambiguous') return none(`${twoNamed(marketName, plugin)}, so which one to turn off can’t be told here.`);
-  if (box?.off) return none(box.off);
+  const cant = cantTurnOffReason(plugin, marketName, box);
+  if (cant) return none(cant);
   if (!box) return none('');
   const also = wholeAlso(item).words;
   return button('keep-out', 'Turn the plugin off', also ? `With ${also}` : 'Whole plugin', `Turns ${whole}.`);
+}
+
+/** Why a plugin cannot be turned off here from its box (pluginstatus.ts boxOf, or unlisted/ambiguous), if it cannot. */
+export function cantTurnOffReason(plugin: string, marketName: string, box: LineFacts['box']): string | undefined {
+  if (box === 'unlisted') return marketName === DIRECTORY ? FROM_DIRECTORY : `${capital(unlisted(marketName))}, so it can’t be turned off from here.`;
+  if (box === 'ambiguous') return `${twoNamed(marketName, plugin)}, so which one to turn off can’t be told here.`;
+  return box?.off;
 }
 
 function install({ tool, kind, plugin, marketName, box, parts, yours = [] }: LineFacts): LineControl {

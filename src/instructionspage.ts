@@ -3,8 +3,8 @@
 // leads with the tools' cards (one a row, two from 1,000 inner px: style.css .ins-tool-cards), then the Base instructions card
 // (basecard.ts), and keeps what explains the files (who reads each, the tools' own notes) in one info box at the top beside a
 // jump to Base instructions. On each tool's card, after those files, the hooks and extensions that can add text to its sessions
-// (sessionStripView, from sessionhooks.ts), and under them a plugin run made from them while they show its plugin, else above
-// the cards (runStrip; the run's own place: pluginstate.ts pluginsResultPlace). A tool's card has its actions in its head at
+// (sessionStripView, from sessionhooks.ts, with Turn off <plugin> in <Tool> via pluginOffButton), and under them a plugin run made
+// from them while they show its plugin, else above the cards (runStrip; pluginstate.ts pluginsResultPlace). A tool's card has its actions in its head at
 // every stage, so a long text never hides them (the base card's, too, except while its Draft panel is open: basecard.ts).
 // There is no turn-off switch: instruction files are edited, never disabled or emptied by Central Knot (the one deletion is
 // an Undo of a base save removing a file that save created, while unchanged).
@@ -14,13 +14,16 @@ import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keys, legend
 import { fileName, lineCount, toolNames } from './words.ts';
 import { button, h, icon, infoMark, lockAttrs, pathText, rereadBand, scrollIntoBox } from './dom.ts';
 import { noToolsState } from './pages.ts';
-import { brandMark, openPlugin, outcomeBand } from './matrix.ts';
+import { brandMark, outcomeBand } from './matrix.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { plural } from './model.ts';
 import { canRun, hookCantRunReason, hookRow } from './hooksourceview.ts';
 import { HOOK_RUN_WARN, hookStripHelp, hookStripNote, sessionStrip, type SessionGroup, type SessionStrip } from './sessionhooks.ts';
-import { listingOf, runTouches } from './pluginstate.ts';
+import { cantTurnOffReason, type LineBox } from './pluginline.ts';
+import { installedImpact } from './pluginswitch.ts';
+import { clickOn, lineBox, listingOf, market, pluginBusy, runTouches, sessionOffId, turnPlugin, viewCurrent, wantView } from './pluginstate.ts';
 import { runBand } from './pluginspage.ts';
+import type { PageDataState } from './pagedata.ts';
 import type { HarnessId, InstalledPlugin, InstructionFile, InstructionPart } from './types.ts';
 import { lineDiff } from './diff.ts';
 import { keepLineBreaks } from './drafts.ts';
@@ -235,6 +238,18 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
       why: editing ? 'Finish or cancel this edit first.' : lockedWhy, run: version => void loadInstructionVersion(file, version) }));
 }
 
+/** Label, hover breakdown, disabled reason and inline text for a listed plugin group’s Turn off button on Instructions. */
+export function pluginOffButton(plugin: InstalledPlugin, info: { current: boolean; readState: PageDataState; box?: LineBox | 'unlisted' | 'ambiguous'; canWrite?: boolean; busy?: string; problem?: string }) {
+  const tool = toolNames[plugin.tool], label = `Turn off ${plugin.plugin} in ${tool}`, reading = { label, disabled: 'Reading marketplaces…', why: 'Reading…' };
+  if (!info.current) return info.readState === 'failed' ? { label, disabled: 'Marketplaces could not be read.', why: 'Marketplaces could not be read.' } : reading;
+  const cant = cantTurnOffReason(plugin.plugin, plugin.marketName, info.box);
+  if (cant) return { label, disabled: cant, why: typeof info.box === 'object' && info.box.line ? info.box.line : info.canWrite === false || info.problem?.includes(cant) ? undefined : cant };
+  if (info.busy) return { label, disabled: info.busy, why: info.busy };
+  if (typeof info.box !== 'object' || !info.box.ticked) return reading;
+  const words = installedImpact(plugin).words;
+  return { label, title: `Turns ${plugin.plugin} off in ${tool}${words ? `, with its ${words}` : ''}. Undo turns it on again.` };
+}
+
 /**
  * The strip on a tool's card after the files read with it (sessionhooks.ts sessionStrip): its heading (with T1.23's mark on
  * the first hooks strip of a page), the standing run warning when any row can run, the tool's note (T2.28 where it applies),
@@ -244,6 +259,7 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
 function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
   const strip = sessionStrip(file.tool, state.home?.pluginItems ?? [], file);
   if (!strip) return null;
+  if (strip.groups.some(group => group.plugin?.listed)) wantView(state.home?.readId);
   const isHooks = strip.heading === 'Hooks that can add text';
   const hasRunnable = stripHasRunnable(strip);
   const showMark = isHooks && (!hookInfo || !hookInfo.marked);
@@ -251,9 +267,18 @@ function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
   const mark = showMark ? infoMark('session-hooks-info', strip.heading, hookStripHelp(file.tool, hookInfo ? hookInfo.anyRunnable : hasRunnable)) : null;
   const whyNot = isHooks && !hasRunnable && strip.groups.some(group => group.hooks.length) ? hookCantRunReason(file.tool) : undefined;
   const note = hookStripNote(file.tool, strip, hasRunnable);
-  const where = ({ plugin, settings, says }: SessionGroup, at: number) => (plugin?.listed
-    ? button({ variant: 'link', size: 'micro', label: 'Plugin’s page: turn it off there', id: `session-page-${file.tool}-${at}`, onclick: () => openPlugin({ source: plugin.source, plugin: plugin.plugin, marketplace: plugin.marketName, tool: file.tool }) })
-    : settings ? h('span.session-in', {}, 'in ', pathText(shownPath(settings), settings)) : says ? h('span', {}, says) : null);
+  const where = ({ plugin, settings, says, problem }: SessionGroup) => {
+    if (!plugin?.listed) return settings ? h('span.session-in', {}, 'in ', pathText(shownPath(settings), settings)) : says ? h('span', {}, says) : null;
+    const { box, source, entry } = lineBox(plugin.plugin, plugin.marketName, plugin.source, file.tool);
+    const click = entry ? clickOn(entry.source, plugin.plugin) : undefined;
+    const busy = click && (click.state !== 'ended' || (typeof box === 'object' && !box.ticked && click.tool === file.tool && click.what === 'keep-out'))
+      ? (click.state === 'waiting' ? click.said.waiting : click.said.running) : undefined;
+    const off = pluginOffButton(plugin, { current: viewCurrent(), readState: market.read.state, box, canWrite: market.view?.canWrite, busy, problem });
+    const btn = button({ variant: 'outline', size: 'micro', label: off.label, id: sessionOffId(file.tool, source ?? plugin.source ?? plugin.marketName, plugin.plugin),
+      disabled: off.disabled || state.busy || false, attrs: off.title ? { title: off.title } : undefined,
+      onclick: () => { if (!off.disabled && entry && !pluginBusy(entry.source, plugin.plugin)) turnPlugin(entry, plugin.plugin, 'keep-out', file.tool); } });
+    return off.why ? [btn, h('span.session-why', {}, off.why)] : btn;
+  };
   const warning = (words: string, path?: string) => h('p.session-warning.tone-warning', {}, icon('triangle-alert', 12), h('span', {}, words, path ? pathText(shownPath(path), path) : null));
   const warnLine = hasRunnable ? h('p.session-run-warn', {}, HOOK_RUN_WARN) : whyNot ? h('p.session-note.session-cant-run', {}, whyNot) : null;
   return h('section.session-strip', { id: `session-${file.tool}`, 'aria-label': `${strip.heading}: ${toolNames[file.tool]}` },
@@ -262,7 +287,7 @@ function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
       warnLine),
     note ? h('p.session-note', {}, ...inlineMarkdown(note, () => undefined)) : null,
     strip.groups.length ? h('ul.session-groups', {}, strip.groups.map((group, at) => h('li.session-group', {},
-      h('p.session-head', {}, h(`span.origin-mark.${group.mark}`, { 'aria-hidden': 'true' }), h('strong.session-name', {}, group.settings ? `${group.name},` : group.name), where(group, at)),
+      h('p.session-head', {}, h(`span.origin-mark.${group.mark}`, { 'aria-hidden': 'true' }), h('strong.session-name', {}, group.settings ? `${group.name},` : group.name), where(group)),
       group.problem ? warning(group.problem) : null,
       ...group.unread.map(path => (path === group.settings ? warning('Its hooks couldn’t be read.') : warning('Its hooks couldn’t be read: ', path))),
       group.hooks.length ? h('ul.session-hooks', {}, group.hooks.map((hook, row) => hookRow(hook, `hook-source-${state.page}-${file.tool}-${at}-${row}`))) : null))) : null,
