@@ -13,7 +13,7 @@ import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { hashesOf, libraryWords, sentences } from '../src/libraryrow.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { allTurns, changeWords, copilotKeptOnBy, effectiveOut, filledWords, leftLoadingAfter, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, lastSwitched, leftOut, leftOutWords, listedChanges, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeTurns, withCopilotOff, toolsOf, withTool, type Libraries, type PluginHome, endedByChanges, endedProfiles, nameNow, profileNow, profileNowIn } from '../src/profileplan.ts';
+import { allTurns, changeWords, copilotKeptOnBy, effectiveOut, filledWords, leftLoadingAfter, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, lastSwitched, leftOut, leftOutWords, listedChanges, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, statusMenuRows, stillLoadAfter, switchable, switchOffer, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeTurns, withCopilotOff, toolsOf, withTool, type Libraries, type PluginHome, type PluginLive, endedByChanges, endedProfiles, nameNow, profileNow, profileNowIn } from '../src/profileplan.ts';
 import { NO_PLUGINS, deleteProfile, profilesNaming, profilesWithLast, readLibraries, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { pluginOnIn } from '../src/pluginrows.ts';
@@ -100,6 +100,37 @@ test('Every place names the profiles now by one rule: those in use; else, while 
   assert.deepEqual([nameNow(now, all), nameNow(now, dev)], ['All · changed', 'Dev'], 'where profiles are listed, only it is named so');
   assert.deepEqual(profileNow({ profiles: [all] }, live, []), { inUse: [], name: 'No profile' }, 'none switched to within History’s days');
   assert.deepEqual(profileNow({ profiles: [all], last: 'gone' }, live, []), { inUse: [], name: 'No profile' }, 'or the one last switched to gone');
+});
+
+test('Switch back and See changes in the status bar menu follow switchOffer and listedChanges in order', () => {
+  const live = liveItems(libraryOf([['skill', 'dev', true], ['skill', 'notes', true]]), new Set());
+  const first = profile('First', ['skill:notes']), last = profile('Last', ['skill:dev']), both = profile('Both', ['skill:dev', 'skill:notes']), other = profile('Other', ['skill:notes']);
+  const heldCopy: PluginCopy = { tool: 'codex-cli', on: false, way: 'plugin-off', why: 'off', target: { libraryKey: 'p' } };
+  const heldPlugin: PluginLive = { id: 'plugin:skill:a@m/p', kind: 'skill', name: 'p', plugin: 'a', marketName: 'm', copies: [heldCopy] };
+  const heldProf = { ...profile('Held', [heldPlugin.id]), switchesPluginItems: true };
+  const partHeldProf = { ...profile('PartHeld', ['skill:dev', heldPlugin.id]), switchesPluginItems: true };
+  const kinds = (rows: ReturnType<typeof statusMenuRows>) => rows.map(row => `${row.kind}:${row.profile.name}`);
+  assert.deepEqual({
+    writable: switchOffer(last, live, [], true),
+    readOnly: switchOffer(last, live, [], false),
+    empty: switchOffer({ ...last, items: [] }, live, [], true),
+    inUse: switchOffer(both, live, [], true),
+    whollyHeld: switchOffer(heldProf, liveItems(libraryOf([]), new Set()), [heldPlugin], true),
+    partHeld: switchOffer(partHeldProf, live, [heldPlugin], true),
+  }, {
+    writable: { offered: true, enabled: true },
+    readOnly: { offered: true, enabled: false },
+    empty: { offered: false, enabled: false },
+    inUse: { offered: false, enabled: false },
+    whollyHeld: { offered: false, enabled: false },
+    partHeld: { offered: true, enabled: true },
+  });
+  const changed = profileNow({ profiles: [first, last, other], last: 'Last' }, live, []);
+  assert.deepEqual(kinds(statusMenuRows([first, last, other], changed, live, [], true)), ['profile:First', 'changed-heading:Last', 'switch-back:Last', 'see-changes:Last', 'profile:Other']);
+  assert.deepEqual(kinds(statusMenuRows([first, last], changed, live, [], false)), ['profile:First', 'changed-heading:Last', 'see-changes:Last'], 'read-only hides Switch back, keeps heading and See changes');
+  assert.deepEqual(kinds(statusMenuRows([first, { ...last, items: [] }], profileNow({ profiles: [first, { ...last, items: [] }], last: 'Last' }, live, []), live, [], true)), ['profile:First', 'profile:Last'], 'empty offers neither');
+  assert.deepEqual(kinds(statusMenuRows([heldProf], profileNow({ profiles: [heldProf], last: 'Held' }, [], [heldPlugin]), [], [heldPlugin], true)), ['profile:Held'], 'wholly held keeps clickable profile row');
+  assert.deepEqual(kinds(statusMenuRows([both], profileNow({ profiles: [both], last: 'Both' }, live, []), live, [], true)), ['profile:Both'], 'in use offers neither');
 });
 
 test('Before a Library click, the profiles in use it would end are worked out from the click’s own changes, by the rule the result says after it', () => {
