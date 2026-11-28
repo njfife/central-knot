@@ -15,6 +15,7 @@ import type { PluginContext } from '../src/plugins.ts';
 import { kindSource } from '../src/itemrow.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts } from '../src/types.ts';
 import { slashPath } from './wincompat.ts';
+import { lockSkip, withLock } from './fslock.ts';
 
 const put = async (path: string, text: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, text); };
 
@@ -193,6 +194,20 @@ test('a copy that can’t be read is said, and neither it nor broken records sto
     await put(join(box.home, '.codex/config.toml'), '[plugins."demo@m"\n');
     const found = await readPluginItems(box.context, ['claude-cli', 'copilot-cli', 'codex-cli']);
     assert.deepEqual(brief(found), [{ tool: 'claude-cli', plugin: 'gone', marketName: 'm', off: undefined, skillsOff: undefined, listed: false, problem: 'Claude Code lists it, but its files are not where it records them.', items: [] }]);
+    assert.equal(found[0]?.problemKind, 'missing');
+  } finally { await box.cleanup(); }
+});
+
+test('a plugin folder that cannot be listed reports unreadable files, not missing files', { skip: lockSkip }, async () => {
+  const box = await sandbox();
+  try {
+    const locked = join(box.home, '.claude/plugins/cache/m/locked/1.0.0');
+    await put(join(locked, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }] }] } }));
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'locked@m': [{ scope: 'user', installPath: locked }] } }));
+    await withLock(locked, 'dir-unreadable', async () => {
+      const [found] = await readPluginItems(box.context, ['claude-cli']);
+      assert.deepEqual([found?.problem, found?.problemKind], ['Claude Code lists it, but its files couldn’t be read.', 'unreadable']);
+    });
   } finally { await box.cleanup(); }
 });
 
