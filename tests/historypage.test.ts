@@ -67,12 +67,20 @@ test('History keeps the Keep selector reachable in empty/no-managed states via n
 test('History folds all-tools and conflict losers, leaves unrecorded and zero-loser conflicts unfolded', () => {
   forgetHistoryFolds();
   state.home = makeHome(six, six);
+  state.home.agents.library.reviewer = {
+    key: 'reviewer', name: 'reviewer', on: true, hash: 'w',
+    versions: ['w', 'x', 'y', 'z', 'p'].map(hash => ({ hash, at: '2026-11-27T10:00:00.000Z', from: { how: 'edited', tool: 'codex-cli' } })),
+    except: [], applied: {}, own: {},
+  };
   state.history.state = 'ready';
   const at = '2026-11-27T10:00:00.000Z';
+  const five = ['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'] as HarnessId[];
   const conflictBase = { at, winner: { tool: 'codex-cli' as HarnessId, hash: 'w' }, previous: 'p', kind: 'conflict' as const, orderProved: true };
   state.history.data = [
     { id: 'unrecorded', at, key: 'instructions:old-del', item: 'old-del', kind: 'deleted', winner: { tool: 'claude-cli', hash: 'a' }, losers: [], orderProved: true },
     { id: 'all-six', at, key: 'notes', of: 'skill', item: 'notes', kind: 'off', cause: 'switch', losers: six.map(tool => ({ tool, hash: 'b' })), orderProved: true },
+    { id: 'del-five', at, key: 'old-draft', of: 'skill', item: 'old-draft', kind: 'deleted', losers: five.map(tool => ({ tool, hash: 'b' })), orderProved: true },
+    { id: 'on-over', at, key: 'draft-over', of: 'skill', item: 'draft-over', kind: 'on', cause: 'switch', losers: five.map(tool => ({ tool, hash: '' })), tookFrom: [{ tool: 'claude-cli', hash: 'old' }], orderProved: true },
     { ...conflictBase, id: 'lib-conflict', key: 'agent:reviewer', of: 'agent', item: 'reviewer', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'opencode-cli', hash: 'z' }] },
     { ...conflictBase, id: 'legacy-conflict', key: '', item: 'clash', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'old-cli' as HarnessId, hash: 'z' }] },
     { ...conflictBase, id: 'legacy-no-losers', key: '', item: 'lone-clash', losers: [] },
@@ -85,6 +93,8 @@ test('History folds all-tools and conflict losers, leaves unrecorded and zero-lo
   for (const [id, text, opened] of [
     ['unrecorded', 'Deleted in Claude Code, then removed from the other tools it synced to.'],
     ['all-six', 'Turned off: removed from all 6 tools', 'Claude Code, Copilot CLI, Codex, Pi, OpenCode and Antigravity'],
+    ['del-five', 'Deleted from Central Knot and removed from 5 of 6 tools', 'Claude Code, Copilot CLI, Pi, OpenCode and Antigravity'],
+    ['on-over', 'Turned on: put in 5 of 6 tools — Claude Code’s own copy was written over and kept as a version.', 'Claude Code, Copilot CLI, Pi, OpenCode and Antigravity'],
     ['lib-conflict', 'Codex’s edit was the latest, so it became the current version. Edits from 3 of 6 tools are kept as versions.', 'Copilot CLI, Pi and OpenCode'],
     ['legacy-conflict', 'Codex’s edit won over edits in 3 tools', 'Copilot CLI, Pi and old-cli'],
     ['legacy-no-losers', 'Codex’s edit won over another’s.'],
@@ -97,4 +107,8 @@ test('History folds all-tools and conflict losers, leaves unrecorded and zero-lo
       assert.equal(textOf(findById(page, `history-tools-names-${id}-0`)), opened, id);
     }
   }
+  assert.deepEqual(
+    ['copilot-cli', 'pi-cli', 'opencode-cli'].map(tool => textOf(findById(page, `history-lib-conflict-${tool}`))),
+    ['Use Copilot CLI’s version', 'Use Pi’s version', 'Use OpenCode’s version'],
+  );
 });

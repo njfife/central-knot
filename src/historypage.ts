@@ -100,9 +100,9 @@ function rowAbout(event: HistoryEvent): { glyph: IconName; action?: string; node
   const text = event.settingsChanged ? `${described.text} ${event.settingsChanged.join(' ')}` : described.text;
   if (!text.includes('\0')) return { glyph: described.glyph, action: described.action, node: h('div.history-about', {}, text) };
   const opened: HTMLElement[] = [];
-  // Odd slots are `\0<group index>\0` markers from formatTools; even slots are literal text (drop a trailing "." only when a fold ends the row).
-  const inline: Child[] = text.split('\0').map((part, slot, parts) => {
-    if (slot % 2 === 0) return slot === parts.length - 1 ? part.replace(/^\.$/, '') : part;
+  // Odd slots are `\0<group index>\0` markers from formatTools; even slots are literal text (drop a trailing "." and separate a following sentence with " — " so no fold chevron stands before a full stop).
+  const inline: Child[] = text.split('\0').map((part, slot) => {
+    if (slot % 2 === 0) return slot > 0 ? part.replace(/^\.$/, '').replace(/^\.\s+/, ' — ') : part;
     const group = groups[Number(part)]!;
     const key = `${event.id}-${(slot - 1) / 2}`;
     const open = openToolFolds.has(key);
@@ -195,7 +195,7 @@ const actionHelp = (event: HistoryEvent) => (event.kind === 'profile'
   : event.kind === 'everything' ? everythingOffer(event)?.help ?? ''
     : 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)');
 
-/** A library entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s copy" for each copy that gave way. */
+/** A library entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s version" for each version that gave way. */
 function libraryButtons(event: HistoryEvent) {
   const entry = libraryEntry(event)!, item = itemOf(event);
   // A skill's own switches as the page last read them, so an action that would change nothing there is not offered.
@@ -211,7 +211,7 @@ function libraryButtons(event: HistoryEvent) {
   const over = Object.entries(found?.copies ?? {}).filter(([, copy]) => copy && copy.hash !== item?.hash).map(([tool]) => tool);
   const help = own && over.length ? `${own.help}. ${keptOver(event.item, over)}` : own?.help;
   return [own ? link(own.label, help!, `history-${event.id}`) : null,
-    ...versionChoices(event, item).map(choice => link(`Use ${who(choice.tool)}’s copy`, `Make ${who(choice.tool)}’s version of ${event.item} the current one`, `history-${event.id}-${choice.tool}`, choice.hash))];
+    ...versionChoices(event, item).map(choice => link(`Use ${who(choice.tool)}’s version`, `Make ${who(choice.tool)}’s version of ${event.item} the current one`, `history-${event.id}-${choice.tool}`, choice.hash))];
 }
 
 /** A profile's or the base instructions' Undo (or Redo), naming what it undoes: "Undo switch", or "Undo pull in Claude Code and Codex". */

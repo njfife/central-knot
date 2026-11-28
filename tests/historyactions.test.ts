@@ -147,6 +147,9 @@ test('A deletion offers Restore while the agent is deleted; every other entry of
   const deleted = entry({ kind: 'deleted', losers: tools.map(tool => ({ tool: tool as 'claude-cli', hash: 'b' })) });
   const gone = item({ deleted: { at } });
   assert.equal(librarySentence(deleted, libraryWords.agents, tools)?.text, 'Deleted from Central Knot and removed from all 3 tools. History keeps it.');
+  assert.equal(librarySentence(deleted, libraryWords.agents, tools, undefined, false, { row: true })?.text, 'Deleted from Central Knot and removed from all 3 tools.');
+  const gaveBackDel = entry({ kind: 'deleted', losers: [{ tool: 'codex-cli', hash: 'b' }], gaveBack: ['claude-cli'] });
+  assert.equal(librarySentence(gaveBackDel, libraryWords.agents, tools, undefined, false, { row: true })?.text, 'Undone: taken out of Central Knot again and removed from Codex; Claude Code keeps its own copy, as before.');
   assert.deepEqual(offered(deleted, gone), ['Restore', { ...asIs, deleted: false }]);
   assert.equal(offered(deleted, item()), undefined, 'it is back already');
   assert.equal(offered(entry({ kind: 'edit', previous: 'a' }), gone), undefined);

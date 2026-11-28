@@ -3494,7 +3494,7 @@ async function practiceFlow() {
   await a.click('#nav-history');
   const deletedRow = `[...document.querySelectorAll('.history-row[data-kind="deleted"]')].find(row => row.textContent.includes('release-notes'))`;
   same('History says it was deleted from Central Knot, and offers Restore', await a.run(`[${deletedRow}.querySelector('.history-about').textContent, ${deletedRow}.querySelector('.history-actions button').textContent]`),
-    ['Deleted from Central Knot and removed from all 3 tools. History keeps it.', 'Restore']);
+    ['Deleted from Central Knot and removed from all 3 tools', 'Restore']);
   // One more edit, so the Make current entry is no longer the latest: it offers to go back to the version before it.
   await openKind(a, 'agents');
   writeFileSync(codexAgent, taken[2].replace('description = "', 'description = "Edited again. '));
@@ -16345,6 +16345,15 @@ async function libraryFlow() {
   const hFold = jsonOrNothing(hPath) ?? { events: [] };
   const sixIds = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
   const fiveIds = ['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
+  const sFold = JSON.parse(readFileSync(oSkillRec, 'utf8'));
+  const clashItem = sFold.items['active-skill'];
+  clashItem.versions.push(
+    { hash: 'p', at: foldAt(20), from: { how: 'found', tool: 'claude-cli' } },
+    { hash: 'x', at: foldAt(1), from: { how: 'edited', tool: 'copilot-cli', replacedBy: clashItem.hash } },
+    { hash: 'y', at: foldAt(1), from: { how: 'edited', tool: 'pi-cli', replacedBy: clashItem.hash } },
+    { hash: 'z', at: foldAt(1), from: { how: 'edited', tool: 'opencode-cli', replacedBy: clashItem.hash } },
+  );
+  writeFileSync(oSkillRec, `${JSON.stringify(sFold, null, 2)}\n`);
   hFold.events.push(
     { id: 'fold-legacy', at: foldAt(7), key: 'instructions:old', item: 'old', kind: 'edit', winner: { tool: 'claude-cli', hash: 'a' }, losers: ['claude-cli', 'codex-cli', 'old-cli'].map(tool => ({ tool, hash: 'a' })), orderProved: true },
     { id: 'fold-two-groups', at: foldAt(6), key: 'instructions:legacy', item: 'legacy', kind: 'switched', switched: [{ tool: 'claude-cli', disabled: true }, { tool: 'copilot-cli', disabled: true }, { tool: 'codex-cli', disabled: true }, { tool: 'pi-cli', disabled: false }, { tool: 'opencode-cli', disabled: false }, { tool: 'antigravity-cli', disabled: false }], losers: [], orderProved: true },
@@ -16353,7 +16362,9 @@ async function libraryFlow() {
     { id: 'fold-two', at: foldAt(3), key: 'two-tools', of: 'skill', item: 'two-tools', kind: 'on', cause: 'switch', losers: [{ tool: 'claude-cli', hash: '' }, { tool: 'codex-cli', hash: '' }], orderProved: true },
     { id: 'fold-all', at: foldAt(2), key: 'all-six', of: 'skill', item: 'all-six', kind: 'off', cause: 'switch', losers: sixIds.map(tool => ({ tool, hash: 'b' })), orderProved: true },
     { id: 'fold-then', at: foldAt(1.5), key: 'draft-over', of: 'skill', item: 'draft-over', kind: 'on', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: '' })), tookFrom: [{ tool: 'claude-cli', hash: 'old' }], orderProved: true },
+    { id: 'fold-long', at: foldAt(1.2), key: 'cross-workspace-release-migration-checklist-v2', of: 'skill', item: 'cross-workspace-release-migration-checklist-v2', kind: 'off', cause: 'switch', losers: [{ tool: 'codex-cli', hash: 'b' }], orderProved: true },
     { id: 'fold-five', at: foldAt(1), key: 'draft-rfc', of: 'skill', item: 'draft-rfc', kind: 'off', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: 'b' })), orderProved: true },
+    { id: 'fold-clash', at: foldAt(0.5), key: 'active-skill', of: 'skill', item: 'active-skill', kind: 'conflict', winner: { tool: 'codex-cli', hash: clashItem.hash }, version: clashItem.hash, previous: 'p', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'opencode-cli', hash: 'z' }], orderProved: true },
   );
   writeFileSync(hPath, `${JSON.stringify(hFold, null, 2)}\n`);
   await o.click('#header-refresh');
@@ -16363,7 +16374,7 @@ async function libraryFlow() {
     [await rowAbout('draft-rfc'), await rowAbout('draft-over'), await rowAbout('all-six'), await rowAbout('two-tools'), await rowAbout('one-tool'), await rowAbout('release-prose'), await rowAbout('legacy'), await rowAbout('old')],
     [
       { text: 'Turned off: removed from 5 of 6 tools', folds: 1 },
-      { text: 'Turned on: put in 5 of 6 tools. Claude Code’s own copy was written over and kept as a version.', folds: 1 },
+      { text: 'Turned on: put in 5 of 6 tools — Claude Code’s own copy was written over and kept as a version.', folds: 1 },
       { text: 'Turned off: removed from all 6 tools', folds: 1 },
       { text: 'Turned on: put in Claude Code and Codex.', folds: 0 },
       { text: 'Turned on: put in Codex.', folds: 0 },
@@ -16413,6 +16424,24 @@ async function libraryFlow() {
     if (await o.run(`document.getElementById('sidebar-toggle')?.getAttribute('aria-label') === 'Expand the sidebar'`)) await o.click('#sidebar-toggle');
     await o.settle();
     same(`History with Keep warning and open tool fold fits at ${width}×${height} with sidebar open and icon beside text`, [await o.run(CUT_OFF), await warnIconBeside(o)], [[], true]);
+    if (width === 860) {
+      const clash860 = await o.run(`(() => {
+        const row = document.getElementById('history-row-fold-clash');
+        const name = row?.querySelector('.history-what strong'), about = row?.querySelector('.history-about'), acts = row?.querySelector('.history-actions');
+        const nr = name?.getBoundingClientRect(), ar = about?.getBoundingClientRect(), br = acts?.getBoundingClientRect();
+        return { buttons: [...(acts?.querySelectorAll('button') ?? [])].map(b => b.textContent?.trim()), nameW: Math.round(nr?.width ?? 0), nameWhole: !!(name && nr && nr.width > 0 && name.scrollWidth <= name.clientWidth + 1), underAbout: !!(ar && br && br.top >= ar.bottom - 1 && Math.abs(br.left - ar.left) <= 2) };
+      })()`);
+      same('at 860 with five conflict buttons, the item name keeps its width in sight and actions sit under the sentence',
+        [clash860.buttons, clash860.nameW >= 50, clash860.nameWhole, clash860.underAbout],
+        [['See change', 'Undo', 'Use Copilot CLI’s version', 'Use Pi’s version', 'Use OpenCode’s version'], true, true, true]);
+    } else {
+      const long1316 = await o.run(`(() => {
+        const name = document.querySelector('#history-row-fold-long .history-what strong');
+        const nr = name?.getBoundingClientRect();
+        return { width: Math.round(nr?.width ?? 0), whole: !!(name && nr && name.scrollWidth <= name.clientWidth + 1) };
+      })()`);
+      check('at 1316 a long History item name takes the room there is without cutting at 150 px', long1316.width >= 280 && long1316.whole, long1316);
+    }
   }
   await o.click('#history-shorten-cancel');
   await fullSize(o);

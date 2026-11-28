@@ -126,7 +126,7 @@ export function librarySentence(
   event: HistoryEvent, words: RowWords, homeTools: string[], item?: LibraryItem, undid = false, options?: SentenceOptions,
 ): { glyph: IconName; text: string } | undefined {
   const formatTools = options?.tools ?? toolsPhrase;
-  // Lazy: rowAbout's fold formatter registers a fold per call, so branches using a filtered list (conflict) must not invoke it on raw losers.
+  // Lazy: skips formatting raw event.losers (and pushing an unused fold group on 3+ losers) in branches like conflict that format a filtered list.
   let losersText: string | undefined;
   const tools = () => losersText ??= formatTools(event.losers.map(loser => loser.tool), homeTools);
   /** " and removed from Codex", or nothing when no harness was touched. */
@@ -134,7 +134,7 @@ export function librarySentence(
   const where = event.only ? toolName(event.only) : '', from = event.winner ? toolName(event.winner.tool) : '';
   const away = event.only && !homeTools.includes(event.only) ? ` ${where} isn’t managed now.` : '';
   // What made it happen is the entry's `cause` alone (types.ts HistoryEvent); none is the person's own switch or click.
-  const pulled = event.cause === 'pulled', keeps = options?.row ? '' : ' Central Knot keeps it.';
+  const pulled = event.cause === 'pulled', keeps = options?.row ? '' : ' Central Knot keeps it.', historyKeeps = options?.row ? '' : ' History keeps it.';
   const source = event.link ? linkLabel(event.link) : 'Its source', plugin = event.link && pluginOf(event.link);
   // An Undo that gave tools their own copies back instead of removing what was there (types.ts HistoryEvent gaveBack).
   const gave = (event.gaveBack ?? []).map(toolName);
@@ -202,9 +202,9 @@ export function librarySentence(
       // Its copies a pass no click asked removed afterwards, where they were left (a tool managed again).
       if (event.cause === 'in-line') return { glyph: 'trash-2', text: `Deleted from Central Knot, so its ${words.copy} in ${tools()} was removed when sync reached ${event.losers.length === 1 ? 'it' : 'them'}. History can restore it.` };
       // The Undo of taking a found item in: out of Central Knot again, each tool it was found in keeping its own copy.
-      if (gave.length) return { glyph: 'undo-2', text: `Undone: taken out of Central Knot again${also(' and removed from')}; ${andList(gave)} ${gave.length === 1 ? 'keeps its own copy' : 'keep their own copies'}, as before. History keeps it.` };
+      if (gave.length) return { glyph: 'undo-2', text: `Undone: taken out of Central Knot again${also(' and removed from')}; ${andList(gave)} ${gave.length === 1 ? 'keeps its own copy' : 'keep their own copies'}, as before.${historyKeeps}` };
       const how = pulled ? 'Removed in the Git repo, so Pull deleted it' : 'Deleted';
-      return { glyph: pulled ? 'git-branch' : 'trash-2', text: `${how} from Central Knot${also(' and removed from')}. History keeps it.` };
+      return { glyph: pulled ? 'git-branch' : 'trash-2', text: `${how} from Central Knot${also(' and removed from')}.${historyKeeps}` };
     }
     case 'restored': {
       // Likewise: an Undo or Restore from before the library names a tool or an earlier version.
