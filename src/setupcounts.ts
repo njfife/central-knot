@@ -46,13 +46,18 @@ export function waitingForChoice(home: HomeView): Waiting[] {
   });
 }
 
+/** A found item taken out of Central Knot earlier, and whether its copies differ, so a click's Add asks which (its click answer waits). */
+export interface TakenOut { kind: PageKind; key: string; name: string; differs: boolean }
 /**
  * The found items the rule leaves for good because Central Knot holds them as deleted (the take-in table's rule column, `deleted`):
- * taken out earlier, by Delete or by an Undo of their take-in, and not added by themselves again. Settings counts them, so "nothing
- * would be added" beside a page full of found items says why.
+ * taken out earlier, by Delete or by an Undo of their take-in, and not added by themselves again, each split by what a click's
+ * Add would answer (its click column). Settings counts and lists them, Add on each that doesn't differ, so "nothing would be
+ * added" beside a page full of found items says why.
  */
-export const takenOutEarlier = (home: HomeView): number => KINDS.reduce((count, kind) => count
-  + kindSource(home, kind).facts.filter(fact => fact.takeInAnswers && 'leave' in fact.takeInAnswers.rule && fact.takeInAnswers.rule.leave === 'deleted').length, 0);
+export const takenOutEarlier = (home: HomeView): TakenOut[] => KINDS.flatMap(kind => kindSource(home, kind).facts.flatMap(fact => {
+  const answers = fact.takeInAnswers;
+  return answers && 'leave' in answers.rule && answers.rule.leave === 'deleted' ? [{ kind, key: fact.key, name: fact.name, differs: 'wait' in answers.click }] : [];
+}));
 
 /**
  * What Yes would do now, counted from the take-in table's rule column as the pass reads it (each kind's view): the items it takes

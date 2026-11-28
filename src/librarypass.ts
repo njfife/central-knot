@@ -1045,39 +1045,43 @@ export async function itemsNow<C, E extends Seen, D extends Disk<E>>(kind: Kind<
  * those clicks in one pass of the kind; each entry is marked done by the entry its click made (`undid`: entry, then that one). An
  * entry with nothing left to do is passed over. `version`: one of an entry's version choices ("Use Codex’s") instead of its own
  * action, which leaves the entry open: its other choices still stand. A harness an entry wrote, removed or took a copy from that
- * isn't managed now is left as it is, and the results say so. History's one button runs restore; Synchronize everything's one
- * Undo and its Restore run several (everything.ts).
+ * isn't managed now is left as it is, and the results say so. `wanted`: run an entry's action only where this says so, worked
+ * out on the action as it is now (Settings' added line: everything.ts undoAdded); each other entry found is `passed` over too.
+ * History's one button runs restore; Synchronize everything's one Undo and its Restore run several (everything.ts).
  */
 export async function restoreAll<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], eventIds: string[], version?: string,
-): Promise<PassResult & { undid: Map<string, string> }> {
+  wanted: (past: HistoryEvent, change: Change) => boolean = () => true,
+): Promise<PassResult & { undid: Map<string, string>; passed: string[] }> {
   const undid = new Map<string, string>(), about = await itemsNow(kind, context, tools);
-  if (about.problem) return { stopped: about.problem, results: [], writes: 0, reloads: [], undid };
-  const asked = (await readHistory(context)).filter(event => eventIds.includes(event.id)).flatMap(past => {
+  if (about.problem) return { stopped: about.problem, results: [], writes: 0, reloads: [], undid, passed: [] };
+  const found = (await readHistory(context)).filter(event => eventIds.includes(event.id));
+  const asked = found.flatMap(past => {
     const { item, now } = about.of(past), action = kind.historyAction(past, item, now, version);
-    return action ? [{ past, change: action.change }] : [];
+    return action && wanted(past, action.change) ? [{ past, change: action.change }] : [];
   });
-  if (!asked.length) return { results: [], writes: 0, reloads: [], undid };
+  const passed = found.filter(past => !asked.some(each => each.past === past)).map(past => past.id);
+  if (!asked.length) return { results: [], writes: 0, reloads: [], undid, passed };
   const done = await runPass(kind, context, tools, asked.map(({ change }) => change), { only: new Set(asked.map(({ change }) => change.key)) });
   const away = asked.flatMap(({ past }) => [...new Set([...past.losers, ...(past.tookFrom ?? [])].map(copy => copy.tool))]
     .filter(tool => !kind.harnesses(tools).includes(tool) && kind.harnesses([tool]).length).sort(byToolOrder)
     .map((tool): DestinationResult => ({ item: past.item, harness: tool, outcome: 'held', message: notManagedHere(tool) })));
   if (!done.stopped) done.results.push(...away);
-  if (!done.made?.length || version) return { ...done, undid };
+  if (!done.made?.length || version) return { ...done, undid, passed };
   const history = await readHistory(context), made = history.filter(event => done.made!.includes(event.id));
   for (const { past, change } of asked) {
     const by = made.find(event => event.key === `${kind.historyPrefix}${change.key}`);
     if (by) { history.find(event => event.id === past.id)!.undoneBy = by.id; undid.set(past.id, by.id); }
   }
   await replaceHistory(context, history);
-  return { ...done, undid };
+  return { ...done, undid, passed };
 }
 
 /** One History entry's action (restoreAll for one entry), or why it has nothing left to do. */
 export async function restore<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], eventId: string, version?: string,
 ): Promise<PassResult> {
-  const { undid: _undid, ...done } = await restoreAll(kind, context, tools, [eventId], version);
+  const { undid: _undid, passed: _passed, ...done } = await restoreAll(kind, context, tools, [eventId], version);
   if (done.stopped || done.made?.length || done.results.length) return done;
   return { stopped: `That change has nothing left to undo: the ${kind.words.item} is as that would leave it.`, results: [], writes: 0, reloads: [] };
 }

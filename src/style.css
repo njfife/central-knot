@@ -1911,8 +1911,8 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .setting-added > .setting-message:has(.row-file-btn) { line-height: 24px; }
 .setting-added > .setting-message:has(.row-file-btn) > .icon { margin-top: 5px; }
 .setting-added > .setting-message.file-anchored { color: var(--ink); }
-.setting-added-name, .setting-added-tail { white-space: nowrap; }
-.setting-added .row-file-btn { width: 20px; height: 20px; margin: 0 1px 0 4px; vertical-align: -5px; }
+.setting-added-name { white-space: nowrap; }
+.setting-added .row-file-btn, .setting-taken-out-row .row-file-btn { width: 20px; height: 20px; margin: 0 1px 0 4px; vertical-align: -5px; }
 /* Marked lines use line-height 24px (20px marks) while a following (i) notice uses 16px, so keep the same gap as between lines. */
 .setting-added:has(> .setting-message:last-child .row-file-btn) + .setting-message { margin-top: -4px; }
 .setting-added > .details-file-only { min-width: 0; margin: -6px 0 8px; }
@@ -1940,8 +1940,17 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .setting-attention { color: var(--ink); }
 .setting-attention .icon { color: var(--warning); }
 .setting-message .text-action { margin: -2px -4px; padding: 2px 4px; line-height: 16px; }
-/* History sits inside .setting-added-tail (no .setting-message-text margin-right: 8px), so +4px margin + 4px padding keeps the 8px gap. */
-.setting-added .setting-added-tail > .text-action { margin-left: 4px; }
+/* The found items taken out earlier: a fold under the added lines, its rows a name, its kind and Add (settingspage.ts takenOutFold). */
+.setting-row > .fold { grid-column: 1 / -1; margin: -8px 0 0; }
+/* One grid, its rows' parts in columns (name and mark, kind, act), so each Add starts where the others do; a panel or the copy question spans it. */
+.setting-taken-out-list { display: grid; grid-template-columns: minmax(0, max-content) max-content minmax(0, 1fr); gap: 4px 12px; align-items: center; font-size: 12px; line-height: 24px; }
+.setting-taken-out-row { display: contents; }
+.setting-taken-out-row .item-name { overflow-wrap: anywhere; white-space: normal; }
+.setting-taken-out-act { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.setting-taken-out-list > :not(.setting-taken-out-row) { grid-column: 1 / -1; }
+/* Why an added line has no Undo, in its place: quiet, its hover the reason's cost. */
+.setting-added-why { white-space: nowrap; color: var(--ink-faint); }
+.setting-added-why[title] { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
 .setting-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 /* The log under its row (Show log): as tall as its lines, so the page scrolls, never the block; a long line wraps; its text can
    be selected and copied (the body's is not). */
