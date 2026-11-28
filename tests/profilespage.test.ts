@@ -20,6 +20,9 @@ const { announcement, dispatch } = installDom({
   switchProfile: async () => (switchStopped ? { stopped: switchStopped } : {}),
   selectHome: async () => nextHome,
   readUsage: async () => ({ at: '2026-11-20T00:00:00.000Z', tools: [] }),
+  pluginItemTexts: async (_plugin: string, _market: string, kind: string, name: string) => (kind === 'mcp'
+    ? [{ tool: 'claude-cli', text: `{\n  "url": "https://issues.example/${name}"\n}` }]
+    : [{ tool: 'claude-cli', text: `---\nname: ${name}\n---\nPrompt for ${name}.\n` }]),
 }, { byId: id => findById(rendered, id) ?? null });
 
 const { state: app } = await import('../src/app.ts');
@@ -210,7 +213,7 @@ test('Leaving Profiles ends only See changes…’s pin; the page toggle’s pin
   assert.deepEqual([ownSurvived, profileState.changes], [['skill:standup'], undefined], 'page toggle pin survives leaving Profiles, and no pin survives switching to another home and back');
 });
 
-test('Marks cover own items, folded plugin skills, and Pi-linked copies, never whole-only plugin agents or servers; rowKey keeps server case; mark binds only last few letters; Escape and empty draws keep state true', async t => {
+test('Marks cover own items, folded plugin skills, Pi-linked copies, and plugin agents and servers; rowKey keeps server case; mark binds only last few letters; Escape and empty draws keep state true', async t => {
   const { profileState, setRenderer } = await import('../src/app.ts');
   const { pageRows } = await import('../src/pluginrows.ts');
   const { pluginLive } = await import('../src/profileplan.ts');
@@ -230,7 +233,7 @@ test('Marks cover own items, folded plugin skills, and Pi-linked copies, never w
         library: { triage: held('triage'), [longWord]: held(longWord), placed: held('placed', 'p1') }, gate: { state: 'ready' } },
       mcp: { tools, items: [fact('docs')], library: { docs: held('docs') }, gate: { state: 'ready' } },
       agents: { tools, items: [fact('reviewer')], library: { reviewer: held('reviewer') }, gate: { state: 'ready' } },
-      pluginItems: [{ tool: 'claude-cli', plugin: 'alpha', marketName: 'team', source: '/market', listed: true,
+      pluginItems: [{ tool: 'claude-cli', plugin: 'alpha', marketName: 'team', source: '/market', listed: true, version: '2.0.0',
         items: [{ kind: 'skill', name: 'Triage', description: '', path: 'skills/triage' }, { kind: 'mcp', name: 'Issues', description: '' }, { kind: 'agent', name: 'Helper', description: '' }] }],
       profiles: { profiles: [{ id: 'work', name: 'Work', items: allWork, switchesPluginItems: true }, { id: 'other', name: 'Other', items: ['skill:triage'], switchesPluginItems: true }],
         plugins: [{ id: 'p1', source: '/market', marketName: 'team', plugin: 'alpha', on: true }] },
@@ -246,14 +249,27 @@ test('Marks cover own items, folded plugin skills, and Pi-linked copies, never w
       assert.deepEqual([rowKey(plugged.find(item => item.kind === 'mcp')!), pageRows(home, 'mcp').rows[0]!.key, rowKey(plugged.find(item => item.name === 'Triage')!)],
         ['alpha@team/Issues', 'alpha@team/Issues', 'alpha@team/triage']);
     });
-    await t.test('marks cover folded plugin skills and bind only the last few letters of a long word', () => {
+    await t.test('marks cover folded plugin skills and plugin servers and agents, open their text under the row, and bind only the last few letters of a long word', async () => {
       assert.equal(pageRows(home, 'skills').rows.length, 0);
       assert.deepEqual(['skill:triage', 'mcp:docs', 'agent:reviewer', 'plugin:skill:alpha@team/triage', 'plugin:skill:alpha@team/placed', 'plugin:mcp:alpha@team/Issues', 'plugin:agent:alpha@team/helper'].map(id => has(id, 'row-file-btn')),
-        [true, true, true, true, true, false, false]);
+        [true, true, true, true, true, true, true]);
       const longRow = rowOfItem(`skill:${longWord}`);
       const keep = findNode(longRow, el => el.classList.contains('pf-mark-keep'));
       assert.deepEqual([textOf(findNode(longRow, el => el.classList.contains('pf-name-text'))), textOf(keep), !!findNode(keep, el => el.classList.contains('row-file-btn'))],
         [longWord, 'ious', true]);
+      markOf('plugin:mcp:alpha@team/Issues')!.click();
+      await new Promise(done => setImmediate(done));
+      const serverRow = rowOfItem('plugin:mcp:alpha@team/Issues');
+      assert.deepEqual([serverRow?.classList.contains('file-anchored'), textOf(findNode(serverRow, el => el.classList.contains('file-open-now'))), textOf(findNode(serverRow, el => el.classList.contains('file-open-name'))), textOf(findNode(serverRow, el => el.tag === 'pre')), !!findNode(serverRow, el => el.classList.contains('file-open-foot'))],
+        [true, 'current version', 'Claude Code’s copy · 2.0.0', '{\n  "url": "https://issues.example/Issues"\n}', false]);
+      markOf('plugin:agent:alpha@team/helper')!.click();
+      await new Promise(done => setImmediate(done));
+      const agentRow = rowOfItem('plugin:agent:alpha@team/helper');
+      assert.deepEqual([agentRow?.classList.contains('file-anchored'), textOf(findNode(agentRow, el => el.tag === 'pre'))],
+        [true, '---\nname: Helper\n---\nPrompt for Helper.\n']);
+      const escEvent = { key: 'Escape', defaultPrevented: false, preventDefault() { escEvent.defaultPrevented = true; } };
+      dispatch('keydown', escEvent);
+      assert.deepEqual([has('plugin:agent:alpha@team/helper', 'details-file-only'), markOf('plugin:agent:alpha@team/helper')?.focused], [false, 1]);
     });
     await t.test('Rename and active Delete confirmation claim Escape, stale Delete confirmation after Edit profiles… does not, and switching/empty draws clear the place', () => {
       markOf('skill:triage')!.click();

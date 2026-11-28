@@ -10,8 +10,8 @@
 // profile with `switchesPluginItems` false hides plugin rows behind "Choose plugin items for this profile". Unchanged rows leave
 // their state cell blank (hover keeps live state; `Off · on in …` stays on a plugin row in use; rows left out name tools that
 // keep them on: keptOn; a row whose tools change says where: `Out of Codex`). Each library item Central Knot holds, each
-// plugin-linked library copy, and each installed plugin's skill (folded onto an own row included) gets a file mark after its name,
-// opening its current version under that row (profilesFiles, rowKey → filepanel.ts); whole-only plugin servers and agents have none.
+// plugin-linked library copy, and each installed plugin's skill, server or agent (folded onto an own row included) gets a file mark after its name,
+// opening its current version under that row (profilesFiles, rowKey → filepanel.ts).
 // A profile held by a plugin off in a tool offers in Switch's place, and on each row held in another plugin or tool, the Library
 // line's own press to turn it on there, its result and Undo in this page's band, else the link to its page, the header saying why (wayPast, turnOnControl).
 // Every rule and preview is profileplan.ts's (listedChanges, listedChangeCount, switchPlan, pluginPlan, inUse, switchSaid,

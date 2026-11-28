@@ -15,6 +15,7 @@ let nextSearch: ((text: string) => Promise<{ ready: boolean; home: string; rows:
 const { dispatch } = installDom({
   refresh: () => (nextRefresh ? nextRefresh() : Promise.resolve(null)),
   search: (text: string) => (nextSearch ? nextSearch(text) : Promise.resolve({ ready: false, home: '', rows: [] })),
+  pluginItemTexts: async (_plugin: string, _market: string, kind: string, name: string) => [{ tool: 'claude-cli', text: kind === 'mcp' ? `{\n  "command": "${name}"\n}` : `Prompt for ${name}.` }],
 });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first, before matrix.ts.
 await import('../src/settingspage.ts');
@@ -657,4 +658,31 @@ test('openKind with a key not yet in state.home awaits the owed home read and op
   } finally {
     nextRefresh = undefined;
   }
+});
+
+test('An opened plugin agent row in the Library has no Show its agent file link; its row mark opens its text with no empty footer, while a plugin skill keeps Show its SKILL.md', async () => {
+  const pluginItems: HomeView['pluginItems'] = [
+    { tool: 'claude-cli', plugin: 'kit', source: '/market', marketName: 'team', version: '2.0.0', off: false, listed: true,
+      items: [{ kind: 'skill', name: 'triage', description: 'Triages.', path: 'skills/triage' }, { kind: 'agent', name: 'helper', description: 'Helps.' }, { kind: 'mcp', name: 'issues', description: '', runs: 'npx issues' }] },
+  ];
+  state.home = makeFiveToolHome([], {}, pluginItems);
+  Object.assign(state, { page: 'library', libraryKind: 'agents', libraryView: 'list', visit: 31, shownWhole: undefined, outcome: undefined });
+  openKind('agents');
+  let tree = libraryTable() as unknown as FakeNode;
+  const agentRowId = 'agents-kit@team/helper';
+  findById(tree, `open-${agentRowId}`)!.click();
+  tree = libraryTable() as unknown as FakeNode;
+  assert.deepEqual([!!findById(tree, `pfile-${agentRowId}`), !!findById(tree, `file-${agentRowId}`)], [false, true]);
+  findById(tree, `file-${agentRowId}`)!.click();
+  await new Promise(done => setImmediate(done));
+  tree = libraryTable() as unknown as FakeNode;
+  assert.deepEqual([textOf(findNode(tree, el => el.classList.contains('file-open-name'))), textOf(findNode(tree, el => el.tag === 'pre')), !!findNode(tree, el => el.classList.contains('file-open-foot'))],
+    ['Claude Code’s copy · 2.0.0', 'Prompt for helper.', false]);
+  // Plugin skill still keeps Show its SKILL.md in its opened details.
+  openKind('skills');
+  tree = libraryTable() as unknown as FakeNode;
+  const skillRowId = 'skills-kit@team/triage';
+  findById(tree, `open-${skillRowId}`)!.click();
+  tree = libraryTable() as unknown as FakeNode;
+  assert.equal(textOf(findById(tree, `pfile-${skillRowId}`)), 'Show its SKILL.md');
 });
