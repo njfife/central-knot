@@ -483,7 +483,7 @@ if (typeof document !== 'undefined') {
   window.addEventListener('resize', () => syncInfoCard(true));
 }
 /**
- * A small circled-`?` button (`icon('circle-question-mark', 14)`) with a top-layer detail card beside it (text only, ≤2 sentences).
+ * A small circled-`?` button (`icon('circle-question-mark', 14)`, or custom `face` with optional extra class `look`) with a top-layer detail card beside it (text only, ≤2 sentences).
  * - `id` must be unique on the page and stable across redraws (redraws reopen the card and keep focus by it).
  * - The card's id is `infoCardId(id)` (`<id>-card`); use it for `aria-describedby` on related controls too.
  * - Do not place the mark inside a `<button>` or `<label>`.
@@ -493,9 +493,9 @@ if (typeof document !== 'undefined') {
  *   New native `title` attributes only name an icon, a mark, a "—", a label cut short, or a command's hint (older disabled
  *   reasons in whyOff/lockAttrs and checkbox's help still use `title`).
  */
-export function infoMark(id: string, label: string, text: string | readonly string[]): HTMLElement {
+export function infoMark(id: string, label: string, text: string | readonly string[], { face = icon('circle-question-mark', 14), look = '' }: { face?: Child | Child[]; look?: string } = {}): HTMLElement {
   const enter = hoverInfo(id, true), leave = hoverInfo(id, false);
-  const mark = h('button.info-mark', {
+  const mark = h(`button.info-mark${look ? `.${look}` : ''}`, {
     type: 'button', id, 'aria-label': `About ${label}`, 'aria-describedby': infoCardId(id),
     onpointerenter: enter, onpointerleave: leave,
     onfocus: (event: FocusEvent) => {
@@ -513,7 +513,7 @@ export function infoMark(id: string, label: string, text: string | readonly stri
       if (openCard?.id === id && openCard.pinned) closeInfoCard();
       else openInfoCard(id, true);
     },
-  }, icon('circle-question-mark', 14));
+  }, face);
   const body = typeof text === 'string' ? [text] : text.flatMap((line, at) => (at ? ['\n', h('span.info-line', {}, line)] : [h('span.info-line', {}, line)]));
   const card = h('span.info-card', { id: infoCardId(id), role: 'tooltip', popover: 'manual', onpointerenter: enter, onpointerleave: leave }, ...body);
   return h('span.info-wrap', {}, mark, card);
