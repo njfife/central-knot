@@ -330,7 +330,7 @@ test('A found skill whose only copy can’t be copied as it is (a link inside) i
     await mkdir(join(box.home, roots['codex-cli'], 'not-a-skill'), { recursive: true });
     const { fact, item, row } = await seen(box);
     assert.match(fact!.unseen?.['claude-cli'] ?? '', /can’t be copied as it is/);
-    assert.deepEqual([canAdd(row), statusLine(row, item, tools)], [false, 'Not in Central Knot · it can’t be taken in now (see below).']);
+    assert.deepEqual([canAdd(row), statusLine(row, item, tools)], [false, '']);
     assert.equal((await seen(box, box.context, 'not-a-skill')).fact, undefined);
     // Found only where a tool has it another way (the shared folder), it says so, and can be taken in.
     await rm(folderOf(box, 'claude-cli'), { recursive: true });
@@ -1506,7 +1506,7 @@ test('An edit Codex won’t load is never written over Codex’s copy, which sta
   } finally { await box.cleanup(); }
 });
 
-test('A found row says “every tool” only when it is true: the tools it will go to, those that can’t take it, those that have it another way, and what to do when it can’t be taken in', async () => {
+test('A found row says “every tool” only when it is true: the tools it will go to, those that can’t take it, those that have it another way, and what to do when it can’t be added', async () => {
   const box = await sandbox();
   try {
     await put(box, 'claude-cli', { 'SKILL.md': 'Just text.\n' });
@@ -1525,7 +1525,7 @@ test('A found row says “every tool” only when it is true: the tools it will 
     await put(box, 'claude-cli');
     await symlink('SKILL.md', join(folderOf(box, 'claude-cli'), 'alias'));
     const linked = await seen(box);
-    assert.equal(say.placeTag(linked.row, linked.item, tools)?.text, 'can’t be taken in');
+    assert.equal(say.placeTag(linked.row, linked.item, tools)?.text, 'can’t be added');
     assert.match(linked.fact!.unseen?.['claude-cli'] ?? '', /Replace the link with the file it leads to, then Refresh\.$/);
   } finally { await box.cleanup(); }
 });

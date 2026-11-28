@@ -1,4 +1,4 @@
-// Library Used cell words by Sort (matrix.ts usedCellWords), reload step rendering (reloadLines, reloadChips), row-hiding rules (matrix.ts tableOf), tool-tab single mark, Mark key disclosure, section jump and docked description priority.
+// Library Used cell words by Sort (matrix.ts usedCellWords), reload step rendering (reloadLines, reloadChips), row-hiding rules (matrix.ts tableOf), tool-tab single mark, What the marks mean disclosure, section jump and docked description priority.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { dayWords, DAY_MS } from '../src/model.ts';
@@ -20,7 +20,7 @@ const { dispatch } = installDom({
 await import('../src/settingspage.ts');
 const { oweHomeRead, readHomeOnce, setRenderer, state, unpin } = await import('../src/app.ts');
 const { runAfterLayout } = await import('../src/dom.ts');
-const { headerNotices, itemsTable, libraryTable, listResult, noticeKindsShown, openKind, reloadChips, reloadLines, rowByKey, skillsBrowser, unshownReloadRows, usedCellWords } = await import('../src/matrix.ts');
+const { backFromFiles, headerNotices, itemsTable, libraryTable, listResult, noticeKindsShown, openFiles, openKind, reloadChips, reloadLines, rowByKey, skillsBrowser, unshownReloadRows, usedCellWords } = await import('../src/matrix.ts');
 const { pluginsResult, runBand } = await import('../src/pluginspage.ts');
 const { market } = await import('../src/pluginstate.ts');
 const app = state;
@@ -307,9 +307,23 @@ test('tool tab places What the marks mean by the toolbar with one entry per visu
   const body = findById(openTree, 'mark-legend-body');
   assert.ok(body, 'opening What the marks mean draws #mark-legend-body below the toolbar');
   const legendItems = findAll(body, el => el.className.split(/\s+/).includes('legend-item')).map(el => textOf(el));
-  assert.deepEqual(legendItems, ['On there / Has the current version / Has it', 'No copy', 'Off: Central Knot keeps it']);
+  assert.deepEqual(legendItems, ['Has a copy', 'No copy', 'Off: Central Knot keeps it']);
+  // Tool tab preserves open key across Files -> Back and across a home change in forgetOtherHomes (matching next).
+  const prevPage = app.page, prevHarness = app.harness, prevTab = app.harnessTab, prevHome = app.home;
+  app.page = 'harnesses';
+  app.harness = 'claude-cli';
+  app.harnessTab = 'skills';
+  openFiles('alpha');
+  backFromFiles();
+  assert.ok(findById(itemsTable('skills', 'claude-cli') as unknown as FakeNode, 'mark-legend-body'), 'tool tab keeps What the marks mean open after Files -> Back');
+  app.home = { ...prevHome!, home: '/tool-tab-other-home' };
+  assert.ok(findById(itemsTable('skills', 'claude-cli') as unknown as FakeNode, 'mark-legend-body'), 'tool tab keeps What the marks mean open across forgetOtherHomes');
+  app.home = prevHome;
+  app.page = prevPage;
+  app.harness = prevHarness;
+  app.harnessTab = prevTab;
   // Close again to leave view clean for later tests.
-  const openFold = findById(openTree, 'mark-legend') as unknown as { ontoggle: (e: { currentTarget: { open: boolean } }) => void };
+  const openFold = findById(itemsTable('skills', 'claude-cli') as unknown as FakeNode, 'mark-legend') as unknown as { ontoggle: (e: { currentTarget: { open: boolean } }) => void };
   openFold.ontoggle({ currentTarget: { open: false } });
 
   // Opening a row on the tool tab still lists all 5 tools in order, Claude Code first.
@@ -344,7 +358,7 @@ test('tool tab section jump lists all drawn section names without counts, sets d
   assert.equal(findAll(singleTree, el => el.className.split(/\s+/).includes('section-jump')).length, 0);
 });
 
-test('Library and its Files view keep all tool marks, open legend, and no section jump', () => {
+test('Library and its Files view keep all tool marks, pin grouped What the marks mean outside the scroll area (forgotten on way in), and have no section jump', () => {
   installFiveToolFixture();
   openKind('skills');
   const libTree = libraryTable() as unknown as FakeNode;
@@ -352,8 +366,46 @@ test('Library and its Files view keep all tool marks, open legend, and no sectio
   const libPlugin = findAll(libTree, el => el.className.split(/\s+/).includes('ov-plugin-row'))[0]!;
   assert.equal(findAll(libAlpha, el => el.className.split(/\s+/).includes('tool-mark')).length, 5);
   assert.equal(findAll(libPlugin, el => el.className.split(/\s+/).includes('tool-mark')).length, 5);
-  assert.equal(findById(libTree, 'mark-legend'), undefined);
-  assert.ok(findAll(libTree, el => el.className.split(/\s+/).includes('legend-item')).map(el => textOf(el)).includes('Has it another way, not from Central Knot'));
+  const scroller = findAll(libTree, el => el.className.split(/\s+/).includes('matrix'))[0]!;
+  const foot = findAll(libTree, el => el.className.split(/\s+/).includes('legend-foot'))[0];
+  const toolbar = findAll(libTree, el => el.className.split(/\s+/).includes('toolbar'))[0]!;
+  assert.equal(findById(toolbar, 'mark-legend'), undefined, 'Library does not place What the marks mean in the toolbar');
+  assert.equal(findAll(scroller, el => el.className.split(/\s+/).includes('legend-foot')).length, 0, 'Library pins .legend-foot outside .scroll.matrix');
+  const legendFold = findById(foot, 'mark-legend');
+  assert.ok(legendFold && legendFold.tag === 'details', 'Library places What the marks mean in .legend-foot');
+  assert.equal('open' in legendFold.attrs, false, 'Library What the marks mean starts closed');
+  const toggleEl = findById(legendFold, 'mark-legend-toggle')!;
+  assert.equal(textOf(toggleEl), 'What the marks mean');
+  assert.equal(toggleEl.attrs['aria-controls'], 'mark-legend-body');
+  assert.equal(findById(libTree, 'mark-legend-body'), undefined, 'Library legend body stays absent while closed');
+  assert.equal(findAll(libTree, el => el.className.split(/\s+/).includes('legend-item')).length, 0);
+
+  const openLibraryLegend = () => {
+    const foldEl = findById(libraryTable() as unknown as FakeNode, 'mark-legend') as unknown as { ontoggle: (e: { currentTarget: { open: boolean } }) => void };
+    foldEl.ontoggle({ currentTarget: { open: true } });
+    return libraryTable() as unknown as FakeNode;
+  };
+  const openTree = openLibraryLegend();
+  const openFoot = findAll(openTree, el => el.className.split(/\s+/).includes('legend-foot'))[0]!;
+  const body = findById(openFoot, 'mark-legend-body')!;
+  const openFold = findById(openFoot, 'mark-legend')!;
+  assert.ok(body, 'opening Library What the marks mean draws #mark-legend-body in .legend-foot');
+  assert.ok(openFoot.children.indexOf(body) < openFoot.children.indexOf(openFold), 'opened Library key renders above its toggle');
+  const items = findAll(body, el => el.className.split(/\s+/).includes('legend-item')).map(el => textOf(el));
+  assert.deepEqual(items, ['Has a copy', 'No copy', 'Kept out', 'Off: Central Knot keeps it', 'Has it another way, not from Central Knot']);
+
+  // openKind, another home, and another segment forget the open key (re-entry visit is checked in e2e harnessFlow).
+  openKind('skills');
+  assert.equal(findById(libraryTable() as unknown as FakeNode, 'mark-legend-body'), undefined, 'openKind forgets open key');
+  openLibraryLegend();
+  const savedHome = app.home;
+  app.home = { ...savedHome!, home: '/library-other-home' };
+  assert.equal(findById(libraryTable() as unknown as FakeNode, 'mark-legend-body'), undefined, 'another home forgets open key');
+  app.home = savedHome;
+  openLibraryLegend();
+  app.libraryKind = 'all';
+  assert.equal(findById(libraryTable() as unknown as FakeNode, 'mark-legend-body'), undefined, 'another segment forgets open key');
+  openKind('skills');
   assert.equal(findAll(libTree, el => el.className.split(/\s+/).includes('section-jump')).length, 0);
 
   const filesTree = skillsBrowser(() => ({ where: [], contents: [] }), () => {}) as unknown as FakeNode;
