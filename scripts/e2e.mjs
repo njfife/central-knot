@@ -12436,13 +12436,14 @@ const probe = net.connect(port, '127.0.0.1').once('connect', () => { probe.destr
   /** A cell as drawn: its words (a mark aside), then each of its buttons' labels and the line under it. */
   const cell = async (tool, name) => a.run(`(cell => [[...cell.querySelector('.signin-words').childNodes].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''),
     ...[...cell.querySelectorAll('.btn')].filter(button => !button.closest('.info-wrap')).map(button => button.textContent), cell.querySelector('.signin-command')?.textContent ?? null])(document.querySelector(${JSON.stringify(await id('cell', tool, name))}))`);
+  const checkColumn = async tool => {
+    await a.click(`#signin-check-${tool}`);
+    await until(async () => !(await a.run(`document.querySelector('.signin-head[data-tool="${tool}"]').innerText`)).includes('Checking…'), `${tool}’s check`);
+  };
   const opening = async () => {
     await a.click('#home-actual');
     await a.click('#nav-mcpsignin');
-    for (const tool of ['pi-cli', 'opencode-cli']) {
-      await a.click(`#signin-check-${tool}`);
-      await until(async () => !(await a.run(`document.querySelector('.signin-head[data-tool="${tool}"]').innerText`)).includes('Checking…'), `${tool}’s check`);
-    }
+    for (const tool of ['pi-cli', 'opencode-cli']) await checkColumn(tool);
   };
   await opening();
   if (process.platform !== 'linux') {
@@ -12553,6 +12554,8 @@ const probe = net.connect(port, '127.0.0.1').once('connect', () => { probe.destr
   await press('opencode-cli', 'moved', 'accept');
   await until(async () => (await words('opencode-cli', 'moved')).startsWith('Signed in'), 'OpenCode signed in on its own port');
   same('a server with its own callback port signs in while 19876 is held, on its own port', [readNow(at('opencode.port')), await leftOf('opencode')], [String(moved), []]);
+  // Checked again (its stand-in still says it needs a sign-in), so the cell offers Sign in again.
+  await checkColumn('opencode-cli');
   const movedOwner = await holdOn(moved);
   await press('opencode-cli', 'moved', 'wait');
   await until(async () => (await words('opencode-cli', 'moved')) === `Port ${moved} is in use`, 'its own port in use');
