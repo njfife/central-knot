@@ -345,8 +345,11 @@ function rowsOf(kind: PageKind): ItemRow[] {
 }
 /** A kind's row by its key, as the home on screen has it now: what a result reads of each row it changed (app.ts runOutcome, stillRead). */
 export const rowByKey = (kind: PageKind, key: string) => rowsOf(kind).find(row => row.key === key);
-/** A kind's row by its key, a plugin's own row too (pluginrows.ts PluginRow key), as the Library lists it: showRow's, and the Overview's most used (overview.ts). */
-export const rowOf = (kind: PageKind, key: string): ItemRow | PluginRow | undefined => rowByKey(kind, key) ?? (state.home ? pageRows(state.home, kind).rows.find(row => row.key === key) : undefined);
+/** A kind's row drawn on the Library, own or standalone plugin row (showRow reveals only rows the Library draws, never folded plugin rows). */
+const libraryRowOf = (kind: PageKind, key: string): ItemRow | PluginRow | undefined => rowByKey(kind, key) ?? (state.home ? pageRows(state.home, kind).rows.find(row => row.key === key) : undefined);
+/** File target lookup for filepanel.ts alone: libraryRowOf plus plugin skills folded onto an own row (not drawn on the Library, so Library code uses libraryRowOf or rowByKey). */
+export const rowOf = (kind: PageKind, key: string): ItemRow | PluginRow | undefined => libraryRowOf(kind, key)
+  ?? (state.home ? [...pageRows(state.home, kind).folded.values()].flat().find(row => row.key === key) : undefined);
 /**
  * A table (useLibrary, useTab): the kinds it lists (the Library's segment's; a tab's one) and the harness whose page it is on
  * (`tool`, none on the Library: its column comes first, and the rows it has before the others), as its caller names them; its
@@ -495,14 +498,14 @@ export function showRow(which: PageKind, key: string) {
   if (segment() !== 'all' && segment() !== which) state.libraryKind = 'all';
   if (state.page !== 'library') showPage('library');
   if (state.libraryView === 'files') leaveFiles();
-  const t = useLibrary(), row = rowOf(which, key);
+  const t = useLibrary(), row = libraryRowOf(which, key);
   if (row) { reveal(t, row); return; }
   // A link from a plugin's page may arrive before its owed home read lands (pluginstate.ts oweHomeRead): await it, then reveal.
   if (!homeReadOwed()) return;
   const visit = state.visit, home = state.home?.home, opened = t.view.comparing;
   void readHomeOnce().then(() => {
     if (state.page !== 'library' || state.libraryView === 'files' || state.visit !== visit || state.home?.home !== home || (segment() !== 'all' && segment() !== which) || (views.library.comparing && views.library.comparing !== opened)) return;
-    const now = useLibrary(), found = rowOf(which, key);
+    const now = useLibrary(), found = libraryRowOf(which, key);
     if (found) reveal(now, found);
   });
 }
