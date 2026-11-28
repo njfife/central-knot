@@ -140,7 +140,7 @@ test('Rows Central Knot holds and plugin skills get a file mark after the name; 
   // Rename's Escape claims the event so an open file stays open.
   profileState.renaming = 'work';
   draw();
-  const renameEsc = { key: 'Escape', defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+  const renameEsc = { key: 'Escape', target: { value: 'Work' }, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
   (findById(rendered, 'profile-name') as FakeNode & { onkeydown?: (e: unknown) => void }).onkeydown?.(renameEsc);
   assert.deepEqual([renameEsc.defaultPrevented, has('plugin:skill:alpha@team/triage', 'details-file-only')], [true, true]);
   // Switching profiles closes the previous profile's open panel.
