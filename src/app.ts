@@ -693,7 +693,7 @@ export const applyClick = (click: Click | (() => Promise<Click | Outcome>)) => b
   const resolved = typeof click === 'function' ? await click() : click;
   if ('changes' in resolved) {
     const done = await carryOut(resolved, page);
-    // Turning an item on/off from Library sources updates its In Central Knot, Off/On lines.
+    // Turning an item on/off from the Sources page updates its In Central Knot, Off/On lines.
     if (state.page === 'sources') await loadSources();
     sayDone(done, resolved);
   } else tell({ ...resolved, page });
@@ -742,7 +742,7 @@ export const applyByKind = (clicks: Click[] | (() => Promise<ByKindBatch | Outco
   const { clicks: list, reasons: extraReasons = extra, tail: endTail = tail } = batch;
   const several = new Set(list.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
   for (const click of list) parts.push({ click, done: await carryOut(click, page) });
-  // Turning several items on from Library sources updates their In Central Knot, Off/On lines.
+  // Turning several items on from the Sources page updates their In Central Knot, Off/On lines.
   if (state.page === 'sources') await loadSources();
   const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
   const stops = saidByKind(parts.flatMap(part => (part.done.refused ? [[part.click.kind, part.done.refused] as [PageKind, string]] : [])), several);
@@ -940,7 +940,7 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   }
   setHome(await api().refresh());
   await refreshPlugins(true);
-  // Undoing a Turn on from Library sources restores its In Central Knot, Off lines.
+  // Undoing a Turn on from the Sources page restores its In Central Knot, Off lines.
   if (state.page === 'sources') await loadSources();
   // Settled: managed, readable, and matching what the library now wants (not held or owed a write/removal; nothing applied if deleted).
   const settledIn = (kind: PageKind, key: string, tool: HarnessId) => {
