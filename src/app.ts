@@ -23,7 +23,7 @@ import type { Reason, ApplyResult, Profile, ProfileEdit, ProfileSwitchResult, Ba
 import { anyOn, kindSource, noPins, pinsOn, rowId, sameRow, type NamedRow, type Pinned, type RowKey } from './itemrow.ts';
 import { itemKey, wantedIn } from './library.ts';
 import { caughtUpNames, groupBy, noticeNames, plural, withSetAside } from './model.ts';
-import { button, h } from './dom.ts';
+import { button, h, scrollIntoBox } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { pageOfPart } from './pluginstatus.ts';
@@ -1628,7 +1628,7 @@ function focusEditor(id: string, headId: string, caret?: number) {
     box.setSelectionRange(caret!, caret!);
   }
   const shows = (element: Element) => { const edges = element.getBoundingClientRect(); return edges.top >= page.top - 1 && edges.bottom <= page.bottom + 1; };
-  if (!shows(head) || !shows(target)) head.scrollIntoView({ block: 'start' });
+  if (!shows(head) || !shows(target)) scrollIntoBox(head);
   if (box) box.scrollTop = lineEnd > box.clientHeight ? lineEnd - box.clientHeight / 2 : 0;
 }
 
@@ -1687,7 +1687,10 @@ function askAboutBaseDraft(): boolean {
   const base = state.baseEdit;
   if (!base || !baseDraftTyped()) return false;
   base.confirmDiscard = true;
-  rerender(); document.getElementById(base.stage === 'review' ? 'base-review-keep' : 'base-keep')?.focus(); return true;
+  rerender();
+  scrollIntoBox(document.getElementById('base-head'), 'nearest');
+  document.getElementById(base.stage === 'review' ? 'base-review-keep' : 'base-keep')?.focus({ preventScroll: true });
+  return true;
 }
 
 /** This home only shows its files: saving is off (writeAccess refuses it: preview only, or held by another build). */
@@ -1774,8 +1777,8 @@ export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (wri
     return;
   }
   state.baseEdit = undefined;
-  // Back to the card's rows, which now show each file's state; focus goes to the result's Undo.
-  document.getElementById('instructions-scroll')?.scrollTo({ top: 0 });
+  // Back to the base card's rows, which now show each file's state; focus goes to the result's Undo.
+  scrollIntoBox(document.getElementById('base-card'));
   const written = result.written.map(entry => entry.tool);
   const sessions = written.length ? ` Start a new ${written.length === 1 ? `${toolList(written)} session` : 'session in each'} for this to take effect.` : '';
   const created = result.written.filter(entry => entry.before === null).map(entry => entry.tool);
@@ -1895,7 +1898,7 @@ export const startDraft = () => {
       announce(`${namedTools[tool]} wrote a draft. Review it, then save to update the files.`, true);
     } finally { state.drafting = undefined; }
     // Focus is on Save, at the foot of the review; the page shows the draft from its top, where reading it starts.
-  }).then(() => { if (state.baseEdit?.source?.kind === 'draft') document.getElementById('base-card')?.scrollIntoView({ block: 'start' }); });
+  }).then(() => { if (state.baseEdit?.source?.kind === 'draft') scrollIntoBox(document.getElementById('base-card')); });
 };
 
 /** Stops the draft being written; its request then answers that it was cancelled. */

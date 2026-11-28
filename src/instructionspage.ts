@@ -1,18 +1,18 @@
 // Instructions: each tool's own instruction file, a plain editor (opened by a click on the text or by Edit), a diff before
 // saving and earlier versions (INS-01, INS-02), and the other files the tool reads with it, shown only (otherFiles); the page
-// puts the Base instructions card (basecard.ts) first, then the tools' cards under a heading (one a row, two on a wide page:
-// style.css .ins-tool-cards), and keeps what explains the files (who reads each, the tools' own notes) in one info box at the
-// top. On each tool's card, after those files, the hooks and extensions that can add text to its sessions
+// leads with the tools' cards (one a row, two from 1,000 inner px: style.css .ins-tool-cards), then the Base instructions card
+// (basecard.ts), and keeps what explains the files (who reads each, the tools' own notes) in one info box at the top beside a
+// jump to Base instructions. On each tool's card, after those files, the hooks and extensions that can add text to its sessions
 // (sessionStripView, from sessionhooks.ts), and under them a plugin run made from them while they show its plugin, else above
 // the cards (runStrip; the run's own place: pluginstate.ts pluginsResultPlace). A tool's card has its actions in its head at
 // every stage, so a long text never hides them (the base card's, too, except while its Draft panel is open: basecard.ts).
 // There is no turn-off switch: instruction files are edited, never disabled or emptied by Central Knot (the one deletion is
 // an Undo of a base save removing a file that save created, while unchanged).
 import { acting, announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
-import { baseCard, baseStrip } from './basecard.ts';
+import { baseCard, baseStrip, baseWaiting } from './basecard.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
 import { fileName, lineCount, toolNames } from './words.ts';
-import { button, h, icon, infoMark, lockAttrs, pathText, rereadBand } from './dom.ts';
+import { button, h, icon, infoMark, lockAttrs, pathText, rereadBand, scrollIntoBox } from './dom.ts';
 import { noToolsState } from './pages.ts';
 import { brandMark, openPlugin, outcomeBand } from './matrix.ts';
 import { inlineMarkdown } from './markdown.ts';
@@ -183,9 +183,10 @@ function partView(tool: HarnessId, part: InstructionPart): HTMLElement {
   const press = (pressId: string) => button({ variant: 'link', size: 'micro', label: open ? 'Hide' : 'Show', id: pressId, attrs: { 'aria-expanded': String(open) }, onclick: toggle });
   const shown = 'text' in part ? (part.text ? plural(lineCount(part.text), 'line') : 'empty') : 'notShown' in part ? part.notShown : part.problem;
   const says = [part.from, part.only && `for ${part.only}`, part.ownedBy && `${toolNames[part.ownedBy]}’s own file: edited on its card`, shown];
+  const saysText = says.filter(Boolean).join(' · ');
   const view = h('div.ins-part', { 'data-path': part.path },
     h('div.ins-part-line', {}, pathText(shownPath(part.path), part.path),
-      h(`span.ins-part-says${'problem' in part ? '.tone-warning' : ''}`, {}, 'problem' in part ? icon('triangle-alert', 12) : null, says.filter(Boolean).join(' · ')),
+      h(`span.ins-part-says${'problem' in part ? '.tone-warning' : ''}`, {}, ...('problem' in part ? [icon('triangle-alert', 12), h('span', {}, saysText)] : [saysText])),
       'text' in part ? press(id) : null),
     'text' in part && open ? h('pre.content.mono', { id: `${id}-text`, tabindex: '0', 'aria-label': `${fileName(part.path)} contents` }, part.text.replace(/\n$/, '')) : null,
     'text' in part && open && lineCount(part.text) > LONG_PART ? h('div.ins-part-end', {}, press(`${id}-end`)) : null);
@@ -221,7 +222,7 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
   const escape = editing && state.instructionEdit!.stage === 'edit' ? escapeTo(`ins-cancel-${file.tool}`, `ins-keep-${file.tool}`) : undefined;
   return h('article.card.ins-card', { 'aria-label': `${toolNames[file.tool]} instructions`, onkeydown: escape },
     h('header.ins-head', { id: `ins-head-${file.tool}` },
-      h('div.ins-title', {}, titled ? [brandMark(file.tool, 18), h('h3.tool-title', {}, toolNames[file.tool])] : null, pathText(shownPath(file.path), file.path),
+      h('div.ins-title', {}, titled ? [brandMark(file.tool, 18), h('h2.tool-title', {}, toolNames[file.tool])] : null, pathText(shownPath(file.path), file.path),
         file.exists || editing ? null : h('span.ins-missing', {}, 'No file yet'),
         savedHere(file) ? h('span.ins-saved-group', { 'data-outcome': '' }, h('span.ins-missing.ins-saved', {}, 'Saved'),
           state.outcome!.act ? button({ variant: 'link', size: 'micro', label: 'Undo save', id: state.outcome!.act.id, attrs: { title: 'Put back the text this save replaced' }, onclick: () => state.outcome!.act!.run() }) : null) : null,
@@ -254,7 +255,7 @@ function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
     ? button({ variant: 'link', size: 'micro', label: 'Plugin’s page: turn it off there', id: `session-page-${file.tool}-${at}`, onclick: () => openPlugin({ source: plugin.source, plugin: plugin.plugin, marketplace: plugin.marketName, tool: file.tool }) })
     : settings ? h('span.session-in', {}, 'in ', pathText(shownPath(settings), settings)) : says ? h('span', {}, says) : null);
   const warning = (words: string, path?: string) => h('p.session-warning.tone-warning', {}, icon('triangle-alert', 12), h('span', {}, words, path ? pathText(shownPath(path), path) : null));
-  const warnLine = hasRunnable ? h('p.session-run-warn', {}, HOOK_RUN_WARN) : whyNot ? h('p.session-note', {}, whyNot) : null;
+  const warnLine = hasRunnable ? h('p.session-run-warn', {}, HOOK_RUN_WARN) : whyNot ? h('p.session-note.session-cant-run', {}, whyNot) : null;
   return h('section.session-strip', { id: `session-${file.tool}`, 'aria-label': `${strip.heading}: ${toolNames[file.tool]}` },
     h('div.session-strip-head', mark ? { 'data-info-block': true } : {},
       h('div.session-title-row', {}, h('h4.session-title', {}, strip.heading), mark),
@@ -321,12 +322,21 @@ export function instructionsPage() {
   const items = state.home?.pluginItems ?? [];
   const anyRunnable = files.some(file => stripHasRunnable(sessionStrip(file.tool, items, file)));
   const hookInfo: HookStripPage = { marked: false, anyRunnable };
+  const waiting = baseWaiting(files);
+  const goBase = state.base ? h('button.btn.link.micro.ins-go-base', { id: 'ins-go-base', type: 'button', onclick: () => {
+    const card = document.getElementById('base-card');
+    scrollIntoBox(card);
+    const target = card?.querySelector<HTMLElement>('#base-review-keep:not(:disabled), #base-keep:not(:disabled)')
+      ?? card?.querySelector<HTMLElement>('#base-text:not(:disabled), #base-save:not(:disabled), #base-edit:not(:disabled), #base-write:not(:disabled)')
+      ?? card?.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, [tabindex="0"]')
+      ?? card;
+    target?.focus({ preventScroll: true });
+  } }, waiting ? [h('span.ins-go-label', {}, 'Base instructions'), ' ', h('span.ins-go-wait.base-pill-warn', {}, waiting), ' ', h('span.ins-go-arrow', {}, '↓')] : h('span.ins-go-label', {}, 'Base instructions ↓')) : null;
   return h('div.page', {}, instructionBands(),
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
-      aboutInstructions(files, !!state.base),
-      baseCard(files),
-      h('div.ins-section-head', {}, h('h2.ins-section-title', {}, 'Each tool’s own instructions')),
-      h('div.ins-tool-cards', {}, files.map(file => instructionCard(file, { hookInfo })))));
+      h('div.ins-about-line', {}, aboutInstructions(files, !!state.base), goBase),
+      h('div.ins-tool-cards', {}, files.map(file => instructionCard(file, { hookInfo }))),
+      baseCard(files)));
 }
 
 /** Shown while the files are not here yet: their read is under way, or it failed (Refresh reads again). */

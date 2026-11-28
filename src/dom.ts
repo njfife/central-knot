@@ -95,6 +95,19 @@ export const pathText = (text: string, full = text): HTMLElement => {
 /** A disabled control's reason, as its tooltip and its accessible description. */
 export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria-description': why } : undefined);
 
+/** Scrolls only the enclosing `.scroll` area (never `body`/`html`) so `element` lands at its top, centre, or nearest edge. */
+export function scrollIntoBox(element: Element | null | undefined, block: 'start' | 'center' | 'nearest' = 'start', pad = 12): void {
+  const box = element?.closest('.scroll');
+  if (!element || !box) return;
+  const rect = element.getBoundingClientRect();
+  const view = box.getBoundingClientRect();
+  if (block === 'center') box.scrollTop += rect.top + rect.height / 2 - (view.top + view.height / 2);
+  else if (block === 'nearest') {
+    if (rect.top < view.top) box.scrollTop += rect.top - view.top - pad;
+    else if (rect.bottom > view.bottom) box.scrollTop += rect.bottom - view.bottom + pad;
+  } else box.scrollTop += rect.top - view.top - pad;
+}
+
 /** The character offset in `text`'s whole text of the place (node, offset) inside it. */
 const offsetOf = (text: Element, node: Node, offset: number) => {
   const before = document.createRange();
