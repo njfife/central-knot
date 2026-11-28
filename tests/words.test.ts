@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { capitalToolsPhrase, fewNames, pageNames, profileLeftUse, toolsPhrase, touchedTools } from '../src/words.ts';
+import { capitalToolsPhrase, changedCard, changedName, fewNames, pageNames, profileBack, profileLeftUse, profileStops, toolsPhrase, touchedTools } from '../src/words.ts';
 
 test('A page named otherwise on screen is spelled once, in words.ts pageNames: every other sentence, link and button reads it from there', () => {
   const src = new URL('../src/', import.meta.url);
@@ -36,6 +36,26 @@ test('the same phrase can start a label: "All 3 tools", or the names as they are
 test('many names in a sentence: four in full, then the first three and how many more', () => {
   const names = (count: number) => Array.from({ length: count }, (_, index) => `item${index + 1}`);
   assert.deepEqual([fewNames(names(4)), fewNames(names(40))], ['item1, item2, item3 and item4', 'item1, item2, item3 and 37 more']);
+});
+
+test('before an act that would end the profile in use, its words are those said after it: Everyday · changed where it is the one last switched to', () => {
+  const ending = { names: ['Everyday'], may: false, changed: 'Everyday' };
+  assert.deepEqual([changedName('Everyday'), changedCard('Everyday', true)], ['Everyday · changed',
+    'What is on differs from Everyday, the profile you last switched to. Everyday itself is as you saved it; switching to it again sets what Central Knot manages as it says.'],
+    'after it: the name, and what it means behind its (?)');
+  assert.equal(changedCard('Everyday', false), 'What is on differs from Everyday, the profile you last switched to. Everyday itself is as you saved it.',
+    'where it can’t be switched to now (nothing in it), no promise of a switch');
+  assert.deepEqual([profileStops(ending), profileStops(ending, true), profileBack(ending)],
+    ['the status bar will say Everyday · changed', 'would show Everyday · changed', 'Everyday stays saved: Undo, or switching to it again, puts it back in use.']);
+  assert.deepEqual([profileStops({ ...ending, may: true }), profileStops({ ...ending, may: true }, true)], ['the status bar may say Everyday · changed', 'might show Everyday · changed'],
+    'while other clicks still wait');
+  // Focus came into use without a switch, Everyday was switched to last: the click ends Focus, after it Everyday is named changed,
+  // and Undo puts Focus back in use, which the hover says.
+  assert.equal(profileBack({ names: ['Focus'], may: false, changed: 'Everyday' }), 'Undo puts Focus back in use.');
+  // With none last switched to, as before: the sentence after it is profileLeftUse's.
+  const before = { names: ['Everyday', 'Focus'], may: false };
+  assert.deepEqual([profileStops(before), profileStops(before, true), profileBack(before)],
+    ['Everyday and Focus stay saved but stop being the profiles in use', 'would leave Everyday and Focus', 'Undo, or switching to one of them again, puts it back in use.']);
 });
 
 test('a profile leaving use: singular and plural', () => {
