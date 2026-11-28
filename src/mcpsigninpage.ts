@@ -1,20 +1,21 @@
 // The MCP sign-in page (MAP.md, "MCP sign-in"): a row per MCP server some managed tool has, a column per such tool, each cell what
 // that tool's own command said of the server at its column's last Check. Nothing runs when the page opens: Check runs one tool's
 // command (main.ts mcp-signin:check → mcpsigninrun.ts checkSignin), Check all runs the columns one after another, one check at a
-// time, beside it the line saying what a check does on this computer; a cell that needs a sign-in offers that tool's own command
-// to copy, or, where its cell offers that tool's sign-in (mcpsignin.ts offersSignin), Sign in (signIn), with Stop while it waits;
+// time, beside it how many cells need a sign-in now (mcpsignin.ts signinsNeeded) and the line saying what a check does on this
+// computer; a cell that needs a sign-in offers that tool's own command to copy, or, where its cell offers that tool's sign-in
+// (mcpsignin.ts offersSignin), Sign in (signIn), with Stop while it waits;
 // nothing else is started. What each check and sign-in said lives in app.ts state.mcpSignin for the home it was made in, until
 // Central Knot quits; nothing is stored. The rows keep the places they had when he came to the page (inPlace). The rows, which cells a check holds for, the
-// cells' words, a session-only head, the line, the cards and the commands are mcpsignin.ts's; the controls', `MCP server`,
-// Local, `In the plugin …`, the marks' labels, a check's refusal and the empty state are this file's.
+// cells' words, the count, a column's own time, a session-only head, the line, the cards and the commands are mcpsignin.ts's; the
+// controls', `MCP server`, Local, `In the plugin …`, the marks' labels, a check's refusal and the empty state are this file's.
 import { pinnedRows, rerender, state } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, emptyState, h, infoMark } from './dom.ts';
 import { pin } from './itemrow.ts';
 import { askedNow, cannotRun, cellNow, checkLine, connectedCard, grouped, IN_SESSION, listCommand, LOCAL_CARD, offersSignin, ownTime, SAID,
-  SESSION_CARD, signinRows, signinStarted, signinWaits, type CellSays, type SigninRow } from './mcpsignin.ts';
+  SESSION_CARD, signinRows, signinsNeeded, signinStarted, signinWaits, type CellSays, type SigninRow } from './mcpsignin.ts';
 import { pagePlatform } from './machine.ts';
-import { clockTime } from './model.ts';
+import { timeOrDate } from './model.ts';
 import { copyButton, noToolsState, notRead } from './pages.ts';
 import { toolNames } from './words.ts';
 import type { HarnessId, HomeView } from './types.ts';
@@ -95,7 +96,7 @@ type Mark = ReturnType<typeof marksOnce>;
 function columnHead(tool: HarnessId, mark: Mark) {
   const own = ownTime(state.mcpSignin, tool);
   const failed = state.mcpSignin.failed?.[tool];
-  const when = state.mcpSignin.checking?.tool === tool ? 'Checking…' : failed ? `Couldn’t run the check: ${failed}` : own ? `Checked ${clockTime(own)}` : '';
+  const when = state.mcpSignin.checking?.tool === tool ? 'Checking…' : failed ? `Couldn’t run the check: ${failed}` : own ? `Checked ${own}` : '';
   return h('th.signin-head', { scope: 'col', 'data-tool': tool },
     h('span.signin-tool', {}, brandMark(tool, 14), toolNames[tool]),
     listCommand[tool] ? h('span.signin-check', {},
@@ -143,12 +144,13 @@ export function mcpSigninPage() {
   if (!rows.length) return h('div.page', {}, emptyState('plug', 'No MCP servers in your tools.', undefined));
   const runs = checked.filter(tool => !cannotRun(state.mcpSignin, home, tool));
   const line = checkLine(rows, runs, home.snapshots.find(snapshot => snapshot.harness === 'opencode-cli')?.probe.version);
-  const all = state.mcpSignin.all;
+  const all = state.mcpSignin.all, needed = signinsNeeded(state.mcpSignin, rows);
   const platform = pagePlatform(navigator.userAgent), offers = Object.fromEntries(tools.map(tool => [tool, offersSignin(tool, home.mode === 'actual' && home.sync.access.allowed, platform)]));
   return h('div.page', {}, h('div.scroll.signin-scroll', { id: 'mcpsignin-scroll' },
     checked.length ? h('div.signin-top', {},
       button({ label: 'Check all', name: 'Check all: run each tool’s own command, one after another', id: 'signin-check-all', disabled: waitsFor(), onclick: () => void checkColumns(checked, true) }),
-      all ? h('span.signin-when', { id: 'signin-checked' }, `Checked ${clockTime(all)}`) : null,
+      all ? h('span.signin-when', { id: 'signin-checked' }, `Checked ${timeOrDate(all)}`) : null,
+      needed ? h('span.signin-need.tone-warning', { id: 'signin-needed' }, needed) : null,
       line ? h('span.signin-line', { id: 'signin-line' }, line) : null) : null,
     h('table.signin-table', {},
       h('thead', {}, h('tr', {}, h('th.signin-name', { scope: 'col' }, 'MCP server'), ...tools.map(tool => columnHead(tool, mark)))),

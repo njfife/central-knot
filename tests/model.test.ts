@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
-import { atMostEvery, caughtUpNames, holdingBuild, oneTurn, plural, timeAgo, timesApart } from '../src/model.ts';
+import { atMostEvery, caughtUpNames, holdingBuild, oneTurn, plural, timeAgo, timeOrDate, timesApart } from '../src/model.ts';
 
 test('plural words read naturally', () => {
   assert.equal(plural(1, 'copy', 'copies'), '1 copy');
@@ -53,6 +53,16 @@ test('How long ago floors minutes and hours at each boundary', () => {
     [30, 59, 60, 90, 59 * 60, 60 * 60, 119 * 60].map(seconds => timeAgo(ago(seconds), now)),
     ['just now', 'just now', '1 min ago', '1 min ago', '59 min ago', '1 h ago', '1 h ago'],
   );
+});
+
+test('A kept time says its clock time on the day it was kept, and its date on any day after', () => {
+  const today = new Date();
+  today.setHours(10, 0, 0, 0);
+  const before = new Date(today);
+  before.setDate(today.getDate() - 1);
+  assert.match(timeOrDate(today.toISOString()), /^\d+:\d\d\D/);
+  assert.equal(timeOrDate(before.toISOString()), before.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+  assert.doesNotMatch(timeOrDate(before.toISOString()), /\d:\d\d/);
 });
 
 test('What holds this build, one install at a time: nothing is written before the first look answers, then the first other build found holds it; none found, or whether one is here can’t be told, holds nothing', () => {

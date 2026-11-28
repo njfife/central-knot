@@ -14,9 +14,9 @@ import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { answerFor, askedNow, cannotRun, cellKey, cellNow, cellSays, checkLine, connectedCard, followView, grouped, lastSaid, ownTime, readAnswer, signInArgs, signInCommand, signinKey, signinRows, signinStarted,
-  offersSignin, type SigninCell, type SigninChecks, type SigninRow, type SigninRun } from '../src/mcpsignin.ts';
+  offersSignin, signinsNeeded, type SigninCell, type SigninChecks, type SigninRow, type SigninRun } from '../src/mcpsignin.ts';
 import { harnessIds } from '../src/harnesses.ts';
-import { clockTime } from '../src/model.ts';
+import { clockTime, timeOrDate } from '../src/model.ts';
 import { checkLimit, checkSignin, signinRefusal, startSignin, stopChecks, stopSignin, type SigninAsk, type SigninNow } from '../src/mcpsigninrun.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, SigninAnswer, SigninEnd } from '../src/types.ts';
 import { standIn } from './standin.ts';
@@ -75,7 +75,7 @@ test('OpenCode’s text is read line by line, its colours left out, a failed ser
 
 test('What a reader could not read is never made into a status: a state it doesn’t know is that server’s unread line', () => {
   const claude = readAnswer('claude-cli', 'Checking MCP server health…\n\nplain: http://127.0.0.1:1/mcp (HTTP) - ⏳ Pending approval\noauth: http://127.0.0.1:2/mcp (HTTP) - ✔ Connected\n', '', ['plain', 'oauth']);
-  assert.deepEqual(['plain', 'oauth'].map(name => cellSays('claude-cli', server(name), claude)), [{ words: 'Couldn’t read Claude Code’s answer', line: 'plain: http://127.0.0.1:1/mcp (HTTP) - ⏳ Pending approval', heed: true }, { words: 'Connected' }]);
+  assert.deepEqual(['plain', 'oauth'].map(name => cellSays('claude-cli', server(name), claude)), [{ words: 'Couldn’t read Claude Code’s answer', line: 'plain: http://127.0.0.1:1/mcp (HTTP) - ⏳ Pending approval', heed: true }, { words: 'Connected', need: false }]);
   const openCode = readAnswer('opencode-cli', '┌  MCP Servers\n│\n●  ○ plain needs client registration\n│      http://127.0.0.1:1/mcp\n│\n└  1 server(s)\n', '', ['plain']);
   assert.deepEqual(cellSays('opencode-cli', server('plain'), openCode), { words: 'Couldn’t read OpenCode’s answer', line: '●  ○ plain needs client registration', heed: true });
   // OpenCode's heading and then an error is no list: the whole answer is unread, its first line kept for every cell.
@@ -111,13 +111,13 @@ test('A cell says what its tool’s answer says of it, and only that: not checke
   // A name that is also a member every object has is a server like any other.
   assert.equal(cellSays('claude-cli', server('constructor'), answer).words, 'Not reported by Claude Code');
   // Switched off with the tool's own switch: said so, never matched against the answer.
-  assert.deepEqual(cellSays('claude-cli', server('oauth', true), answer), { words: 'Off in Claude Code', tone: 'muted' });
+  assert.deepEqual(cellSays('claude-cli', server('oauth', true), answer), { words: 'Off in Claude Code', tone: 'muted', need: false });
   assert.equal(cellSays('codex-cli', server('plain'), { failed: 'missing' }).words, 'No Codex command line here');
   assert.equal(cellSays('codex-cli', server('plain'), { failed: 'timeout' }).words, 'Didn’t answer in 70 s');
   // Needs sign-in offers the tool's own command; it and every fault above need him (heed), the good answers and Not checked don't.
-  assert.deepEqual(cellSays('claude-cli', server('oauth'), answer), { words: 'Needs sign-in', tone: 'warning', command: 'claude mcp login oauth', heed: true });
+  assert.deepEqual(cellSays('claude-cli', server('oauth'), answer), { words: 'Needs sign-in', tone: 'warning', command: 'claude mcp login oauth', heed: true, need: true });
   assert.deepEqual([cellSays('codex-cli', server('plain'), { failed: 'missing' }).heed, cellSays('claude-cli', server('elsewhere'), answer).heed, cellSays('claude-cli', server('plain'), answer).heed], [true, true, undefined]);
-  assert.deepEqual(cellSays('copilot-cli', server('github', true), undefined), { words: 'Off in Copilot CLI', tone: 'muted' });
+  assert.deepEqual(cellSays('copilot-cli', server('github', true), undefined), { words: 'Off in Copilot CLI', tone: 'muted', need: false });
   // Connected's card names only the columns whose Connected can't tell a sign-in from none needed.
   assert.equal(connectedCard(['codex-cli', 'pi-cli']), 'The server answered. Pi doesn’t say whether it needed a sign-in.');
   assert.equal(connectedCard(['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli']), 'The server answered. Claude Code, Pi and OpenCode don’t say whether it needed a sign-in.');
@@ -159,12 +159,19 @@ test('What a check does is said before it is pressed, each part only where it is
   assert.equal(checkLine([row('notes', 'stdio', ['codex-cli'])], ['codex-cli'], undefined), undefined);
 });
 
-test('A column shows its own time before a whole Check all, and after one only where its minute or day differs', () => {
+test('A column shows its own time before a whole Check all, and after one only where its time or date reads otherwise than the one beside it', () => {
+  /** `back` days ago, at that hour, minute and second of the person's own clock. */
+  const day = (back: number, hours: number, minutes: number, seconds = 0) => { const at = new Date(); at.setDate(at.getDate() - back); at.setHours(hours, minutes, seconds, 0); return at.toISOString(); };
   const at = (iso: string) => ({ at: iso, answer: { servers: {} }, asked: [] });
-  const checks: SigninChecks = { home: '/h', columns: { 'claude-cli': at('2026-11-21T10:00:05Z'), 'pi-cli': at('2026-11-21T10:00:50Z'), 'codex-cli': at('2026-11-21T10:02:00Z'), 'opencode-cli': at('2026-11-22T10:00:10Z') } };
-  assert.equal(ownTime(checks, 'claude-cli'), '2026-11-21T10:00:05Z');
-  checks.all = '2026-11-21T10:00:59Z';
-  assert.deepEqual((['claude-cli', 'pi-cli', 'codex-cli', 'opencode-cli', 'copilot-cli'] as HarnessId[]).map(tool => ownTime(checks, tool)), [undefined, undefined, '2026-11-21T10:02:00Z', '2026-11-22T10:00:10Z', undefined]);
+  const checks: SigninChecks = { home: '/h', columns: { 'claude-cli': at(day(0, 10, 0, 5)), 'pi-cli': at(day(0, 10, 0, 50)), 'codex-cli': at(day(0, 10, 2)), 'opencode-cli': at(day(1, 10, 0, 10)) } };
+  assert.equal(ownTime(checks, 'claude-cli'), clockTime(day(0, 10, 0, 5)));
+  // Check all ended today at 10:00: a column of that minute says nothing of its own; one of another minute its time; yesterday's its date.
+  checks.all = day(0, 10, 0, 59);
+  assert.deepEqual((['claude-cli', 'pi-cli', 'codex-cli', 'opencode-cli', 'copilot-cli'] as HarnessId[]).map(tool => ownTime(checks, tool)),
+    [undefined, undefined, clockTime(day(0, 10, 2)), new Date(day(1, 10, 0, 10)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), undefined]);
+  // Check all ended yesterday: a column checked that day reads the same date, said once beside Check all.
+  checks.all = day(1, 22, 0);
+  assert.deepEqual((['claude-cli', 'opencode-cli'] as HarnessId[]).map(tool => ownTime(checks, tool)), [clockTime(day(0, 10, 0, 5)), undefined]);
 });
 
 test('The rows that need him come first, each group in the order given: a sign-in to make, or a check that went wrong', () => {
@@ -214,8 +221,8 @@ test('Where Codex says a sign-in is needed its cell offers Sign in, on this comp
   assert.deepEqual([offersSignin('codex-cli', true, 'linux'), offersSignin('codex-cli', true, 'darwin'), offersSignin('codex-cli', true, 'win32'), offersSignin('codex-cli', false, 'linux'),
     offersSignin('pi-cli', true, 'linux'), offersSignin('claude-cli', true, 'linux')], [true, true, false, false, false, false]);
   const oauth = server('oauth'), checks = needing([oauth]);
-  assert.deepEqual(cellNow(checks, 'codex-cli', oauth, true), { words: 'Needs sign-in', tone: 'warning', act: { label: 'Sign in', runs: 'codex mcp login -- oauth' }, heed: true });
-  assert.deepEqual(cellNow(checks, 'codex-cli', oauth, false), { words: 'Needs sign-in', tone: 'warning', command: 'codex mcp login -- oauth', heed: true });
+  assert.deepEqual(cellNow(checks, 'codex-cli', oauth, true), { words: 'Needs sign-in', tone: 'warning', act: { label: 'Sign in', runs: 'codex mcp login -- oauth' }, heed: true, need: true });
+  assert.deepEqual(cellNow(checks, 'codex-cli', oauth, false), { words: 'Needs sign-in', tone: 'warning', command: 'codex mcp login -- oauth', heed: true, need: true });
   // Only a cell that needs a sign-in has one: an answer that needs nothing offers nothing.
   assert.deepEqual(cellNow({ ...checks, columns: {} }, 'codex-cli', oauth, true), { words: 'Not checked', tone: 'muted' });
 });
@@ -223,9 +230,13 @@ test('Where Codex says a sign-in is needed its cell offers Sign in, on this comp
 test('A sign-in’s cell: Stop while it waits, Signed in with its time, and on any other end what happened, in amber, Try again and the command to copy', () => {
   const oauth = server('oauth'), copy = cellKey(oauth, oauth.cells['codex-cli']!), at = '2026-11-27T10:05:00Z';
   const says = (end?: SigninEnd) => cellNow(needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy, ...(end ? { at, end } : {}) }]), 'codex-cli', oauth, true);
-  const again = { tone: 'warning', command: 'codex mcp login -- oauth', act: { label: 'Try again', runs: 'codex mcp login -- oauth' }, heed: true };
-  assert.deepEqual(says(), { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true });
-  assert.deepEqual(says({ signedIn: true }), { words: `Signed in ${clockTime(at)}` });
+  const again = { tone: 'warning', command: 'codex mcp login -- oauth', act: { label: 'Try again', runs: 'codex mcp login -- oauth' }, heed: true, need: true };
+  assert.deepEqual(says(), { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true, need: true });
+  assert.deepEqual(says({ signedIn: true }), { words: `Signed in ${timeOrDate(at)}`, need: false });
+  // Signed in on an earlier day: its date.
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString();
+  assert.equal(cellNow(needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy, at: yesterday, end: { signedIn: true } }]), 'codex-cli', oauth, true).words,
+    `Signed in ${new Date(yesterday).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`);
   // What Codex said last is behind a (?) after the words, not a line under it.
   assert.deepEqual(says({ unfinished: 'Error: the server refused the sign-in' }), { words: 'Sign-in didn’t finish', why: 'Error: the server refused the sign-in', ...again });
   assert.deepEqual(says({ failed: 'timeout' }), { words: 'Not finished in 3 minutes', ...again });
@@ -236,13 +247,13 @@ test('A sign-in’s cell: Stop while it waits, Signed in with its time, and on a
   // its Stop, whatever became of the copy meanwhile.
   const moved = { ...oauth, cells: { 'codex-cli': { name: 'oauth', copy: 'other#2', off: false } } };
   assert.equal(cellNow(needing([moved], [{ tool: 'codex-cli', row: 'oauth', copy, at, end: { signedIn: true } }]), 'codex-cli', moved, true).words, 'Needs sign-in');
-  assert.deepEqual(cellNow(needing([moved], [{ tool: 'codex-cli', row: 'oauth', copy }]), 'codex-cli', moved, true), { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true });
+  assert.deepEqual(cellNow(needing([moved], [{ tool: 'codex-cli', row: 'oauth', copy }]), 'codex-cli', moved, true), { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true, need: true });
   // Codex's copy gone from a row another tool still has, while its sign-in waits: the row's Codex cell keeps its Stop.
   const elsewhere = { ...oauth, cells: { 'claude-cli': { name: 'oauth', off: false } } };
-  assert.deepEqual(cellNow(needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy }]), 'codex-cli', elsewhere, true), { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true });
+  assert.deepEqual(cellNow(needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy }]), 'codex-cli', elsewhere, true), { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true, need: true });
   // A Check of the column begun after it ended says what Codex answers then; one begun before it ended doesn't.
   const checked = (began: string) => ({ ...needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy, at, end: { signedIn: true } }]), columns: { 'codex-cli': { ...needing([oauth]).columns['codex-cli']!, began } } });
-  assert.deepEqual([cellNow(checked('2026-11-27T10:06:00Z'), 'codex-cli', oauth, true).words, cellNow(checked('2026-11-27T10:04:00Z'), 'codex-cli', oauth, true).words], ['Needs sign-in', `Signed in ${clockTime(at)}`]);
+  assert.deepEqual([cellNow(checked('2026-11-27T10:06:00Z'), 'codex-cli', oauth, true).words, cellNow(checked('2026-11-27T10:04:00Z'), 'codex-cli', oauth, true).words], ['Needs sign-in', `Signed in ${timeOrDate(at)}`]);
   // Signed in needs nothing more of him: its row isn't put first; one that didn't finish is.
   const plain = server('plain');
   assert.deepEqual(grouped([plain, oauth], needing([plain, oauth], [{ tool: 'codex-cli', row: 'oauth', copy, at, end: { signedIn: true } }])).map(each => each.name), ['plain', 'oauth']);
@@ -250,6 +261,43 @@ test('A sign-in’s cell: Stop while it waits, Signed in with its time, and on a
   // One that waits stands with the rows that need him too, as one that offers Sign in does.
   assert.deepEqual(grouped([plain, oauth], { home: '/h', columns: {}, signins: kept({ tool: 'codex-cli', row: 'oauth', copy }) }).map(each => each.name), ['oauth', 'plain']);
   assert.deepEqual(grouped([plain, oauth], needing([oauth])).map(each => each.name), ['oauth', 'plain']);
+});
+
+test('Whether a cell needs a sign-in now, for each thing its column can say of it: yes, no, or not known (absent)', () => {
+  const claude = readAnswer('claude-cli', captured('claude-list.stdout'), '', four), codex = readAnswer('codex-cli', captured('codex-list.stdout'), '', four);
+  const unread = readAnswer('claude-cli', 'plain: http://127.0.0.1:1/mcp (HTTP) - ⏳ Pending approval', '', ['plain']);
+  /** What cellNow says of the need of `name`'s cell in `tool`, its column's `answer` holding for it (none: not checked). */
+  const need = (tool: HarnessId, name: string, answer?: SigninAnswer, off = false) => {
+    const each = server(name, off);
+    return cellNow({ home: '/h', columns: answer ? { [tool]: { at: '2026-11-27T10:00:00Z', answer, asked: [cellKey(each, each.cells[tool]!)] } } : {} }, tool, each, false).need;
+  };
+  // Needed: its tool says so.
+  assert.deepEqual([need('claude-cli', 'oauth', claude), need('codex-cli', 'oauth', codex)], [true, true]);
+  // Not needed: the server answered, needs none, is signed in, or is off in that tool.
+  assert.deepEqual([need('claude-cli', 'plain', claude), need('codex-cli', 'plain', codex), need('codex-cli', 'a', readAnswer('codex-cli', JSON.stringify([{ name: 'a', auth_status: 'o_auth' }]), '', ['a'])),
+    need('claude-cli', 'oauth', claude, true)], [false, false, false, false]);
+  // Not known: not checked, a session-only tool, a tool that can't tell, and every fault (not reached, not reported, a line not
+  // read, an answer not read, no answer in time, no command line).
+  assert.deepEqual([need('claude-cli', 'plain'), need('copilot-cli', 'plain'), need('codex-cli', 'down', codex), need('claude-cli', 'down', claude), need('claude-cli', 'elsewhere', claude),
+    need('claude-cli', 'plain', unread), need('claude-cli', 'plain', { unreadable: 'Error' }), need('claude-cli', 'plain', { failed: 'timeout' }), need('claude-cli', 'plain', { failed: 'missing' })], Array(9).fill(undefined));
+});
+
+test('The head counts the sign-ins needed: each cell that needs one, “known” while some cell’s need isn’t; nothing while none does', () => {
+  const tools: HarnessId[] = ['claude-cli', 'codex-cli'], at = '2026-11-27T10:00:00Z';
+  const oauth = row('oauth', 'http', tools), down = row('down', 'http', ['claude-cli']);
+  const asked = (tool: HarnessId, rows: SigninRow[]) => rows.map(each => cellKey(each, each.cells[tool]!));
+  const claude = readAnswer('claude-cli', 'oauth: x - ! Needs authentication\ndown: x - ✘ Failed to connect — refused\n', '', ['oauth', 'down']);
+  const checks: SigninChecks = { home: '/h', columns: { 'claude-cli': { at, answer: claude, asked: asked('claude-cli', [oauth, down]) },
+    'codex-cli': { at, answer: { servers: { oauth: { is: 'needs-sign-in' } } }, asked: asked('codex-cli', [oauth]) } } };
+  // Claude Code and Codex both need oauth signed in; Claude Code couldn't reach down, which isn't counted, and isn't known.
+  assert.equal(signinsNeeded(checks, [down, oauth]), '2 known sign-ins needed');
+  // Codex's sign-in of oauth made: one.
+  checks.signins = kept({ tool: 'codex-cli', row: 'oauth', copy: cellKey(oauth, oauth.cells['codex-cli']!), at: '2026-11-27T10:05:00Z', end: { signedIn: true } });
+  assert.equal(signinsNeeded(checks, [down, oauth]), '1 known sign-in needed');
+  // Every cell's need known: the count alone.
+  assert.equal(signinsNeeded(checks, [oauth]), '1 sign-in needed');
+  // None needed (another home opened: its checks start empty): nothing is said.
+  assert.equal(signinsNeeded({ home: '/h', columns: {} }, [down, oauth]), undefined);
 });
 
 test('What Codex said last is text: its colours and every other control character left out, cut past 200 characters', () => {

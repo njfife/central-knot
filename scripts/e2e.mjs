@@ -11603,8 +11603,9 @@ async function overviewFlow() {
  * meanwhile does nothing; one time beside Check all, a column's own only where it differs; the rows keep their places through a
  * visit's checks, under the pointer too, each Copy its own row's, and on Refresh those that need a sign-in or say a fault come
  * first; what a check said is still there after another page, is not shown for a server changed while it ran, and is not shown
- * on another home; Copy gives the tool's own command with its name for the server; each mark's card says what it stands for. The
- * head row stays in view as the rows scroll. Nothing is cut off at 860×528, 1280×800, the owner's 1316×819, 1728×1117 or
+ * on another home; Copy gives the tool's own command with its name for the server; each mark's card says what it stands for; above
+ * the table, how many cells need a sign-in, which a sign-in made lowers and another home clears, and a check of an earlier day says
+ * its date. The head row stays in view as the rows scroll. Nothing is cut off at 860×528, 1280×800, the owner's 1316×819, 1728×1117 or
  * 2560×1440, the sidebar open and as a rail; with --shots, pictures in light and dark of every state.
  */
 async function mcpSigninFlow() {
@@ -12191,6 +12192,59 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   await a.click('#nav-mcpsignin');
   same('this home opened again starts with nothing checked', [(await column('claude-cli')).plain, await a.all('.signin-when', 'e.innerText.trim()'), await a.exists('#signin-checked')], ['Not checked', ['In a session: /mcp auth <name>', 'Sign in inside a session'], false]);
   same('… and its rows go by name again: the places of the visit before are let go with the home', await order(), opened.rows.map(rowName));
+  // The head gathers what the cells say (mcpsignin.ts signinsNeeded): Claude Code and Codex both say oauth needs a sign-in, and
+  // Claude Code couldn't reach down, a fault, not counted; "known", as other cells' need isn't (not checked, can't tell, session-only).
+  // Another page and back starts nothing. Codex's sign-in of oauth makes it one. A check made "yesterday" (the page's clock set back
+  // a day while it ran) shows its date when the page is drawn again; this home opened again says nothing of it.
+  const needed = () => a.text('#signin-needed');
+  /** The page from its top, at `size`, in `theme` (with --shots). */
+  const headShot = async (name, [width, height], theme) => {
+    if (!shots) return;
+    await sizeTo(a, width, height); await shape(false);
+    await a.run(`document.querySelector('#mcpsignin-scroll').scrollTop = 0`);
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] }); await wait(300);
+    await a.shot(`mcp-signin-known-${name}-${width}-${theme}`);
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); await fullSize(a);
+  };
+  writeFileSync(join(said, 'claude'), outputs.claude.replace('plugin:tracker:issues: http://127.0.0.1:47212/mcp (HTTP) - ! Needs authentication', 'plugin:tracker:issues: http://127.0.0.1:47212/mcp (HTTP) - ✔ Connected'));
+  same('before any check the head counts nothing', await a.exists('#signin-needed'), false);
+  await a.click('#signin-check-claude-cli');
+  await checked('claude-cli');
+  same('Claude Code checked: one known sign-in needed, its server it couldn’t reach not counted', [await needed(), (await column('claude-cli')).down.startsWith('Couldn’t reach')], ['1 known sign-in needed', true]);
+  await a.click('#signin-check-codex-cli');
+  await checked('codex-cli');
+  same('Codex checked too: oauth needs a sign-in in both, two', [await needed(), (await column('claude-cli')).oauth, (await codexCell('oauth'))[0]], ['2 known sign-ins needed', 'Needs sign-in', 'Needs sign-in']);
+  const pageFrom = started().length;
+  await a.click('#nav-library');
+  await a.click('#nav-mcpsignin');
+  await wait(500);
+  same('another page and back: the same two, and opening the page started nothing', [await needed(), started().length - pageFrom, existsSync(marker)], ['2 known sign-ins needed', 0, false]);
+  await headShot('two', SMALLEST, 'light');
+  await headShot('two', [1316, 819], 'dark');
+  writeFileSync(join(said, 'codex.login'), 'accept');
+  await a.click(await act('oauth'));
+  await until(async () => (await codexCell('oauth'))[0].startsWith('Signed in'), 'Codex’s sign-in of oauth');
+  same('one sign-in made: one known sign-in needed, the head and the cell alike', [await needed(), /^Signed in \d{1,2}:\d{2}/.test((await codexCell('oauth'))[0]), (await column('claude-cli')).oauth],
+    ['1 known sign-in needed', true, 'Needs sign-in']);
+  await headShot('one', SMALLEST, 'light');
+  await a.run(`(Real => { window.RealDate = Real; window.Date = class extends Real { constructor(...given) { super(...(given.length ? given : [Real.now() - 86400000])); } static now() { return Real.now() - 86400000; } }; })(Date)`);
+  await a.click('#signin-check-claude-cli');
+  await checked('claude-cli');
+  await a.run(`window.Date = window.RealDate`);
+  const dayFrom = started().length;
+  await a.click('#nav-library');
+  await a.click('#nav-mcpsignin');
+  await wait(500);
+  same('a check made yesterday shows its date, drawn again today; the one made today its time; opening the page started nothing',
+    [(await head('claude-cli')).split('\n').at(-1), /^Checked \d{1,2}:\d{2}/.test((await head('codex-cli')).split('\n').at(-1)), started().length - dayFrom],
+    [`Checked ${await a.run(`new Date(Date.now() - 86400000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })`)}`, true, 0]);
+  await headShot('dated', SMALLEST, 'light');
+  await a.click('#home-actual');
+  await a.click('#nav-mcpsignin');
+  await wait(500);
+  same('this home opened again: no count, and nothing started', [await a.exists('#signin-needed'), started().length - dayFrom], [false, 0]);
+  writeFileSync(join(said, 'claude'), outputs.claude);
+  rmSync(ports);
   // A tool's only local server switched off there (Pi's tickets): it isn't started, so Pi, with only remote servers on, isn't named.
   write('.pi/agent/mcp.json', piFile({ tickets: { command: server, enabled: false } }));
   await a.click('#header-refresh');
