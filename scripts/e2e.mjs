@@ -4470,12 +4470,13 @@ async function practiceFlow() {
   const dirtyAfterJump = await a.run(`(() => { const area = document.querySelector('#base-text'), sc = document.getElementById('instructions-scroll');
     const children = [...sc.children].map(el => el.id || el.className);
     return [children.indexOf('base-card') > children.indexOf('ins-tool-cards'), document.activeElement?.id === 'base-text', area.value.includes('- Not saved.'), area.selectionStart, area.selectionEnd]; })()`);
-  await a.run(`window.dispatchEvent(new Event('focus'))`);
+  await a.run(`(() => { document.querySelector('#base-text').dataset.before = 'the redraw'; for (let times = 0; times < 2; times++) document.querySelector('#sidebar-toggle').click(); })()`);
   await a.settle();
-  const dirtyAfterRedraw = await a.run(`(() => { const area = document.querySelector('#base-text');
-    return [document.activeElement?.id === 'base-text', area.value.includes('- Not saved.'), area.selectionStart, area.selectionEnd]; })()`);
+  const dirtyAfterRedraw = await a.run(`(() => { const area = document.querySelector('#base-text'), sc = document.getElementById('instructions-scroll');
+    const children = [...sc.children].map(el => el.id || el.className);
+    return [area.dataset.before !== 'the redraw', children.indexOf('base-card') > children.indexOf('ins-tool-cards'), document.activeElement?.id === 'base-text', area.value.includes('- Not saved.'), area.selectionStart, area.selectionEnd]; })()`);
   same('dirty base editor stays in place with its unsaved text and caret after the jump and after a redraw',
-    [...dirtyAfterJump, ...dirtyAfterRedraw], [true, true, true, 10, 10, true, true, 10, 10]);
+    [...dirtyAfterJump, ...dirtyAfterRedraw], [true, true, true, 10, 10, true, true, true, true, 10, 10]);
   // The click on a tool's text and its Edit share one lock. Typing doesn't redraw the page: until something else does (a
   // background pass may), the first click meets the base's typed work as Edit does and asks about it; once the page is drawn
   // again, the card is locked and the click says why. Either way nothing opens and the typed work stays. Kept, a click on the
