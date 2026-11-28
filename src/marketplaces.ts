@@ -21,7 +21,7 @@ import { harnessIds } from './harnesses.ts';
 import { errorCode, liftFirst, syncGate, writeDurably, type ShareContext } from './share.ts';
 import type { Listed } from './plugintext.ts';
 import { readRecord as readPartsRecord, type PartsRecord, type PluginNow } from './partsmigrate.ts';
-import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, blocked, cantInstallAgain, copyDiffers, partWords, firstReadWaits, heldReason, inUseIn, keptOff, keptReason, marketTitle, notCarried, recordUnread, stateOf, toolNow, unavailable, uninstallsWhole, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
+import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, blocked, cantInstallAgain, copyDiffers, partWords, firstReadWaits, heldReason, inUseIn, installId, keptOff, keptReason, marketTitle, notCarried, recordUnread, stateOf, toolNow, unavailable, uninstallsWhole, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
 import { readLink } from './sourcelink.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
 import { leftOutSentence, pageNames, toPluginsLabel, toolName } from './words.ts';
@@ -203,9 +203,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     for (const plugin of plugins) {
       const pairs = await Promise.all(tools.map(async tool => {
         const read = held.get(tool) ?? await engine.installState(ctx, tool, catalog.name, plugin.name, plugin.entry);
-        const own: InstallState = read.state === 'installed' && offIn.get(tool)?.has(`${plugin.name}@${catalog.name}`) ? { ...read, off: true } : read;
-        // Claude Code may have this same plugin from the Anthropic Directory instead.
-        return [tool, own.state === 'not-installed' && tool === 'claude-cli' ? (await engine.fromDirectory(ctx, catalog, plugin)) ?? own : own] as const;
+        // Claude Code may have this same plugin from the Anthropic Directory instead; check its Off flag by its real install id.
+        const found = read.state === 'not-installed' && tool === 'claude-cli' ? (await engine.fromDirectory(ctx, catalog, plugin)) ?? read : read;
+        const id = found.state === 'installed' && found.directory ? found.directory : installId(plugin.name, catalog.name);
+        return [tool, found.state === 'installed' && offIn.get(tool)?.has(id) ? { ...found, off: true } : found] as const;
       }));
       states[plugin.name] = Object.fromEntries(pairs);
     }
@@ -809,6 +810,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     // Uninstall's Undo puts it back as it was: the marketplace's copy installed (what the uninstall deleted with it staying deleted:
     // `deleted`), then turned off again where it was off; none where it can't be installed again (cantInstallAgain).
     const reversed = reverse(ran.done), copy = tool ? stateOf(entry, plugin, tool) : undefined, was = copy?.state === 'installed' ? copy : undefined;
+    if (what === 'uninstall' && was?.ownSettings === 'unknown') for (const step of ran.done) if (step.action === 'remove' && step.report.changed) step.deleted = 'unknown';
     const reinstall = reversed.map(op => (was?.ownSettings ? { ...op, deleted: was.ownSettings } : op));
     const offAgain = was?.off ? reversed.map(op => ({ ...op, action: 'plugin-off' as const })) : [];
     const back = what !== 'uninstall' ? reversed : cantInstallAgain(entry, plugin) ? [] : [...reinstall, ...offAgain];

@@ -60,8 +60,39 @@ const api = {
 };
 // The page's modules, loaded under node with no window: the little of the DOM they touch as they load and redraw. An element keeps
 // what is appended to it, so a test can read the words a part draws (textOf).
-const element = (): any => ({ attrs: {} as Record<string, string>, dataset: {}, style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, children: [], content: {}, setAttribute(k: string, v: string) { this.attrs[k] = v; }, addEventListener() {}, replaceChildren(...kids: unknown[]) { this.children = kids; },
-  append(...kids: unknown[]) { this.children.push(...kids); }, appendChild() {}, focus() {}, querySelector: () => element(), after() {} });
+const element = (): any => ({
+  attrs: {} as Record<string, string>, dataset: {}, style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, children: [] as any[], content: {}, parent: null as any,
+  setAttribute(k: string, v: string) { this.attrs[k] = v; }, addEventListener() {},
+  replaceChildren(...kids: unknown[]) { this.children = kids; for (const kid of kids) if (kid && typeof kid === 'object') (kid as any).parent = this; },
+  append(...kids: unknown[]) { for (const kid of kids) { this.children.push(kid); if (kid && typeof kid === 'object') (kid as any).parent = this; } },
+  appendChild() {}, focus() {},
+  querySelector(sel: string) {
+    if (sel.startsWith('.')) {
+      const cls = sel.slice(1);
+      const walk = (node: any): any => {
+        for (const kid of node.children ?? []) {
+          if (kid && typeof kid === 'object') {
+            if (String(kid.className ?? '').split(/\s+/).includes(cls)) return kid;
+            const hit = walk(kid);
+            if (hit) return hit;
+          }
+        }
+        return null;
+      };
+      const hit = walk(this);
+      if (hit) return hit;
+    }
+    return element();
+  },
+  after(...kids: unknown[]) {
+    if (!this.parent) return;
+    const at = this.parent.children.indexOf(this);
+    if (at >= 0) {
+      this.parent.children.splice(at + 1, 0, ...kids);
+      for (const kid of kids) if (kid && typeof kid === 'object') (kid as any).parent = this.parent;
+    }
+  },
+});
 const findById = (node: any, id: string): any => {
   if (!node || typeof node === 'string') return undefined;
   if (node.id === id || node.attrs?.id === id) return node;
@@ -4024,10 +4055,12 @@ test('Consequential uninstall/Undo shows irreversible completion without Undo qu
   await settled();
   const goneResult = pluginsResult();
   assert.ok(findById(goneResult[0], 'plugins-result'), 'irreversible uninstall without Undo draws #plugins-result');
+  assert.match(textOf(findById(goneResult[0], 'plugins-result')), /alpha: uninstalled from Claude Code\. Can’t be undone\./);
   assert.equal(findById(goneResult[0], 'plugins-undo'), undefined, 'no Undo button when back is empty');
   assert.equal(app.said.quiet, true, 'status bar does not duplicate irreversible header result');
+  assert.match(app.said.text, /Can’t be undone\./);
 
-  // 2. Uninstall's Undo with reload advice omits Row 2 reload chips so the sentence can wrap, puts reload lines under Show all, and stays quiet.
+  // 2. Uninstall's Undo with reload advice omits Row 2 reload chips so the sentence can wrap, labels its disclosure Reload step, puts reload lines under it, and stays quiet.
   market.lastRun = {
     done: [], undo: false, home: '/home', place: 'claude-cli',
     turn: { source: '/market', plugin: 'alpha', before: null, back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'install', deleted: true }] },
@@ -4043,27 +4076,54 @@ test('Consequential uninstall/Undo shows irreversible completion without Undo qu
   const foldedUndo = pluginsResult();
   assert.equal(foldedUndo.length, 1, 'consequential Undo defers reload chips off Row 2 so Row 1 can wrap');
   assert.match(textOf(findById(foldedUndo[0], 'plugins-result')), /without its saved options/);
+  assert.equal(findById(foldedUndo[0], 'problems-show-all')?.attrs['data-advice-label'], 'Reload step');
   assert.equal(app.said.quiet, true, 'status bar does not duplicate consequential Undo shown in header');
   app.shownWhole = market.lastRun;
+  app.wholeDrawer = true;
   const wholeUndo = pluginsResult();
-  assert.equal(wholeUndo.length, 2, 'Show all reveals reload lines on Row 2');
+  assert.equal(wholeUndo.length, 2, 'opening Reload step reveals reload lines');
+  assert.equal(textOf(findById(wholeUndo[0], 'problems-show-all')), 'Hide step');
   assert.match(textOf(wholeUndo[1]), /\/reload-plugins/);
   app.shownWhole = undefined;
+  app.wholeDrawer = false;
 
-  // 3. Ordinary install with reload advice still shows reload chips on Row 2.
+  // 3. Ordinary install and Update both keep reload chips on Row 2 (Update is unchanged from before T3).
+  for (const action of ['install', 'update'] as const) {
+    market.lastRun = {
+      done: [{
+        source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action,
+        report: { tool: 'claude-cli', outcome: action === 'update' ? 'updated' : 'installed', changed: true, message: 'Done.', runs: [], reloads: [{ tool: 'claude-cli', kind: 'plugin', on: true }] },
+      }],
+      undo: false, home: '/home', place: 'claude-cli',
+      ...(action === 'install' ? { turn: { source: '/market', plugin: 'alpha', before: null, back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'remove' }] } } : {}),
+    };
+    const ordinary = pluginsResult();
+    assert.equal(ordinary.length, 2, `${action} keeps reload chips on Row 2`);
+    assert.match(textOf(ordinary[1]), /\/reload-plugins/);
+  }
+
+  // 4. Pressing plugin A's Undo from plugin B's page on Plugin marketplaces: header drops A's reload advice on B, so the status bar announces it instead of going quiet.
+  app.page = 'plugins';
+  market.nav = { ...market.nav, source: '/market', plugin: 'beta' };
   market.lastRun = {
-    done: [{
-      source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'install',
-      report: { tool: 'claude-cli', outcome: 'installed', changed: true, message: 'Installed.', runs: [], reloads: [{ tool: 'claude-cli', kind: 'plugin', on: true }] },
-    }],
-    undo: false, home: '/home', place: 'claude-cli',
-    turn: { source: '/market', plugin: 'alpha', before: null, back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'remove' }] },
+    done: [], undo: false, home: '/home', place: 'plugins',
+    turn: { source: '/market', plugin: 'alpha', before: null, back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-on' }] },
   };
-  const ordinary = pluginsResult();
-  assert.equal(ordinary.length, 2, 'ordinary install keeps reload chips on Row 2');
-  assert.match(textOf(ordinary[1]), /\/reload-plugins/);
+  t.mock.method(api, 'undoPluginTurn', async () => ({
+    done: [{
+      source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-on',
+      report: { tool: 'claude-cli', outcome: 'plugin-on', changed: true, message: 'Turned on.', runs: [], reloads: [{ tool: 'claude-cli', kind: 'plugin', on: true }] },
+    }],
+  }));
+  undoLast();
+  await settled();
+  assert.deepEqual(pluginsResult(), [], 'header draws nothing on B’s page when only A’s dropped reload advice remains');
+  assert.equal(app.said.quiet, false, 'status bar announces the result whenever the header does not draw it');
+  app.page = 'harnesses';
+  app.harness = 'claude-cli';
+  app.harnessTab = 'plugins';
 
-  // 4. Failed reinstall on Uninstall's Undo keeps plugin name and deleted settings in Undo the rest's hover.
+  // 5. Failed reinstall on Uninstall's Undo keeps plugin name and deleted settings in Undo the rest's hover.
   market.lastRun = {
     done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'install', report: { tool: 'claude-cli', outcome: 'failed', message: 'Failed.', runs: [] } }],
     undo: true, home: '/home', place: 'claude-cli',
@@ -4073,6 +4133,51 @@ test('Consequential uninstall/Undo shows irreversible completion without Undo qu
   const failedUndo = findById(pluginsResult()[0], 'plugins-undo')!;
   assert.equal(textOf(failedUndo), 'Undo the rest');
   assert.equal(failedUndo.title, 'Installs alpha again in Claude Code, from the marketplace, without its saved options.');
+});
+
+test('Shared plugin titles name their marketplace in the result, Undo label, Undo hover and Undo result', async t => {
+  const { viewWith } = pluginProfileWorld(t);
+  t.mock.method(api, 'refresh', async () => { main.reads.home++; return viewWith(true); });
+  const alphaEntry: MarketplaceView = { ...entry, source: '/alpha', name: 'alpha-market', sourceLabel: 'alpha-market', plugins: [plugin('shared-kit')] };
+  const betaEntry: MarketplaceView = { ...entry, source: '/beta', name: 'beta-market', sourceLabel: 'beta-market', plugins: [plugin('shared-kit')] };
+  const twoView: PluginsView = { ...view, marketplaces: [alphaEntry, betaEntry] };
+  t.mock.method(api, 'plugins', async () => { main.reads.plugins++; return twoView; });
+  market.read.data = twoView;
+  app.page = 'harnesses';
+  app.harness = 'claude-cli';
+  app.harnessTab = 'plugins';
+
+  turnPlugin(alphaEntry, 'shared-kit', 'uninstall', 'claude-cli');
+  turnPlugin(betaEntry, 'shared-kit', 'uninstall', 'claude-cli');
+  await settled();
+  await main.answer({
+    done: [{ source: '/alpha', marketName: 'alpha-market', plugin: 'shared-kit', tool: 'claude-cli', action: 'remove', report: { tool: 'claude-cli', outcome: 'uninstalled', changed: true, message: 'Uninstalled.', runs: [] } }],
+    before: null,
+    back: [{ source: '/alpha', marketName: 'alpha-market', plugin: 'shared-kit', tool: 'claude-cli', action: 'install' }],
+  });
+  await main.answer({
+    done: [{ source: '/beta', marketName: 'beta-market', plugin: 'shared-kit', tool: 'claude-cli', action: 'remove', report: { tool: 'claude-cli', outcome: 'uninstalled', changed: true, message: 'Uninstalled.', runs: [] } }],
+    before: null,
+    back: [{ source: '/beta', marketName: 'beta-market', plugin: 'shared-kit', tool: 'claude-cli', action: 'install' }],
+  });
+  await settled();
+  const both = pluginsResult();
+  assert.match(textOf(findById(both[0], 'plugins-result')), /shared-kit \(alpha-market\): uninstalled from Claude Code; shared-kit \(beta-market\): uninstalled from Claude Code\./);
+  const undo = findById(both[0], 'plugins-undo')!;
+  assert.equal(textOf(undo), 'Undo shared-kit (beta-market) in Claude Code');
+  assert.equal(undo.title, 'Installs shared-kit (beta-market) again in Claude Code, from the marketplace.');
+
+  const undoneCalls: [string, string][] = [];
+  t.mock.method(api, 'undoPluginTurn', async (source: string, name: string) => {
+    undoneCalls.push([source, name]);
+    return {
+      done: [{ source, marketName: 'beta-market', plugin: name, tool: 'claude-cli', action: 'install', report: { tool: 'claude-cli', outcome: 'installed', changed: true, message: 'Installed.', runs: [] } }],
+    };
+  });
+  undoLast();
+  await settled();
+  assert.deepEqual(undoneCalls, [['/beta', 'shared-kit']]);
+  assert.match(textOf(findById(pluginsResult()[0], 'plugins-result')), /Undone: shared-kit \(beta-market\) reinstalled in Claude Code\./);
 });
 
 

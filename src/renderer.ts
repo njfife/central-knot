@@ -156,17 +156,21 @@ function renderSidebar() {
 }
 
 function renderHeader(rail: boolean) {
-  region('header').replaceChildren(
+  const { items, drawer } = resultHere();
+  const header = region('header');
+  header.replaceChildren(
     button({
       variant: 'ghost', icon: 'panel-left', name: rail ? 'Expand the sidebar' : 'Collapse the sidebar', id: 'sidebar-toggle',
       onclick: () => { state.sidebar = rail ? 'open' : 'rail'; rerender(); },
     }),
     h('h1.page-title', {}, heldBy(state.home) ? 'One build at a time' : (state.page === 'harnesses' && harnessTitle()) || titles[state.page]),
-    ...resultHere(),
+    ...items,
     // The same Refresh on every page: it reads the home again, then the page's own data (on Plugins, every marketplace).
     h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again, and put the rows back in order' : 'Read this home again, and put the rows back in order', id: 'header-refresh', disabled: acting() ?? !state.home,
       onclick: () => void readAgain() })),
   );
+  if (header.nextElementSibling?.classList.contains('result-drawer')) header.nextElementSibling.remove();
+  if (drawer) header.after(drawer);
 }
 
 function renderPage() {
@@ -253,18 +257,23 @@ function resultHere() {
   }
   const whole = parts.some(part => part.querySelector('#problems-show-all[aria-expanded="true"]'));
   const notices = state.home && !heldBy(state.home) ? headerNotices(parts.length > 0) : undefined;
-  if (!whole && !notices?.card) state.shownWhole = undefined;
-  const result = parts.length ? h(`div.header-result${whole ? '.result-whole' : ''}`, { id: whole ? 'result-whole' : undefined }, parts) : null;
-  return [notices?.card ? notices.lines : result ?? notices?.lines, notices?.control].filter((part): part is HTMLElement => !!part);
+  if (!whole && !notices?.card) { state.shownWhole = undefined; state.wholeDrawer = false; }
+  const drawerPart = whole && state.wholeDrawer && !notices?.card ? parts.find(part => part.classList.contains('reload-list')) : undefined;
+  const headerParts = drawerPart ? parts.filter(part => part !== drawerPart) : parts;
+  const cardWhole = whole && !drawerPart;
+  const result = headerParts.length ? h(`div.header-result${cardWhole ? '.result-whole' : ''}`, { id: cardWhole ? 'result-whole' : undefined }, headerParts) : null;
+  const drawer = drawerPart ? h('div.result-drawer', { id: 'result-whole', role: 'region', 'aria-label': 'Reload steps' }, drawerPart) : null;
+  return { items: [notices?.card ? notices.lines : result ?? notices?.lines, notices?.control].filter((part): part is HTMLElement => !!part), drawer };
 }
 /**
  * Folds the card on screen into the header's two lines, answering whether there was one. The redraw waits, so a click that folds it
  * still does its own work. The notices' card folded from within (a notice's way off the page, Escape) gives the focus back to Notices.
  */
 function foldResult(fromWithin = false): boolean {
-  const card = document.querySelector('#header .result-whole');
+  const card = document.querySelector('#header .result-whole, .result-drawer');
   if (!card) return false;
   state.shownWhole = undefined;
+  state.wholeDrawer = false;
   if (fromWithin && card.id === 'notices-card') document.getElementById('notices')?.focus({ preventScroll: true });
   setTimeout(rerender);
   return true;
@@ -274,7 +283,7 @@ function foldResult(fromWithin = false): boolean {
 // its row) closes it; every other action stays on this page and keeps it. The second click of a double click begun there, or on the
 // notice in the lines, which opens the card, does nothing, wherever it lands: the first may have put something else under it (the
 // card's top line, or a notice done leaving the list, which grows shorter).
-const inCard = (event: Event) => !!(event.target as Element).closest('#header :is(.header-result, .notices-card)');
+const inCard = (event: Event) => !!(event.target as Element).closest('#header :is(.header-result, .notices-card), .result-drawer');
 const leavesCard = (event: Event) => !!(event.target as Element).closest('#notices-card :is([id^="notice-history-"], [id^="notice-open-"])');
 let pressedInCard = false, clickedInNotices = false;
 document.addEventListener('pointerdown', event => { pressedInCard = inCard(event); }, true);
@@ -309,8 +318,16 @@ function fitReloadChips(header: HTMLElement): boolean {
 afterLayout(() => {
   const header = region('header'), more = header.querySelector<HTMLElement>('[data-when-cut]');
   const textCut = more ? (more.hidden = true, [...header.querySelectorAll('.problem-text, .problem-text > *, .band-done > .band-text, .toolbar-result-text, .band-profile-name')].some(cut)) : false;
-  if (more) more.hidden = !textCut;
-  if (!fitReloadChips(header) && more && !textCut && more.hasAttribute('data-has-advice')) { more.hidden = false; fitReloadChips(header); }
+  if (more) {
+    more.hidden = !textCut;
+    delete more.dataset.adviceOnly;
+    if (!fitReloadChips(header) && !textCut && more.hasAttribute('data-has-advice')) {
+      if (more.dataset.adviceLabel) { more.textContent = more.dataset.adviceLabel; more.dataset.adviceOnly = ''; }
+      more.hidden = false;
+      fitReloadChips(header);
+      if ([...header.querySelectorAll('.band-done > .band-text, .toolbar-result-text')].some(cut)) { more.textContent = 'Show all'; delete more.dataset.adviceOnly; }
+    }
+  } else fitReloadChips(header);
 });
 
 /** The whole window drawn again, the focus kept on the control that had it (app.ts keepingFocus). */

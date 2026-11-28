@@ -295,6 +295,8 @@ ul { list-style: none; }
 .result-whole #problems-show-all { align-self: flex-end; }
 .result-whole .band-dismiss { position: sticky; top: 5px; }
 .header-result > .toolbar-result .band-dismiss { margin-left: auto; }
+.result-drawer { flex: none; padding: 6px 16px 6px 40px; background: var(--chrome); border-bottom: 1px solid var(--line); }
+.result-drawer > .reload-list { padding: 0; }
 /* What went wrong (matrix.ts problemLines): a line each, Show all on the last. A line in parts gives way only at its item's name,
    never wider than the name itself, and what follows (its tool, what failed) keeps all but 4em of the line, so a long name is
    cut first and a short one leaves no gap. Folded, each part keeps its spaces. Shown, every line whole, with room between them. */

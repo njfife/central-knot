@@ -71,10 +71,13 @@ test('An uninstall’s Undo says it installs the marketplace’s copy again, and
   const done: PluginDone[] = [{ ...back[0]!, report: { tool: 'claude-cli', outcome: 'installed', message: '', runs: [], changed: true } }];
   assert.equal(resultSentence(resultLines(done, true), true), 'Undone: pdf reinstalled in Claude Code, without its saved options.');
   const unknownBack: PluginOp[] = [{ ...op('pdf', 'claude-cli'), deleted: 'unknown' }];
-  assert.equal(undoTitle(unknownBack, { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace, without any saved options it had.');
-  assert.equal(undoTitle([{ ...op('pdf', 'codex-cli'), deleted: 'unknown' }], { plugin: 'pdf' }), 'Installs pdf again in Codex, from the marketplace, without any MCP servers’ settings it had.');
+  assert.equal(undoTitle(unknownBack, { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace; it isn’t known whether its saved options are still there.');
+  assert.equal(undoTitle([...unknownBack, op('pdf', 'claude-cli', 'plugin-off')], { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace, off as it was; it isn’t known whether its saved options are still there.');
+  assert.equal(undoTitle([{ ...op('pdf', 'codex-cli'), deleted: 'unknown' }], { plugin: 'pdf' }), 'Installs pdf again in Codex, from the marketplace; it isn’t known whether its MCP servers’ settings are still there.');
+  const unknownRemoved: PluginDone[] = [{ ...op('pdf', 'claude-cli', 'remove'), deleted: 'unknown', report: { tool: 'claude-cli', outcome: 'uninstalled', message: '', runs: [], changed: true } }];
+  assert.equal(resultSentence(resultLines(unknownRemoved, false), false), 'pdf: uninstalled from Claude Code; it isn’t known whether its saved options are still there.');
   const unknownDone: PluginDone[] = [{ ...unknownBack[0]!, report: { tool: 'claude-cli', outcome: 'installed', message: '', runs: [], changed: true } }];
-  assert.equal(resultSentence(resultLines(unknownDone, true), true), 'Undone: pdf reinstalled in Claude Code, without any saved options it had.');
+  assert.equal(resultSentence(resultLines(unknownDone, true), true), 'Undone: pdf reinstalled in Claude Code; it isn’t known whether its saved options are still there.');
   const step = (action: PluginOp['action'], changed = true): PluginDone => ({ ...op('pdf', 'claude-cli', action), report: { tool: 'claude-cli', outcome: action === 'remove' ? 'uninstalled' : action === 'update' ? 'updated' : action === 'install' ? 'installed' : 'plugin-off', message: '', runs: [], changed } });
   assert.deepEqual([
     consequentialRun(undefined),
@@ -84,7 +87,7 @@ test('An uninstall’s Undo says it installs the marketplace’s copy again, and
     consequentialRun({ done: [step('install')], undo: false, home: '/h' }),
     consequentialRun({ done: [step('plugin-off')], undo: false, home: '/h' }),
     consequentialRun({ done: [step('remove', false)], undo: false, home: '/h' }),
-  ], [false, true, true, true, false, false, false]);
+  ], [false, true, false, true, false, false, false]);
 });
 
 test('An Undo says what came back, and keeps what it did not get to', () => {

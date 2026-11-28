@@ -1224,12 +1224,12 @@ export function listResult(): HTMLElement[] {
   const of = done ? state.outcome : kept.length ? lastResult(kept[0]!.kind) : background[0]?.problem;
   const whole = of !== undefined && state.shownWhole === of;
   const advice = done && state.outcome?.reloads ? reloadAdvice(state.outcome.reloads, toolWays()) : undefined;
-  const hasAdvice = !!advice?.items.length;
-  // With no problem line, Show all follows the sentence, for one the header cuts or whose reload sentences live under Show all.
-  if (done && !lines.length) done.querySelector('.band-text')!.after(wholeToggle(state.outcome, 0, hasAdvice));
+  const adviceCount = advice?.items.length ?? 0;
+  // With no problem line, the disclosure follows the sentence when the header cuts text or holds reload lines.
+  if (done && !lines.length) done.querySelector('.band-text')!.after(wholeToggle(state.outcome, 0, adviceCount));
   const chips = !whole && advice ? reloadChips(advice, of) : null;
   const profile = profileSpan(done && !whole ? state.outcome?.profileLine : undefined);
-  const problem = lines.length ? h(`div.band${chips || profile ? '.result-row2' : ''}`, { role: 'status' }, profile, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, of, hasAdvice), chips, done ? null : closeButton(close, { id: 'problems-dismiss' })) : null;
+  const problem = lines.length ? h(`div.band${chips || profile ? '.result-row2' : ''}`, { role: 'status' }, profile, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, of, adviceCount), chips, done ? null : closeButton(close, { id: 'problems-dismiss' })) : null;
   const row2 = whole && advice ? reloadLines(advice) : problem ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
   return [done, row2, problem].filter((band): band is HTMLElement => !!band);
 }
@@ -1261,20 +1261,30 @@ export const backgroundProblems = () => (state.home?.sync.caughtUp ?? [])
  * Show all; shown whole (`of`, their result: app.ts state.shownWhole), every line whole. A line given in parts is what leads it,
  * its item's name (`.item-name`), then what happened to it (the last part): folded, only the name gives way (style.css).
  */
-export function problemLines(lines: (Child | Child[])[], of: typeof state.shownWhole, hasAdvice = false): HTMLElement {
+export function problemLines(lines: (Child | Child[])[], of: typeof state.shownWhole, adviceCount = 0): HTMLElement {
   const whole = of !== undefined && state.shownWhole === of, shown = whole ? lines : lines.slice(0, 1);
   const text = (line: Child | Child[]) => h('span.problem-text', {}, Array.isArray(line) ? [...line.slice(0, -1).map(part => (typeof part === 'string' ? h('span', {}, part) : part)), h('span.problem-rest', {}, line.at(-1))] : line);
-  return h(`span.band-text.band-lines${whole ? '.lines-whole' : ''}`, {}, shown.map((line, at) => h('span.problem-line', {}, text(line), at === shown.length - 1 ? wholeToggle(of, lines.length, hasAdvice) : null)));
+  return h(`span.band-text.band-lines${whole ? '.lines-whole' : ''}`, {}, shown.map((line, at) => h('span.problem-line', {}, text(line), at === shown.length - 1 ? wholeToggle(of, lines.length, adviceCount) : null)));
 }
 
 /**
- * The one Show all of a result in the header, after the last thing it shows (the sentence, or a problem line): "Show all 3 reasons"
- * where `count` lines wait, else drawn only when the header cuts what it shows or holds reload lines under Show all (renderer.ts, data-when-cut); Show less on the card.
+ * The header result's disclosure: "Show all N reasons" where `count` lines wait, "Show all" when text is cut, or
+ * "Reload step" / "Reload steps" when only reload lines sit behind it (renderer.ts afterLayout).
  */
-export function wholeToggle(of: typeof state.shownWhole, count: number, hasAdvice = false): HTMLElement {
+export function wholeToggle(of: typeof state.shownWhole, count: number, adviceCount = 0): HTMLElement {
   const whole = of !== undefined && state.shownWhole === of, more = count > 1;
-  return h('button.inline-link', { type: 'button', id: 'problems-show-all', 'aria-expanded': String(whole), 'data-when-cut': whole || more ? undefined : '', 'data-has-advice': hasAdvice && !whole ? '' : undefined, onclick: () => { state.shownWhole = whole ? undefined : of; rerender(); } },
-    whole ? 'Show less' : `Show all${more ? ` ${count} reasons` : ''}`);
+  const adviceLabel = adviceCount > 1 ? 'Reload steps' : adviceCount ? 'Reload step' : undefined;
+  return h('button.inline-link', {
+    type: 'button', id: 'problems-show-all', 'aria-expanded': String(whole),
+    'data-when-cut': whole || more ? undefined : '',
+    'data-has-advice': adviceCount && !whole ? '' : undefined,
+    'data-advice-label': !more && adviceLabel ? adviceLabel : undefined,
+    onclick: (event: MouseEvent) => {
+      state.shownWhole = whole ? undefined : of;
+      state.wholeDrawer = !whole && !!(event.currentTarget as HTMLElement | null)?.hasAttribute('data-advice-only');
+      rerender();
+    },
+  }, whole ? (state.wholeDrawer ? `Hide ${adviceCount > 1 ? 'steps' : 'step'}` : 'Show less') : `Show all${more ? ` ${count} reasons` : ''}`);
 }
 
 /** The kind Resume's empty pass goes through, whatever is on show: a held one whose own record can run, so a kind's stop isn't read as Resume's answer. */

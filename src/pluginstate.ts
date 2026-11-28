@@ -28,7 +28,7 @@ import { clickList, drop, endRun, join, runAt, type Turn } from './clicklist.ts'
 import { pin, placeIn } from './itemrow.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
-import { consequentialRun, notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
+import { consequentialRun, noUndoNote, notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, shortOf, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
 import { FIND_FROM, boxOf, categoriesOf, copiesToCompare, installedFrom, marketTitle, matches, pluginPlace, samePart, toolMark } from './pluginstatus.ts';
 import { counted, wholeAlso } from './pluginswitch.ts';
 import { yoursStay } from './pluginline.ts';
@@ -329,8 +329,7 @@ function act(activity: MarketActivity, work: () => Promise<string | void>) {
       const last = runs.get(started);
       const profileLine = last?.done.some(step => succeeded(step.report)) ? profileEndedLine() : undefined;
       if (last && profileLine) last.profileLine = profileLine;
-      const shownInHeader = showsPluginsResult(started) && !problems.get(started) && (undoOps(started).length > 0 || !!profileLine || runReloads(started).items.length > 0 || consequentialRun(last));
-      announce([said, profileLine].filter(Boolean).join(' '), shownInHeader);
+      announce([said, profileLine].filter(Boolean).join(' '), showsPluginsResult(started) && !problems.get(started) && runDisplay(started).shown);
     } finally { market.activity = undefined; }
   });
 }
@@ -426,11 +425,12 @@ export const applyPluginOps = (ops: PluginOp[], undo = false, from?: RunPlace) =
     // A run that stopped after some steps names the plugins it didn't reach; the header says what did run, and counts them first.
     const unreached = result.stopped ? unreachedOps(ops, result.done) : [];
     setRun({ done: result.done, undo, home, place, unreached, ...(undo ? { rest: notUndone(ops, result.done) } : {}) }, place);
-    const unrun = [...new Set(unreached.map(op => op.plugin))];
+    const unrun = [...new Map(unreached.map(op => [pluginKey(op.source, op.plugin), pluginLabel(op.source, op.plugin, unreached)])).values()];
     setProblem(result.stopped && result.done.length && unrun.length ? `Stopped before ${andList(unrun)}: ${result.stopped}` : result.stopped, place);
     await readAgain();
   }
-  return problems.get(place) ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.');
+  const label = (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, result.done);
+  return problems.get(place) ?? (resultSentence(resultLines(result.done, undo), undo, label) || 'Nothing changed.');
 });
 
 /**
@@ -445,7 +445,8 @@ export const usePlugins = (entry: MarketplaceView, plugin: string, tool: Harness
   setRun({ done: result.done, undo: false, home, place, ...(result.back ? { turn: { source: entry.source, plugin, before: result.before ?? null, back: result.back } } : {}) }, place);
   setProblem(result.stopped, place);
   await readAgain();
-  return problems.get(place) ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${plugin}.`);
+  const label = (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, result.done);
+  return problems.get(place) ?? (resultSentence(resultLines(result.done, false), false, label) || `Nothing changed for ${pluginLabel(entry.source, plugin)}.`);
 });
 
 /** What each tool now has changed: the page and the item lists read again, once for the action (app.ts readHomeOnce). */
@@ -518,20 +519,23 @@ function runEnded(): void {
   const place = lastRan!.place, last = runs.get(place);
   // A plugin that partly failed is said once, where it went and where not ("beta: installed in Claude Code, not in Codex");
   // one that went nowhere is named as failed.
-  const lines = lastLines(place), went = new Set(lines.filter(line => line.ok).map(line => line.plugin));
-  const notIn = (plugin: string) => [...new Set(ran.filter(click => click.plugin === plugin).flatMap(click => click.ran?.done ?? []).filter(step => !succeeded(step.report)).map(step => toolNames[step.tool]))];
-  const withNotIn = (list: ResultLine[]) => list.map(line => (line.ok && notIn(line.plugin).length ? { ...line, text: `${line.text}, not in ${andList(notIn(line.plugin))}` } : line));
-  const failed = [...new Set(lines.filter(line => !line.ok && !went.has(line.plugin)).map(line => line.plugin))];
+  const lines = lastLines(place), went = new Set(lines.filter(line => line.ok).map(line => pluginKey(line.source, line.plugin)));
+  const label = (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, [...lines, ...ran, ...(last?.done ?? [])]);
+  const notIn = (source: string, plugin: string) => [...new Set(ran.filter(click => click.source === source && click.plugin === plugin).flatMap(click => click.ran?.done ?? []).filter(step => !succeeded(step.report)).map(step => toolNames[step.tool]))];
+  const withNotIn = (list: ResultLine[]) => list.map(line => (line.ok && notIn(line.source, line.plugin).length ? { ...line, text: `${line.text}, not in ${andList(notIn(line.source, line.plugin))}` } : line));
+  const failed = [...new Map(lines.filter(line => !line.ok && !went.has(pluginKey(line.source, line.plugin))).map(line => [pluginKey(line.source, line.plugin), label(line)])).values()];
   const did = ran.some(click => click.ran?.done.some(step => succeeded(step.report)));
   const profileLine = last && did ? profileEndedLine(lastRan!.run.before) : undefined;
   if (last) last.profileLine = profileLine;
   const one = ran.length === 1 ? ran[0]!.ran : undefined;
   const oneLines = one ? resultLines(one.done, false) : [];
-  const oneFailed = oneLines.filter(line => !line.ok).map(line => `${line.plugin}: ${line.text}`).join(' ');
-  const multi = [resultSentence(withNotIn(lines), false), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ') || 'Nothing changed.';
-  const base = one ? (one.stopped ?? (resultSentence(withNotIn(oneLines), false) || oneFailed || `Nothing changed for ${ran[0]!.plugin}.`)) : multi;
+  const oneFailed = oneLines.filter(line => !line.ok).map(line => `${label(line)}: ${line.text}`).join(' ');
+  const multi = [resultSentence(withNotIn(lines), false, label), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ') || 'Nothing changed.';
+  const note = noUndoNote(last, undoOps(place).length > 0);
+  const oneSaid = one ? resultSentence(withNotIn(oneLines), false, label) : '';
+  const base = one ? (one.stopped ?? (oneSaid ? `${oneSaid}${note}` : oneFailed || `Nothing changed for ${label(ran[0]!)}.`)) : `${multi}${note}`;
   const here = showsPluginsResult(place);
-  const shown = undoOps(place).length > 0 || !!profileLine || runReloads(place).items.length > 0 || consequentialRun(last);
+  const { shown } = runDisplay(place);
   announce([base, profileLine].filter(Boolean).join(' '), here && (one ? !!one.stopped || !!oneFailed || shown : !lines.some(line => !line.ok) && shown));
   if (here && document.activeElement === document.body && clickedLast) {
     // Undo was drawn off while the list ran, and the list's last draw comes after this: drawn usable first, so it takes the focus.
@@ -564,8 +568,10 @@ async function runClick(click: PluginClick, home: string): Promise<void> {
   const stop = result.stopped ? { stop: { source: click.source, plugin: click.plugin, ok: false, text: result.stopped, short: result.stopped } } : {};
   const turn = result.back ? { turn: { source: click.source, plugin: click.plugin, before: result.before ?? null, back: result.back } } : {};
   setRun({ done: result.done, undo: false, home, place: click.place, ...stop, ...turn }, click.place);
-  if (clickList.turns.some(turn => turn.run === click.run && turn.state === 'waiting'))
-    announce(result.stopped ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${click.plugin}.`), showsPluginsResult(click.place) && !result.stopped && (undoOps(click.place).length > 0 || consequentialRun(runs.get(click.place))));
+  if (clickList.turns.some(turn => turn.run === click.run && turn.state === 'waiting')) {
+    const label = (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, result.done);
+    announce(result.stopped ?? (resultSentence(resultLines(result.done, false), false, label) || `Nothing changed for ${label(click)}.`), showsPluginsResult(click.place) && !result.stopped && runDisplay(click.place).shown);
+  }
   rerender();
   showView(await api().plugins().catch(() => null));
 }
@@ -591,6 +597,23 @@ export const runReloads = (place: RunPlace = placeNow()): ReloadAdvice => {
   const last = runs.get(place), ran = last ? ranFor(last) : [];
   return reloadAdvice(settleReloads(pluginReloads(last && ran.length ? ran.flatMap(click => click.ran!.done) : last?.done ?? [])), toolWays());
 };
+
+/**
+ * One rule for where a run's result shows (header on Plugins and a tool's Plugins tab, band on Instructions), shared by
+ * pluginspage.ts and the status-bar quiet check so a result is never dropped from both.
+ */
+export function runDisplay(place: RunPlace = placeNow()) {
+  const last = runs.get(place), lines = last ? lastLines(place) : [];
+  const openName = place === 'plugins' ? market.nav.plugin : undefined;
+  const elsewhere = !!last && (last.reread || (!!openName && !lines.some(line => line.plugin === openName)));
+  const advice = !last || elsewhere ? { text: '', items: [] } : runReloads(place);
+  const back = undoOps(place), failed = last ? shortOf(lines, last.unreached).names.length > 0 : false, hasOk = lines.some(line => line.ok);
+  const onBand = place === 'instructions' || place.startsWith('instructions:');
+  const shown = !!last && (onBand
+    ? hasOk || failed || !!last.profileLine || !!problems.get(place)
+    : ((hasOk || failed) && (back.length > 0 || failed || advice.items.length > 0 || !!last.profileLine || consequentialRun(last))) || back.length > 0);
+  return { last, lines, elsewhere, advice, shown };
+}
 
 /**
  * Each click of the place's run, then each step it did, by plugin and tool (a whole switch's click has none), in the order made:
@@ -622,8 +645,21 @@ const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act
   const at = entry ? market.view!.marketplaces.indexOf(entry) : -1;
   const id = place !== 'plugins' && entry ? `harness-plugin-switch-${entry.name}-${last.turn.plugin}` : `pswitch-${market.nav.plugin ? 'page-' : ''}${at}-${last.turn.plugin}`;
   if (showsPluginsResult(place)) focusWhenDone(document.getElementById(id) ? id : id.replace(/^pswitch/, 'padd'));
-  return problems.get(place) ?? (resultSentence(resultLines(done, true), true) || 'Nothing changed.');
+  const label = (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, done);
+  return problems.get(place) ?? (resultSentence(resultLines(done, true), true, label) || 'Nothing changed.');
 });
+
+/** A plugin's name in a result or Undo, with its marketplace in parentheses when another marketplace shares its title or name. */
+export function pluginLabel(source: string, plugin: string, extra: { source: string; plugin: string; marketName?: string }[] = []): string {
+  const markets = market.view?.marketplaces ?? [];
+  const entry = markets.find(each => each.source === source);
+  const title = (entry?.plugins.find(each => each.name === plugin)?.displayName ?? plugin).toLowerCase();
+  const shared = markets.some(each => each.source !== source && each.plugins.some(other => other.name === plugin || (other.displayName ?? other.name).toLowerCase() === title))
+    || extra.some(other => other.source !== source && other.plugin === plugin);
+  if (!shared) return plugin;
+  const where = entry ? marketTitle(entry) : extra.find(each => each.source === source && each.marketName)?.marketName;
+  return where ? `${plugin} (${where})` : plugin;
+}
 
 /**
  * Undo's label: "Undo the rest" after an Undo that didn't finish; with the click it reverses ("Undo gamma", "Undo gamma in Codex"
@@ -632,7 +668,7 @@ const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act
 export function undoLabel(place: RunPlace = placeNow()): string {
   const last = runs.get(place), ran = last ? ranFor(last) : [], click = ran.at(-1);
   if (last?.undo) return 'Undo the rest';
-  return last?.turn && click && ran.length > 1 ? `Undo ${click.plugin}${click.tool ? ` in ${toolNames[click.tool]}` : ''}` : 'Undo';
+  return last?.turn && click && ran.length > 1 ? `Undo ${pluginLabel(click.source, click.plugin, [...ran, ...last.done])}${click.tool ? ` in ${toolNames[click.tool]}` : ''}` : 'Undo';
 }
 
 /** Undo, or "Undo the rest": the last run's way back, by the route that made it (turnPlugin or applyPluginOps). */

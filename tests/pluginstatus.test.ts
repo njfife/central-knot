@@ -290,8 +290,8 @@ test('installsIn carries each tool’s own recorded version rather than the mark
   );
 });
 
-test('installsIn carries each install’s real id (Anthropic Directory id when matched, else plugin@market)', () => {
-  const catalog: MarketplaceView = {
+test('installsIn carries each install’s real installId and emits one row per installed id across duplicate directory matches', () => {
+  const catalogA: MarketplaceView = {
     ...entry,
     name: 'official',
     plugins: [{ name: 'incident-io', description: '' }, { name: 'notes', description: '' }],
@@ -300,10 +300,19 @@ test('installsIn carries each install’s real id (Anthropic Directory id when m
       notes: { 'claude-cli': { state: 'installed', path: '/y' } },
     },
   };
-  const installs = installsIn({ ...view, marketplaces: [catalog] }, 'claude-cli')!;
+  const catalogB: MarketplaceView = {
+    ...entry,
+    source: 'https://github.com/other/mirror.git',
+    name: 'mirror',
+    plugins: [{ name: 'incident-io', description: '' }],
+    states: {
+      'incident-io': { 'claude-cli': { state: 'installed', path: '/x', directory: 'incident.io@anthropic-plugin-directory' } },
+    },
+  };
+  const installs = installsIn({ ...view, marketplaces: [catalogA, catalogB] }, 'claude-cli')!;
   assert.deepEqual(
-    installs.installed.map(item => [item.plugin.name, (item as { id?: string }).id]),
-    [['incident-io', 'incident.io@anthropic-plugin-directory'], ['notes', 'notes@official']],
+    installs.installed.map(item => [item.entry.name, item.plugin.name, item.installId]),
+    [['official', 'incident-io', 'incident.io@anthropic-plugin-directory'], ['official', 'notes', 'notes@official']],
   );
 });
 
@@ -340,24 +349,31 @@ test('Uninstall…’s question: one sentence on whether it can come back, then 
   for (const [said, wanted] of cases) assert.equal(said, wanted);
 });
 
-test('uninstallFacts and uninstallAsk say settings could not be read instead of promising nothing is lost', () => {
+test('uninstallFacts falls back to what the view knows when detail lacks the tool, and only says settings could not be read when ownSettings is unknown', () => {
   const copy = { skills: [], commands: [], agents: [], instructions: [], version: '1.0.0' };
   const at: MarketplaceView = {
     ...entry,
     states: {
       p: {
-        'claude-cli': { state: 'installed', path: '/c', version: '1.0.0' },
+        'claude-cli': { state: 'installed', path: '/c', version: '1.0.0', ownSettings: true },
         'codex-cli': { state: 'installed', path: '/x', version: '1.0.0' },
         'copilot-cli': { state: 'installed', path: '/g', version: '1.0.0' },
+      },
+      u: {
+        'claude-cli': { state: 'installed', path: '/c', version: '1.0.0', ownSettings: 'unknown' },
       },
     },
   };
   const plugin = { name: 'p', description: '', version: '1.0.0', folder: '/m/p' };
+  const unreadPlugin = { name: 'u', description: '', version: '1.0.0', folder: '/m/u' };
   const claudeUnreadDetail = { ...copy, offered: true, installed: { 'claude-cli': { ...copy, ownSettings: 'unknown' } } } as unknown as PluginDetail;
   assert.equal(uninstallFacts(at, plugin, 'claude-cli', claudeUnreadDetail).ownSettings, 'unknown');
-  assert.equal(uninstallFacts(at, plugin, 'codex-cli', null).ownSettings, 'unknown');
-  assert.equal(uninstallFacts(at, plugin, 'claude-cli', { ...copy, offered: true, installed: {} } as unknown as PluginDetail).ownSettings, 'unknown');
+  // Unreadable marketplace (detail === null) or missing installed entry falls back to the view's known ownSettings, never falsely hedging true or inventing unknown for false.
+  assert.equal(uninstallFacts(at, plugin, 'claude-cli', null).ownSettings, true);
+  assert.equal(uninstallFacts(at, plugin, 'claude-cli', { ...copy, offered: true, installed: {} } as unknown as PluginDetail).ownSettings, true);
+  assert.equal(uninstallFacts(at, plugin, 'codex-cli', null).ownSettings, false);
   assert.equal(uninstallFacts(at, plugin, 'copilot-cli', null).ownSettings, false);
+  assert.equal(uninstallFacts(at, unreadPlugin, 'claude-cli', null).ownSettings, 'unknown');
 
   const none: Parameters<typeof uninstallAsk>[2] = { cannot: undefined, app: undefined, version: undefined, offered: undefined, copy: 'same', ownSettings: 'unknown' };
   assert.equal(uninstallAsk('issue-tracker', 'claude-cli', none),

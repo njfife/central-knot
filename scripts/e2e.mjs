@@ -4102,10 +4102,10 @@ async function practiceFlow() {
   const focusAfterUndo = await a.run(`document.activeElement?.id ?? ''`);
   same('keyboard Undo on Claude Code’s Plugins tab turns the plugin back on, restores the record and focus to its switch, shows the reload line, and stays on the tab',
     [readNow(tabCalls).trim(), await a.run(`document.querySelector(${JSON.stringify(tabSwitch)})?.getAttribute('aria-checked')`),
-      await a.exists(`.harness-plugin:has(${tabSwitch}) .harness-plugin-state`), readNow(pluginsJson) === pluginsRecBefore,
+      (await a.text(`.harness-plugin:has(${tabSwitch}) .harness-plugin-state`))?.trim() ?? '', readNow(pluginsJson) === pluginsRecBefore,
       (await a.text('#plugins-result .toolbar-result-text'))?.trim() ?? '', await a.exists('#header .result-reloads'),
       await a.exists('#harness-tab-plugins[aria-selected="true"]'), focusAfterUndo],
-    ['plugin enable issue-tracker@ck-test-market --scope user', 'true', false, true, 'Undone: issue-tracker back on in Claude Code.', true, true, 'harness-plugin-switch-ck-test-market-issue-tracker']);
+    ['plugin enable issue-tracker@ck-test-market --scope user', 'true', 'Still installed', true, 'Undone: issue-tracker back on in Claude Code.', true, true, 'harness-plugin-switch-ck-test-market-issue-tracker']);
   // A problem made on Plugin marketplaces stays off Codex's Plugins tab and reappears on Plugin marketplaces.
   await a.click('#nav-plugins');
   if (!(await a.exists('#marketplace-source'))) await a.click('#open-add-marketplace');
@@ -9310,16 +9310,13 @@ esac
   // An option saved after the home was last read: the question's own read, as it opens, finds it.
   writeFileSync(settingsPath, JSON.stringify({ ...jsonOrNothing(settingsPath), pluginConfigs: { [id]: { options: { endpoint: 'https://issues.example.test' } } } }));
   const tabPageLink = '#harness-plugin-ck-test-market-issue-tracker';
-  const beforeAsk = await a.run(`(() => { const link = document.querySelector(${JSON.stringify(tabPageLink)}), sw = document.querySelector('#${tabSwitch}'); return { left: link?.getBoundingClientRect().left ?? -1, ghost: !!link?.classList.contains('ghost') && !link?.classList.contains('link'), swTitle: sw?.title ?? '', swDesc: sw?.getAttribute('aria-description') ?? '' }; })()`);
+  const linkLeftBefore = await a.run(`document.querySelector(${JSON.stringify(tabPageLink)})?.getBoundingClientRect().left ?? -1`);
   const question = 'Uninstall issue-tracker from Claude Code? Installing it again gives the marketplace’s copy; the edits to this one are lost. Its saved options there are deleted for good.';
   await a.click(`#${uninstallFrom}`);
   same('Uninstall… asks in its row first, naming the edited copy and the options saved since the last look, the focus on Cancel', [await asked(), await a.run(`document.activeElement?.id`)],
     [question, `${uninstallFrom}-cancel`]);
   const linkLeftOpen = await a.run(`document.querySelector(${JSON.stringify(tabPageLink)})?.getBoundingClientRect().left ?? -1`);
-  same('Its page is quiet (ghost), stays put while Uninstall… asks, and the switch carries its consequence on hover',
-    [beforeAsk.ghost, Math.abs(linkLeftOpen - beforeAsk.left) < 1, beforeAsk.swTitle, beforeAsk.swDesc],
-    [true, true, 'Click to turn issue-tracker off in Claude Code, kept installed: it stays off until you turn it on again. Undo turns it on again.',
-      'Click to turn issue-tracker off in Claude Code, kept installed: it stays off until you turn it on again. Undo turns it on again.']);
+  check('Its page stays put horizontally while Uninstall… asks', Math.abs(linkLeftOpen - linkLeftBefore) < 1, [linkLeftBefore, linkLeftOpen]);
   const callsAsked = calls().length;
   await a.press('Escape');
   same('Escape closes the question, runs nothing, and gives the focus back to Uninstall…', [await a.exists('.uninstall-ask'), calls().length, await a.run(`document.activeElement?.id`)], [false, callsAsked, uninstallFrom]);
@@ -9337,19 +9334,20 @@ esac
   await done();
   same('Undo installs it in Claude Code again, the record as before, the focus on the row’s switch, and says what was not brought back', [calls().at(-1), installed(), entry()?.on, entry()?.except, await a.run(`document.activeElement?.id`), await a.text('#plugins-result .toolbar-result-text')],
     ['plugin install issue-tracker@ck-test-market --scope user', true, true, ['pi-cli'], tabSwitch, 'Undone: issue-tracker reinstalled in Claude Code, without its saved options.']);
-  // At 860×600 (both sidebar open and rail, light and dark): the consequential Undo sentence wraps whole in the 48px header with no Row 2 reload chips,
-  // Show all reveals reload details, and the status bar does not duplicate the header sentence.
+  // At 860×600 (sidebar open, light and dark): the consequential Undo sentence wraps whole in the 48px header with no Row 2 reload chips,
+  // its disclosure reads Reload step, opens below the header without covering tabs/counts, and the status bar stays quiet.
   await sizeTo(a, ...SMALLEST);
   if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
   for (const look of ['light', 'dark']) {
     await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
     await themeSettled();
-    const fit = await a.run(`(() => { const t = document.querySelector('#plugins-result .toolbar-result-text'), h = document.querySelector('#header'), more = document.querySelector('#problems-show-all'), bar = document.querySelector('#announcement'); return [!!t && t.scrollHeight <= t.clientHeight + 1 && t.scrollWidth <= t.clientWidth + 1, h?.offsetHeight ?? 0, !!document.querySelector('#header .result-reloads'), !!more && !more.hidden, !!bar?.classList.contains('visually-hidden')]; })()`);
-    same(`consequential Undo wraps whole at 860 (${look}) with reload details behind Show all and quiet status bar`, fit, [true, 48, false, true, true]);
+    const fit = await a.run(`(() => { const t = document.querySelector('#plugins-result .toolbar-result-text'), h = document.querySelector('#header'), more = document.querySelector('#problems-show-all'), bar = document.querySelector('#announcement'); return [!!t && t.scrollHeight <= t.clientHeight + 1 && t.scrollWidth <= t.clientWidth + 1, h?.offsetHeight ?? 0, !!document.querySelector('#header .result-reloads'), !more?.hidden ? more?.textContent?.trim() ?? '' : '', !!bar?.classList.contains('visually-hidden')]; })()`);
+    same(`consequential Undo wraps whole at 860 (${look}) with Reload step disclosure and quiet status bar`, fit, [true, 48, false, 'Reload step', true]);
   }
   await a.click('#problems-show-all');
-  same('Show all on consequential Undo reveals Claude Code’s reload command and Copy button',
-    [await a.exists('#header .reload-list'), await a.run(`document.querySelector('#outcome-copy-claude-cli')?.dataset.copy ?? ''`)], [true, '/reload-plugins']);
+  same('Reload step opens under the header above the tabs and counts with Claude Code’s reload command and Copy button',
+    await a.run(`(() => { const h = document.querySelector('#header')?.getBoundingClientRect(), d = document.querySelector('#result-whole.result-drawer')?.getBoundingClientRect(), b = document.querySelector('.harness-bar')?.getBoundingClientRect(); return [!!d && !!h && !!b && d.top >= h.bottom - 1 && d.bottom <= b.top + 1, document.querySelector('#problems-show-all')?.textContent?.trim() ?? '', document.querySelector('#outcome-copy-claude-cli')?.dataset.copy ?? '']; })()`),
+    [true, 'Hide step', '/reload-plugins']);
   await a.click('#problems-show-all');
   await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
   await fullSize(a);
@@ -9593,50 +9591,50 @@ esac
   writeFileSync(join(home, 'slow'), '');
   await a.run(`document.getElementById('harness-plugin-switch-beta-market-shared-kit').click(); document.getElementById('harness-plugin-switch-alpha-market-solo-kit').click();`);
   for (let tries = 0; tries < 50 && !(await a.exists('[data-click="running"]')); tries++) await wait(50);
-  const liveSnap = await a.run(`(() => { const row = id => document.querySelector('.harness-plugin:has(#' + id + ')'); const r1 = row('harness-plugin-beta-market-shared-kit'), r2 = row('harness-plugin-alpha-market-solo-kit'); return [r1?.querySelector('.plugin-click')?.dataset.click ?? null, r1?.querySelector('.plugin-click')?.textContent?.trim() ?? '', r1?.querySelector('[role="switch"]')?.title ?? '', r2?.querySelector('.plugin-click')?.dataset.click ?? null, r2?.querySelector('.plugin-click')?.textContent?.trim() ?? '', r2?.querySelector('[role="switch"]')?.title ?? '']; })()`);
-  same('queued and running clicks show live state on their rows and describe the disabled switches', liveSnap,
-    ['running', 'Turning off in Claude Code…', 'Turning off in Claude Code…', 'waiting', 'Waiting to turn off in Claude Code', 'Waiting to turn off in Claude Code']);
+  const liveSnap = await a.run(`(() => { const row = id => document.querySelector('.harness-plugin:has(#' + id + ')'); const r1 = row('harness-plugin-beta-market-shared-kit'), r2 = row('harness-plugin-alpha-market-solo-kit'); return [r1?.querySelector('.plugin-click')?.dataset.click ?? null, r1?.querySelector('.plugin-click')?.textContent?.trim() ?? '', r2?.querySelector('.plugin-click')?.dataset.click ?? null, r2?.querySelector('.plugin-click')?.textContent?.trim() ?? '']; })()`);
+  same('queued and running clicks show live state on their rows', liveSnap,
+    ['running', 'Turning off in Claude Code…', 'waiting', 'Waiting to turn off in Claude Code']);
   rmSync(join(home, 'slow'));
   await done();
-  same('after settling, turned-off rows show Off, kept installed with full hover and switch turn-on consequence',
-    await a.run(`(() => { const r = document.querySelector('.harness-plugin:has(#harness-plugin-alpha-market-solo-kit)'); const st = r?.querySelector('.harness-plugin-state'), sw = r?.querySelector('[role="switch"]'); return [st?.textContent?.trim() ?? '', st?.title ?? '', sw?.title ?? '']; })()`),
-    ['Off, kept installed', 'Off in Claude Code: still installed at 1.0.0, with its data and settings.', 'Click to turn solo-kit on in Claude Code. Undo turns it off again.']);
+  same('after settling, turned-off row shows Off, kept installed',
+    await a.run(`document.querySelector('.harness-plugin:has(#harness-plugin-alpha-market-solo-kit) .harness-plugin-state')?.textContent?.trim() ?? ''`),
+    'Off, kept installed');
   await a.click('#harness-plugin-switch-alpha-market-solo-kit');
   await done();
 
   // 4. Copilot CLI live/off on Copilot CLI's Plugins tab: no Uninstall…, switch turns off (Off, kept installed) and Undo restores.
   await a.click('#harness-switch-copilot-cli');
   for (let tries = 0; tries < 50 && !(await a.exists('#harness-plugin-switch-alpha-market-solo-kit')); tries++) await wait(100);
-  const copilotLiveBefore = [await a.exists('#harness-plugin-uninstall-alpha-market-solo-kit'), await a.run(`document.getElementById('harness-plugin-switch-alpha-market-solo-kit')?.title ?? ''`)];
+  const copilotHasUninstall = await a.exists('#harness-plugin-uninstall-alpha-market-solo-kit');
   await a.click('#harness-plugin-switch-alpha-market-solo-kit');
   await done();
   const copilotLiveOff = await a.run(`document.querySelector('.harness-plugin:has(#harness-plugin-alpha-market-solo-kit) .harness-plugin-state')?.textContent?.trim() ?? ''`);
   await a.click('#plugins-undo');
   await done();
-  same('Copilot CLI live copy has no Uninstall…, switch says kept installed, turns off to Off, kept installed, and Undo turns it back on',
-    [...copilotLiveBefore, copilotLiveOff, await a.run(`document.getElementById('harness-plugin-switch-alpha-market-solo-kit')?.getAttribute('aria-checked')`)],
-    [false, 'Click to turn solo-kit off in Copilot CLI, kept installed: it stays off until you turn it on again. Undo turns it on again.', 'Off, kept installed', 'true']);
+  same('Copilot CLI live copy has no Uninstall…, turns off to Off, kept installed, and Undo turns it back on',
+    [copilotHasUninstall, copilotLiveOff, await a.run(`document.getElementById('harness-plugin-switch-alpha-market-solo-kit')?.getAttribute('aria-checked')`)],
+    [false, 'Off, kept installed', 'true']);
 
-  // 5. Sequence 3: turn shared-kit@alpha-market (1.0.0 vs catalog 2.0.0) off, uninstall older copy, fail reinstall on Undo, then retry Undo.
+  // 5. Sequence 3: turn shared-kit@alpha-market (1.0.0 vs catalog 2.0.0) off, uninstall older copy (question names marketplace for shared title), fail reinstall on Undo, then retry Undo.
   await a.click('#harness-switch-claude-cli');
   for (let tries = 0; tries < 50 && !(await a.exists('#harness-plugin-switch-alpha-market-shared-kit')); tries++) await wait(100);
   await a.click('#harness-plugin-switch-alpha-market-shared-kit');
   await done();
   await a.click('#harness-plugin-uninstall-alpha-market-shared-kit');
-  same('older kept-off copy uninstall prompt names the catalog version and lost version', await asked(),
-    'Uninstall shared-kit from Claude Code? Installing it again gives 2.0.0; this 1.0.0 can’t be brought back.');
+  same('older kept-off copy uninstall prompt names the marketplace for a shared title and the lost version', await asked(),
+    'Uninstall shared-kit (alpha-market) from Claude Code? Installing it again gives 2.0.0; this 1.0.0 can’t be brought back.');
   await a.click('#harness-plugin-uninstall-alpha-market-shared-kit-confirm');
   await done();
   const recAfterUninstall = readFileSync(join(home, '.central-knot/plugins.json'), 'utf8');
-  same('uninstall of kept-off copy gives Undo hover naming off as it was', await a.run(`document.getElementById('plugins-undo')?.title ?? ''`),
-    'Installs shared-kit again in Claude Code, from the marketplace, off as it was.');
+  same('uninstall of kept-off copy gives Undo hover naming marketplace and off as it was', await a.run(`document.getElementById('plugins-undo')?.title ?? ''`),
+    'Installs shared-kit (alpha-market) again in Claude Code, from the marketplace, off as it was.');
   writeFileSync(join(home, 'fail-install'), '');
   await a.click('#plugins-undo');
   await done();
   same('failed reinstall on Undo keeps record as uninstall left it, keeps row absent, shows failure, and Undo the rest keeps accurate hover',
     [readFileSync(join(home, '.central-knot/plugins.json'), 'utf8') === recAfterUninstall, await a.exists('#harness-plugin-alpha-market-shared-kit'), await a.exists('#header .plugin-problems'),
       (await a.text('#plugins-undo'))?.trim() ?? '', await a.run(`document.getElementById('plugins-undo')?.title ?? ''`)],
-    [true, false, true, 'Undo the rest', 'Installs shared-kit again in Claude Code, from the marketplace, off as it was.']);
+    [true, false, true, 'Undo the rest', 'Installs shared-kit (alpha-market) again in Claude Code, from the marketplace, off as it was.']);
   rmSync(join(home, 'fail-install'));
   await a.click('#plugins-undo');
   await done();
@@ -9670,9 +9668,9 @@ esac
     [await a.exists('#plugins-result'), await a.exists('#plugins-undo')], [false, false]);
   await a.click('#harness-switch-claude-cli');
   for (let tries = 0; tries < 50 && !(await a.exists('#plugins-result')); tries++) await wait(100);
-  same('returning to Claude Code’s Plugins tab shows the irreversible completion in the header without Undo',
+  same('returning to Claude Code’s Plugins tab shows the irreversible completion in the header without Undo and says Can’t be undone',
     [(await a.text('#plugins-result .toolbar-result-text'))?.trim() ?? '', await a.exists('#plugins-undo'), await a.run(`document.getElementById('header')?.offsetHeight ?? 0`)],
-    ['solo-kit: uninstalled from Claude Code.', false, 48]);
+    ['solo-kit: uninstalled from Claude Code. Can’t be undone.', false, 48]);
 
   // 8. Check both 860 themes fit without overflow or clipping.
   for (const look of ['light', 'dark']) {

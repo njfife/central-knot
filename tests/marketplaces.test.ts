@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { createMarketplaces, registerMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import { resultLines, resultParts, resultSentence, undoTitle } from '../src/pluginplan.ts';
 import * as engine from '../src/plugins.ts';
-import { FROM_DIRECTORY, WAITS_TO_MOVE, boxOf, foundIn, recordUnread, toolMark } from '../src/pluginstatus.ts';
+import { FROM_DIRECTORY, WAITS_TO_MOVE, boxOf, foundIn, installsIn, recordUnread, toolMark } from '../src/pluginstatus.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { readProfiles } from '../src/profiles.ts';
 import { pluginLive, pluginPlan, wholeTurns, type PluginHome } from '../src/profileplan.ts';
@@ -302,6 +302,19 @@ test('Claude Code’s copy of a plugin from the Anthropic Directory shows as ins
     // An older version than the marketplace's, yet nothing is due: Claude Code keeps its directory copy.
     assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops, []);
     assert.deepEqual(Object.keys((await box.markets.detail(root, 'incident-io'))?.installed ?? {}), ['claude-cli'], 'its copy’s contents are read');
+    // A second catalog listing the same repository and folder still yields one row for that Directory install.
+    const mirror = join(box.base, 'mirror');
+    await put(join(mirror, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'mirror', plugins: [{ name: 'incident-io', version: '2.0.0', source: { source: 'git-subdir', url: 'https://github.com/incident-io/skills.git', path: 'plugins/incident-io' } }] }));
+    await box.markets.add(mirror);
+    // Turning the Directory install off in Claude Code's settings.json shows off (unchecked) after Refresh.
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'incident.io@anthropic-plugin-directory': false } }));
+    const offView = await box.markets.view();
+    const offEntry = offView.marketplaces.find(candidate => candidate.name === 'official')!;
+    assert.equal(installsIn(offView, 'claude-cli')!.installed.length, 1, 'two catalogs bound to one Directory install give one row');
+    assert.deepEqual(offEntry.states['incident-io']?.['claude-cli'], { state: 'installed', path: copy, version: '1.0.0', directory: 'incident.io@anthropic-plugin-directory', off: true });
+    const boxState = boxOf(offView, offEntry, 'incident-io', 'claude-cli', toolMark(offView, offEntry, 'incident-io', 'claude-cli', offEntry.switches?.['incident-io']?.tools['claude-cli']));
+    assert.equal(boxState.ticked, false, 'disabled Directory install shows unchecked');
+    assert.equal(boxState.line, 'Off, kept installed · can’t be changed here');
   } finally { await box.cleanup(); }
 });
 
@@ -1738,16 +1751,22 @@ test('Unreadable Claude Code settings.json reports ownSettings unknown in detail
   try {
     await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
     const settingsPath = join(box.home, '.claude/settings.json');
-    await put(settingsPath, '{broken');
+    const brokenSettings = '{"pluginConfigs":{"pdf@team":{"theme":"dark"}}, broken';
+    await put(settingsPath, brokenSettings);
     const det = await box.markets.detail(box.root, 'pdf');
     assert.equal(det?.installed?.['claude-cli']?.ownSettings, 'unknown');
 
     const gone = await box.markets.turn(box.root, 'pdf', 'uninstall', 'claude-cli', box.home);
+    assert.equal(await readFile(settingsPath, 'utf8'), brokenSettings, 'broken settings.json stays untouched byte for byte');
+    assert.equal(gone.done[0]?.deleted, 'unknown');
     assert.equal(gone.back?.[0]?.deleted, 'unknown');
+    assert.equal(resultSentence(resultLines(gone.done, false), false), 'pdf: uninstalled from Claude Code; it isn’t known whether its saved options are still there.');
+    assert.equal(undoTitle(gone.back!, { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace; it isn’t known whether its saved options are still there.');
 
-    await rm(settingsPath, { force: true });
     const undone = await box.markets.undoTurn(box.root, 'pdf', gone.before!, gone.back!, box.home);
+    assert.equal(await readFile(settingsPath, 'utf8'), brokenSettings, 'broken settings.json stays untouched after Undo');
     assert.equal(undone.done[0]?.deleted, 'unknown');
+    assert.equal(resultSentence(resultLines(undone.done, true), true), 'Undone: pdf reinstalled in Claude Code; it isn’t known whether its saved options are still there.');
 
     // IPC sanitizer accepts deleted: 'unknown' on plugins:undo-turn (reaching writeAccess instead of malformed refusal) and rejects unknown strings.
     const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
