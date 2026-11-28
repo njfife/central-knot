@@ -1291,8 +1291,7 @@ span.ins-confirm { margin-top: 0; }
 .signin-scroll { --signin-pad-top: 16px; display: flex; flex-direction: column; gap: 14px; padding: var(--signin-pad-top) var(--pad-end) 32px 16px; }
 .signin-scroll > * { flex: none; }
 .signin-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
-.signin-top > .btn { flex: none; }
-.signin-line { font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
+.signin-check-all { flex: none; display: inline-flex; align-items: center; gap: 4px; }
 .signin-need { font-size: 12.5px; font-weight: 600; }
 .signin-table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 12.5px; line-height: 1.45; }
 .signin-table th, .signin-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; font-weight: 400; vertical-align: top; overflow-wrap: anywhere; }

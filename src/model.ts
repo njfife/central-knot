@@ -1,4 +1,4 @@
-// Small helpers both the main process and the page use (but atMostEvery and oneTurn, main's alone): times in words (dayAndTime, timeAgo, timesApart, timeOrDate), History's days (the choices
+// Small helpers both the main process and the page use (but atMostEvery and oneTurn, main's alone): times in words (dayAndTime, timeAgo, timesApart, timeOrDay), History's days (the choices
 // and the default: historyDayChoices, defaultHistoryDays), counts (plural), a tool's monogram, one install at a time (what
 // holds this build: holdingBuild, holdsUntil, QUIT_WAIT_MS), a notice's names, what the Caught up band names (caughtUpNames),
 // the notices a view set aside brought, carried into the next view (withSetAside), grouping, a call paced to at most once
@@ -13,9 +13,11 @@ export const toolMonogram = (tool: HarnessId) => monograms[tool];
 export const fullToolName = (snapshot: Snapshot) => `${snapshot.harnessName} ${snapshot.surface}`;
 /** A clock time in the person's own format: "9:20 AM". */
 export const clockTime = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-/** A kept time as it reads on the day it is shown: its clock time on the day it was kept ("9:20 AM"), else its date ("Nov 8"). */
-export const timeOrDate = (iso: string) =>
-  (new Date(iso).toDateString() === new Date().toDateString() ? clockTime(iso) : new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+/**
+ * A kept time as it reads on the day it is shown: its clock time on the day it was kept ("9:20 AM"), else its day (dayWords:
+ * "yesterday", "Nov 8", "Nov 8, 2025"); every space a no-break one, so it is never split across two lines.
+ */
+export const timeOrDay = (iso: string) => (nearDay(iso) === 'today' ? clockTime(iso) : dayWords(iso)).replace(/\s/g, '\u00a0');
 /**
  * One install at a time: what holds this build, from what the looks have found so far (main.ts others, types.ts HomeView
  * otherBuilds): 'unlooked' until the first look answers, so nothing is written before it; else the first other build the last

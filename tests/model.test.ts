@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
-import { atMostEvery, caughtUpNames, holdingBuild, oneTurn, plural, timeAgo, timeOrDate, timesApart } from '../src/model.ts';
+import { atMostEvery, caughtUpNames, clockTime, dayWords, holdingBuild, oneTurn, plural, timeAgo, timeOrDay, timesApart } from '../src/model.ts';
 
 test('plural words read naturally', () => {
   assert.equal(plural(1, 'copy', 'copies'), '1 copy');
@@ -41,8 +41,8 @@ test('Every row of a list says its time in one form: how long ago while that tel
   // A row from yesterday: the clock for every row; the versions list (withDay) names that day, History (under day headings) does not.
   const yesterday = new Date(ten.getTime() - 86_400_000 - 3600_000).toISOString();
   const [todayRow, dayRow] = timesApart([plus(0), yesterday], now, true);
-  assert.ok(/^\d+:\d\d\D/.test(todayRow) && !/\d:\d\d:\d\d/.test(todayRow), todayRow);
-  assert.match(dayRow, /^yesterday at \d+:\d\d\D/);
+  assert.equal(todayRow, clockTime(plus(0)));
+  assert.equal(dayRow, `yesterday at ${clockTime(yesterday)}`);
   assert.doesNotMatch(timesApart([plus(0), yesterday], now)[1], /yesterday/);
 });
 
@@ -55,14 +55,14 @@ test('How long ago floors minutes and hours at each boundary', () => {
   );
 });
 
-test('A kept time says its clock time on the day it was kept, and its date on any day after', () => {
-  const today = new Date();
-  today.setHours(10, 0, 0, 0);
-  const before = new Date(today);
-  before.setDate(today.getDate() - 1);
-  assert.match(timeOrDate(today.toISOString()), /^\d+:\d\d\D/);
-  assert.equal(timeOrDate(before.toISOString()), before.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
-  assert.doesNotMatch(timeOrDate(before.toISOString()), /\d:\d\d/);
+test('A kept time says its clock time on the day it was kept, then its day (yesterday, a date, the year from another year), on one line', () => {
+  /** 10:00 on the day `days` calendar days back, `years` back. */
+  const back = (days: number, years = 0) => { const at = new Date(); at.setFullYear(at.getFullYear() - years, at.getMonth(), at.getDate() - days); at.setHours(10, 0, 0, 0); return at.toISOString(); };
+  /** Words kept on one line: every space a no-break one. */
+  const whole = (words: string) => words.replace(/\s/g, '\u00a0');
+  assert.deepEqual([back(0), back(1), back(3)].map(timeOrDay), [whole(clockTime(back(0))), 'yesterday', whole(dayWords(back(3)))]);
+  assert.notEqual(timeOrDay(back(3)), 'yesterday');
+  assert.match(timeOrDay(back(0, 1)), new RegExp(String(new Date(back(0, 1)).getFullYear())));
 });
 
 test('What holds this build, one install at a time: nothing is written before the first look answers, then the first other build found holds it; none found, or whether one is here can’t be told, holds nothing', () => {
