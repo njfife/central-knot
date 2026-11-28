@@ -2,8 +2,9 @@
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time. History's
 // time control (historyWindowControl, openHistoryWindow) is shared with historypage.ts. Under "This
 // home" sit two per-home switches: Synchronize everything, kept in the home's sync record (share.ts SyncRecord syncEverything)
-// and switched through app.ts switchSyncEverything (its added lines, each with its own Undo, and the items taken out earlier, each
-// with Add: syncEverythingRow; each item's file mark opens its text under its line: settingsFiles → filepanel.ts), and Keep
+// and switched through app.ts switchSyncEverything (its added lines, each with its own Undo, the items taken out earlier, and the
+// found items waiting for a choice of copy: syncEverythingRow; each item's file mark opens its text under its line:
+// settingsFiles → filepanel.ts), and Keep
 // session costs, kept per canonical home in app-settings.json
 // (sessionkeep.ts). Help's Log row also shows Central Knot's own log under it (Show log: its
 // last lines, read by main.ts readLog, never stored); the log is written by main.ts log. A settings file that couldn't be read at
@@ -11,11 +12,11 @@
 import { acting, addTakenOut, announce, keepingBusy, loadHistory, machine, rerender, switchSessionCosts, switchSyncEverything, showPage, state, undoAdded, whyKindReadOnly, whyReadOnly } from './app.ts';
 import { libraryCopyQuestion, outcomeBand } from './matrix.ts';
 import { button, fold, h, icon, infoCardId, infoMark, toggle, type Child } from './dom.ts';
-import { itemFile, keptFile, pagePlace, placePanel, type FileMark } from './filepanel.ts';
+import { itemFile, keptFile, pagePlace, placePanel, setFile, type FileMark } from './filepanel.ts';
 import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
-import { openWalkthrough } from './firstsetup.ts';
-import { whatYesDoes, takenOutEarlier, type TakenOut } from './setupcounts.ts';
+import { useLatest } from './firstsetup.ts';
+import { takenOutEarlier, waitingForChoice, whatYesDoes, type TakenOut, type Waiting } from './setupcounts.ts';
 import { plural } from './model.ts';
 import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, HomeView, LogTail, PluginTextView, SignInPlace } from './types.ts';
 import { entriesNow, everythingPlan, heldSaid, libraryAction, stillAdded, takeInHeld, undoesAddition } from './historyactions.ts';
@@ -109,7 +110,7 @@ export function openHistoryWindow() {
 export function openSettings() {
   messages.clear();
   shortening = undefined;
-  takenOutOpen = false;
+  Object.assign(foldOpen, { 'taken-out': false, waiting: false });
   choosingCopy = undefined;
   readFor.clear();
   logAsked++;
@@ -539,55 +540,88 @@ function buildRow(): HTMLElement | null {
 const addedNotices = (home: HomeView) => (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => (told.kind === 'taken-in' && !state.dismissed.has(told.history) ? [{ kind, told }] : [])));
 /** The switch-on whose Undo Settings' band holds now (app.ts everythingSwitchedOn), if it does: it covers the lines it takes back. */
 const bandUndo = () => (state.outcome?.page === 'settings' ? state.outcome.everythingUndo : undefined);
-/** Whether the taken-out fold is open, and the item whose copy question is open in it (`kind-key`): shut each time the page opens. */
-let takenOutOpen = false, choosingCopy: string | undefined;
+/** Whether each fold is open, and the Choose copy button id whose copy question is open: shut each time the page opens. */
+const foldOpen = { 'taken-out': false, waiting: false };
+let choosingCopy: string | undefined;
+function setCopyQuestion(next?: string, refocus?: string) {
+  choosingCopy = next;
+  rerender();
+  if (refocus && state.page === 'settings') (document.getElementById(refocus) ?? document.getElementById('sync-everything-on'))?.focus();
+}
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || event.defaultPrevented || state.page !== 'settings' || !choosingCopy || settingsFiles.view.openFile || !document.getElementById(choosingCopy)) return;
+  event.preventDefault();
+  setCopyQuestion(undefined, choosingCopy);
+});
 /** The added lines' take-ins History was read for in this visit: a line naming another reads it once (a pass may come with any view). */
 const readFor = new Set<string>();
 /** What was read for no longer stands: History's slot was reset (another home) or its read failed (app.ts accept, loadHistory). */
 export const forgetAddedReads = () => readFor.clear();
 
+type FoldRow = { kind: 'skills' | 'mcp' | 'agents'; key: string; name: string; differs: boolean; tag?: boolean };
 /**
- * The found items taken out earlier (setupcounts.ts takenOutEarlier), one fold: its line counts them; opened, each is named with
- * its kind and its file mark (`marks`, its panel under it: `file`), and the Library row's own Add (app.ts addTakenOut), or, where
- * its copies differ, Choose copy, which opens the Library row's own copy question under it.
+ * One fold under Synchronize everything (removed items, or items waiting for a choice of copy): its count line, optional `head`,
+ * and each item's name with its file mark (`marks`, panel under the row: `file`), kind, and `Choose copy` (in Add's column,
+ * opening the Library's copy question under the row, focus back on the toggle after an answer) or `Add`.
  */
-function takenOutFold(home: HomeView, out: TakenOut[], marks: (FileMark | undefined)[], file: ReturnType<typeof placePanel>): HTMLElement | null {
-  if (!out.length) return null;
-  const label = `${plural(out.length, 'removed item')} ${out.length === 1 ? 'stays' : 'stay'} out of Central Knot.`;
-  return fold({ id: 'setting-taken-out', toggleId: 'setting-taken-out-toggle', label, open: takenOutOpen, onToggle: open => { takenOutOpen = open; }, bodyClass: 'setting-taken-out-list' },
-    out.flatMap((item, at) => {
-      const id = `${item.kind}-${item.key}`, choosing = choosingCopy === id, off = acting() ?? whyKindReadOnly(home, item.kind);
+function syncFold(home: HomeView, kind: 'taken-out' | 'waiting', label: string, items: FoldRow[], marks: (FileMark | undefined)[], file: ReturnType<typeof placePanel>, head?: Child): HTMLElement | null {
+  if (!items.length) return null;
+  const prefix = `setting-${kind}`;
+  const toggleId = `${prefix}-toggle`;
+  const onToggle = (open: boolean) => {
+    foldOpen[kind] = open;
+    if (!open && choosingCopy?.startsWith(`${prefix}-`)) setCopyQuestion();
+    if (!open && settingsFiles.occurrenceId === kind && settingsFiles.view.openFile) setFile(settingsFiles, undefined);
+  };
+  return fold({ id: prefix, toggleId, label, open: foldOpen[kind], onToggle, bodyClass: `setting-fold-list.${prefix}-list` }, head ?? null,
+    items.flatMap((item, at) => {
+      const id = `${item.kind}-${item.key}`;
+      const chooseId = `${prefix}-choose-${id}`;
+      const choosing = choosingCopy === chooseId;
+      const off = acting() ?? whyKindReadOnly(home, item.kind);
       const act = item.differs
-        ? [h('span.row-tag.row-tag-differs', { title: 'Its tools’ copies differ, so adding it needs a choice of copy.' }, 'copies differ'),
-          button({ variant: 'outline', size: 'small', label: 'Choose copy', id: `setting-taken-out-choose-${id}`, disabled: off, attrs: { 'aria-expanded': String(choosing) },
-            onclick: () => { choosingCopy = choosing ? undefined : id; rerender(); } })]
+        ? [button({ variant: 'outline', size: 'small', label: 'Choose copy', id: chooseId, disabled: off, attrs: { 'aria-expanded': String(choosing) }, onclick: () => setCopyQuestion(choosing ? undefined : chooseId) }),
+          item.tag ? h('span.row-tag.row-tag-differs', { title: 'Its tools’ copies differ, so adding it needs a choice of copy.' }, 'copies differ') : null]
         : button({ variant: 'outline', size: 'small', label: 'Add', id: `setting-taken-out-add-${id}`, disabled: off,
           attrs: { title: `Put ${item.name} back in Central Knot from the copy your tools have now, on in every tool` }, onclick: () => void addTakenOut(item.kind, item.key) });
-      return [h('div.setting-taken-out-row', {}, h('span.setting-added-name', {}, h('strong.item-name', {}, item.name), marks[at]?.mark),
-        h('span.tone-faint', {}, ` ${kindNouns[item.kind].one}`), h('span.setting-taken-out-act', {}, act)),
+      return [h(`div.setting-fold-row.${prefix}-row`, {}, h('span.setting-added-name', {}, h('strong.item-name', {}, item.name), marks[at]?.mark),
+        h('span.tone-faint', {}, ` ${kindNouns[item.kind].one}`), h(`span.setting-fold-act.${prefix}-act`, {}, act)),
       file && file.mark === marks[at] ? file.panel : null,
-      choosing ? libraryCopyQuestion(item.kind, item.key, () => { choosingCopy = undefined; rerender(); }) : null];
+      choosing ? libraryCopyQuestion(item.kind, item.key, () => setCopyQuestion(undefined, toggleId)) : null];
     }));
+}
+
+const takenOutFold = (home: HomeView, out: TakenOut[], marks: (FileMark | undefined)[], file: ReturnType<typeof placePanel>) =>
+  syncFold(home, 'taken-out', `${plural(out.length, 'removed item')} ${out.length === 1 ? 'stays' : 'stay'} out of Central Knot.`, out.map(item => ({ ...item, tag: true })), marks, file);
+
+function waitingFold(home: HomeView, waiting: Waiting[], marks: (FileMark | undefined)[], file: ReturnType<typeof placePanel>): HTMLElement | null {
+  const dated = waiting.filter(item => item.latest).length;
+  const skipped = waiting.length - dated;
+  const latestTitle = `Use the copy changed last for ${skipped ? `${dated} of the ${waiting.length} items (${skipped} with no dates to go by ${skipped === 1 ? 'is' : 'are'} skipped)` : `all ${waiting.length} items`}. Each has its own Undo in History.`;
+  const head = waiting.length >= 2 ? h('div.setting-fold-head', {}, button({ variant: 'outline', size: 'small', label: `Use the latest for all ${waiting.length}`, id: 'setting-waiting-latest',
+    disabled: acting() ?? whyReadOnly(home) ?? (!dated ? 'No dates to go by: choose each copy.' : false), attrs: { title: latestTitle },
+    onclick: () => void useLatest(waiting, false).then(() => setCopyQuestion(undefined, 'setting-waiting-toggle')) })) : null;
+  return syncFold(home, 'waiting', `${plural(waiting.length, 'found item')} ${waiting.length === 1 ? 'waits' : 'wait'} for your choice of copy.`, waiting.map(item => ({ ...item, differs: true })), marks, file, head);
 }
 
 /**
  * Synchronize everything, for the open home: what it does (in its card), and, while it is off, how many found items it would
- * add now; either way, how many found items wait for a choice of copy, with the way into first setup's walkthrough of them
- * (firstsetup.ts). Both are counted by setupcounts.ts whatYesDoes; the question says the first too. Under the row: what it added,
- * a line per notice with its own Undo, and the items taken out earlier (takenOutFold). Unchangeable where a pass may not write.
+ * add now (counted by setupcounts.ts whatYesDoes). Under the row: what it added (a line per notice with its own Undo), the items
+ * taken out earlier (takenOutFold), and the found items waiting for a choice of copy (waitingFold, with firstsetup.ts useLatest).
+ * Unchangeable where a pass may not write.
  */
 function syncEverythingRow(): HTMLElement | null {
   const home = state.home;
   if (!home) return null;
   const on = !!home.sync.syncEverything, cannot = whyReadOnly(home) ?? (home.sync.gate.state === 'needs-resume' ? home.sync.gate.reason : undefined);
-  const { takes, choosing } = whatYesDoes(home);
-  const waiting = choosing ? `${plural(choosing, 'found item')} ${choosing === 1 ? 'has' : 'have'} copies that differ and ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy.` : '';
+  const { takes } = whatYesDoes(home);
   // What it leaves for good (the fold) stands in for "nothing would be added".
   const out = takenOutEarlier(home);
+  const waiting = waitingForChoice(home);
   const adds = !on ? (takes ? `Turning it on puts the ${plural(takes, 'item')} found in your tools into every tool Central Knot manages now.` : out.length ? '' : 'Nothing found in your tools now would be added.') : '';
   const later = on && !home.syncOn ? 'Automatic sync is off, so it takes items in at Sync once.' : '';
-  const text = [adds, later, waiting].filter(Boolean).join(' ');
-  const notice: RowMessage | undefined = text ? { text, tone: 'info', action: choosing && !cannot ? { label: 'Choose copies', run: openWalkthrough } : undefined } : undefined;
+  const text = [adds, later].filter(Boolean).join(' ');
+  const notice: RowMessage | undefined = text ? { text, tone: 'info' } : undefined;
   const undoEvent = bandUndo(), about = entriesNow(home);
   const switchOn = undoEvent ? state.history.data?.find(entry => entry.id === undoEvent) : undefined;
   const takenBack = switchOn && state.history.data ? new Set(everythingPlan(switchOn, state.history.data, about).takeBack.map(entry => entry.id)) : undefined;
@@ -623,19 +657,19 @@ function syncEverythingRow(): HTMLElement | null {
   const unread = entries.flatMap(entry => entry.ids).filter(id => !readFor.has(id));
   if (unread.length) { for (const id of unread) readFor.add(id); queueMicrotask(() => void loadHistory()); }
   const outMarks = out.map(item => itemFile(settingsFiles, item.kind, item.key, 'taken-out') ?? keptFile(settingsFiles, item.kind, item.key, 'taken-out'));
-  const file = placePanel(settingsFiles, [...entries.flatMap(entry => entry.marks), ...outMarks]);
+  const waitMarks = waiting.map(item => itemFile(settingsFiles, item.kind, item.key, 'waiting', true));
+  const file = placePanel(settingsFiles, [...entries.flatMap(entry => entry.marks), ...outMarks, ...waitMarks]);
   const added = entries.flatMap(({ kind, id, marks, text, undo }) => {
     const panel = file && marks.includes(file.mark) ? file.panel : null;
     const line = messageLine({ text, tone: 'done', action: undo }, { id: `setting-sync-everything-added-${kind}-${id}`, anchored: !!panel });
     return panel ? [line, panel] : [line];
   });
-  const hint = cannot ?? 'Also adds what turns up in a tool; Automatic sync in the status bar keeps what’s already in Central Knot in step.';
-  const described = [cannot ? null : infoCardId('setting-sync-everything-info'), 'setting-sync-everything-hint', notice && 'setting-sync-everything-notice'].filter(Boolean).join(' ');
-  return settingRow('sync-everything', 'Synchronize everything', hint,
+  const described = [cannot ? 'setting-sync-everything-hint' : infoCardId('setting-sync-everything-info'), notice && 'setting-sync-everything-notice'].filter(Boolean).join(' ');
+  return settingRow('sync-everything', 'Synchronize everything', cannot,
     toggle({ on, label: 'Synchronize everything', onchange: chosen => void switchSyncEverything(chosen), disabled: cannot || acting(), id: 'sync-everything-on',
       attrs: { 'aria-describedby': described, title: null } }),
-    undefined, [added.length ? h('div.setting-added', {}, added) : null, takenOutFold(home, out, outMarks, file), notice ? messageLine(notice, { id: 'setting-sync-everything-notice', announce: false }) : null],
-    'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice.');
+    undefined, [added.length ? h('div.setting-added', {}, added) : null, notice ? messageLine(notice, { id: 'setting-sync-everything-notice', announce: false }) : null, takenOutFold(home, out, outMarks, file), waitingFold(home, waiting, waitMarks, file)],
+    'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice. Automatic sync in the status bar keeps what’s already in Central Knot in step.');
 }
 
 /** Shared end of the disclosure sentence that each keep-costs info card (Sessions and Settings) begins. */

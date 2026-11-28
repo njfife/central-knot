@@ -15,7 +15,10 @@ let historyEvents: HistoryEvent[] = [];
 let historyFails = false;
 /** The home main opens next (Settings' home change), and each Undo of added lines main was asked for. */
 let nextHome: HomeView | undefined;
+let refreshHome: HomeView | undefined;
 const undoCalls: unknown[][] = [];
+const applySkillCalls: unknown[][] = [];
+const fileReads: unknown[][] = [];
 
 let settings: AppPreferences = {
   appearance: 'system',
@@ -31,6 +34,10 @@ const api = {
   setHistoryDays: (days: HistoryDays) => saveHistoryImpl(days),
   history: async () => { historyReads++; return historyFails ? null : { events: historyEvents, days: settings.historyDays }; },
   selectHome: async () => nextHome,
+  refresh: async () => refreshHome ?? state.home,
+  applySkills: async (...call: unknown[]) => { applySkillCalls.push(call); return { results: [], writes: 1, made: [], reloads: [] }; },
+  skillFoundFile: async (...call: unknown[]) => { fileReads.push(['found', ...call]); return { files: ['SKILL.md'], text: 'Found skill body' }; },
+  skillVersionFile: async (...call: unknown[]) => { fileReads.push(['stored', ...call]); return { files: ['SKILL.md'], text: 'Kept version body' }; },
   undoAdded: async (...call: unknown[]) => { undoCalls.push(call); return { results: [], harnessWrites: 0, reloads: [], undid: [], passed: [] }; },
   pluginText: async (): Promise<PluginTextView> => ({ read: 0, of: 0, elsewhere: 0, reading: false, on: true }),
   onPluginTextChanged: (listener: (view: PluginTextView) => void) => { onPluginText = listener; },
@@ -43,7 +50,7 @@ const api = {
   onSaid() {},
 };
 
-installDom(api, { byId: id => (rendered ? findById(rendered, id) ?? null : null) });
+const { dispatch } = installDom(api, { byId: id => (rendered ? findById(rendered, id) ?? null : null) });
 
 const { loadHistory, loadHome, setRenderer, state } = await import('../src/app.ts');
 const { historyWindowControl, loadSettings, openHistoryWindow, settingsPage } = await import('../src/settingspage.ts');
@@ -187,12 +194,20 @@ const deletedFact = (key: string) => ({
   key, name: key, description: '', copies: {}, except: [], cannot: {}, edited: [],
   takeInAnswers: { click: { take: 'h1' }, rule: { leave: 'deleted' } },
 });
-const waitingFact = (key: string) => ({
-  key, name: key, description: '', copies: {}, except: [], cannot: {}, edited: [],
-  takeInAnswers: { click: { wait: true }, rule: { wait: true } },
+const waitingFact = (key: string, latest = 'h2') => ({
+  key, name: key, description: '', on: false, except: [], cannot: {}, edited: [],
+  copies: {
+    'claude-cli': { hash: 'h1', directory: `/tmp/ck/.claude/skills/${key}`, rootLabel: '~/.claude/skills', lines: 3, modified: '2026-11-27T08:00:00.000Z', summary: 'Older.', writable: true, folder: key },
+    'codex-cli': { hash: 'h2', directory: `/tmp/ck/.codex/skills/${key}`, rootLabel: '~/.codex/skills', lines: 3, modified: '2026-11-27T09:00:00.000Z', summary: 'Newer.', writable: true, folder: key },
+  },
+  takeInAnswers: { click: { wait: 'copies-differ', ...(latest ? { latest } : {}) }, rule: { wait: 'copies-differ', ...(latest ? { latest } : {}) } },
 });
+const waitingSnaps = (keys: string[]) => [
+  { harness: 'claude-cli', skills: keys.map(key => ({ folder: key, directory: `/tmp/ck/.claude/skills/${key}`, realDirectory: `/tmp/ck/.claude/skills/${key}`, rootLabel: '~/.claude/skills' })) },
+  { harness: 'codex-cli', skills: keys.map(key => ({ folder: key, directory: `/tmp/ck/.codex/skills/${key}`, realDirectory: `/tmp/ck/.codex/skills/${key}`, rootLabel: '~/.codex/skills' })) },
+];
 
-test('Synchronize everything shows the switch difference on the page', () => {
+test('Synchronize everything moves the Automatic sync sentence into its card, drops the repeated hint, and keeps Update plugins automatically’s warning', () => {
   state.outcome = undefined;
   state.history.data = undefined;
   state.dismissed.clear();
@@ -200,43 +215,83 @@ test('Synchronize everything shows the switch difference on the page', () => {
     skills: { ...emptyKind(), items: [takeFact('new-one'), deletedFact('old-one'), waitingFact('review')] },
   });
   draw();
-  assert.equal(textOf(findById(rendered, 'setting-sync-everything-hint')),
-    'Also adds what turns up in a tool; Automatic sync in the status bar keeps what’s already in Central Knot in step.');
+  assert.equal(findById(rendered, 'setting-sync-everything-hint'), undefined);
   assert.equal(findById(rendered, 'sync-everything-on')?.attrs['aria-describedby'],
-    'setting-sync-everything-info-card setting-sync-everything-hint setting-sync-everything-notice');
+    'setting-sync-everything-info-card setting-sync-everything-notice');
   assert.equal(textOf(findById(rendered, 'setting-sync-everything-info-card')),
-    'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice.');
+    'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice. Automatic sync in the status bar keeps what’s already in Central Knot in step.');
+  assert.equal(textOf(findById(rendered, 'setting-plugin-updates-hint')), 'Updates can’t be undone.');
+
+  // When read-only, the fault line still shows in the hint slot and aria-describedby points at it with no dangling id.
+  state.home = makeHome({ sync: { managed: ['claude-cli'], present: ['claude-cli'], leftOut: [], access: { allowed: false, reason: 'Preview only.' }, gate: { state: 'ready' }, syncEverything: false, caughtUp: [] } });
+  draw();
+  assert.equal(textOf(findById(rendered, 'setting-sync-everything-hint')), 'Preview only.');
+  assert.equal(findById(rendered, 'sync-everything-on')?.attrs['aria-describedby'], 'setting-sync-everything-hint setting-sync-everything-notice');
 });
 
-test('Synchronize everything counts the items taken out earlier on a fold that names each, its text a click away, with its kind and Add, or Choose copy where its copies differ', () => {
+test('Synchronize everything lists waiting items in a fold with marks, Choose copy, and Use the latest for all N, while removed rows keep their kept-version marks and put Choose copy in Add’s column', async () => {
+  const settle = () => new Promise(resolve => setImmediate(resolve));
   state.outcome = undefined;
   state.history.data = undefined;
   state.dismissed.clear();
+  fileReads.length = 0;
+  // Worked example 1 (rule on, 2 waiting skills): shut fold, marks, kind, Choose copy, Use the latest for all 2, no Choose copies link.
   state.home = makeHome({
-    skills: { ...emptyKind(), items: [takeFact('new-one'), deletedFact('old-one'), waitingFact('review')] },
+    snapshots: waitingSnaps(['review', 'triage']),
+    sync: { managed: ['claude-cli', 'codex-cli'], present: ['claude-cli', 'codex-cli'], leftOut: [], access: { allowed: true }, gate: { state: 'ready' }, syncEverything: true, caughtUp: [] },
+    skills: { ...emptyKind(), items: [waitingFact('review'), waitingFact('triage')] },
   });
   draw();
-  assert.deepEqual([textOf(findById(rendered, 'setting-sync-everything-notice')), textOf(findById(rendered, 'setting-taken-out-toggle'))],
-    ['Turning it on puts the 1 item found in your tools into every tool Central Knot manages now. 1 found item has copies that differ and waits for your choice of copy.Choose copies',
-      '1 removed item stays out of Central Knot.']);
-
-  // After Undo (nothing ready to add, 3 taken out, 1 waiting): the fold stands in for "nothing would be added"; opened, it names
-  // each by kind, its kept version's mark after its name, Add on those it takes at once, and Choose copy on the one whose copies
-  // differ, which waits for no walkthrough.
-  const differing = { ...deletedFact('split'), takeInAnswers: { click: { wait: 'choice' }, rule: { leave: 'deleted' } } };
+  const waitRows = () => ((findById(rendered, 'setting-waiting')?.querySelector('.setting-waiting-list')?.children ?? []) as FakeNode[])
+    .filter(child => child.classList?.contains('setting-waiting-row'));
+  assert.deepEqual([
+    textOf(findById(rendered, 'setting-waiting-toggle')),
+    findById(rendered, 'setting-waiting')?.attrs.open,
+    textOf(findById(rendered, 'setting-waiting-latest')),
+    findById(rendered, 'setting-sync-everything-notice'),
+    textOf(rendered).includes('Choose copies'),
+  ], ['2 found items wait for your choice of copy.', undefined, 'Use the latest for all 2', undefined, false]);
+  assert.deepEqual(waitRows().map(row => [textOf(row), !!row.querySelector('.row-file-btn'), row.querySelector('.setting-waiting-act')?.querySelector('button')?.attrs.id]), [
+    ['review skillChoose copy', true, 'setting-waiting-choose-skills-review'],
+    ['triage skillChoose copy', true, 'setting-waiting-choose-skills-triage'],
+  ]);
+  // Waiting row's mark opens the found copy; removed row beside it (also in snapshots) keeps its kept-version mark.
+  const differing = { ...waitingFact('split'), takeInAnswers: { click: { wait: 'choice' }, rule: { leave: 'deleted' } } };
   const kept = { key: 'old-one', name: 'old-one', on: false, hash: 'h-old', versions: [{ hash: 'h-old', at: '2026-11-27T19:00:00Z', from: { how: 'found', harness: 'claude-cli' } }], except: [], applied: {}, deleted: { at: '2026-11-28T00:00:00Z' } };
   state.home = makeHome({
+    snapshots: waitingSnaps(['old-one', 'review']),
     skills: { ...emptyKind(), items: [deletedFact('old-one'), differing, waitingFact('review')], library: { 'old-one': kept } },
     agents: { ...emptyKind(), items: [deletedFact('helper')] },
   });
   draw();
-  const rows = () => (findById(rendered, 'setting-taken-out')?.querySelector('.setting-taken-out-list')?.children ?? []) as FakeNode[];
-  assert.deepEqual([textOf(findById(rendered, 'setting-sync-everything-notice')), textOf(findById(rendered, 'setting-taken-out-toggle')), findById(rendered, 'setting-taken-out')?.attrs.open],
-    ['1 found item has copies that differ and waits for your choice of copy.Choose copies', '3 removed items stay out of Central Knot.', undefined]);
-  assert.deepEqual(rows().map(row => [textOf(row), row.querySelector('.setting-taken-out-act')?.querySelector('button')?.attrs.id]),
-    [['old-one skillAdd', 'setting-taken-out-add-skills-old-one'], ['split skillcopies differChoose copy', 'setting-taken-out-choose-skills-split'], ['helper agentAdd', 'setting-taken-out-add-agents-helper']]);
-  assert.deepEqual([!!rows()[0].querySelector('.row-file-btn'), rows()[1].querySelector('.row-tag')?.attrs.title],
-    [true, 'Its tools’ copies differ, so adding it needs a choice of copy.']);
+  const outRows = () => ((findById(rendered, 'setting-taken-out')?.querySelector('.setting-taken-out-list')?.children ?? []) as FakeNode[])
+    .filter(child => child.classList?.contains('setting-taken-out-row'));
+  assert.deepEqual([
+    findById(rendered, 'setting-sync-everything-notice'),
+    textOf(findById(rendered, 'setting-taken-out-toggle')),
+    textOf(findById(rendered, 'setting-waiting-toggle')),
+    findById(rendered, 'setting-waiting-latest'),
+  ], [undefined, '3 removed items stay out of Central Knot.', '1 found item waits for your choice of copy.', undefined]);
+  assert.deepEqual(outRows().map(row => [textOf(row), row.querySelector('.setting-taken-out-act')?.querySelector('button')?.attrs.id]),
+    [['old-one skillAdd', 'setting-taken-out-add-skills-old-one'], ['split skillChoose copycopies differ', 'setting-taken-out-choose-skills-split'], ['helper agentAdd', 'setting-taken-out-add-agents-helper']]);
+  assert.deepEqual([
+    outRows()[0].querySelector('.row-file-btn')?.attrs.id,
+    outRows()[1].querySelector('.row-tag')?.attrs.title,
+    waitRows()[0].querySelector('.row-file-btn')?.attrs.id,
+  ], ['file-kept-skills-old-one-h-old-taken-out', 'Its tools’ copies differ, so adding it needs a choice of copy.', 'file-skills-review-waiting']);
+  findById(rendered, 'file-skills-review-waiting')!.click();
+  await settle();
+  findById(rendered, 'file-kept-skills-old-one-h-old-taken-out')!.click();
+  await settle();
+  assert.deepEqual(fileReads.map(call => [call[0], call[1]]), [['found', 'review'], ['stored', 'old-one']]);
+
+  // Two undated waiting items disable Use the latest for all 2 with a reason.
+  state.home = makeHome({
+    snapshots: waitingSnaps(['a', 'b']),
+    skills: { ...emptyKind(), items: [waitingFact('a', ''), waitingFact('b', '')] },
+  });
+  draw();
+  assert.equal('disabled' in (findById(rendered, 'setting-waiting-latest')?.attrs ?? {}), true);
 
   // With nothing found at all while off, still says nothing would be added.
   state.home = makeHome();
@@ -245,7 +300,93 @@ test('Synchronize everything counts the items taken out earlier on a fold that n
     'Nothing found in your tools now would be added.');
 });
 
-test('Synchronize everything puts what was taken in before what waits with Choose copies last', () => {
+test('Synchronize everything copy questions close on Escape back to Choose copy, focus the fold toggle after an answer, and Use the latest for all 2 works with the rule off', async () => {
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const pressEscape = () => {
+    const event = { key: 'Escape', defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+    dispatch('keydown', event);
+    return event.defaultPrevented;
+  };
+  state.outcome = undefined;
+  state.history.data = undefined;
+  state.dismissed.clear();
+  applySkillCalls.length = 0;
+
+  // Rule off, two waiting items (Worked examples 2, 3, 4, 5).
+  const twoWaiting = makeHome({
+    snapshots: waitingSnaps(['review', 'triage']),
+    skills: { ...emptyKind(), items: [waitingFact('review'), waitingFact('triage')] },
+  });
+  state.home = twoWaiting;
+  refreshHome = twoWaiting;
+  draw();
+
+  // Worked example 3: Choose copy opens question; Escape closes it, focuses Choose copy, writes nothing.
+  findById(rendered, 'setting-waiting-choose-skills-review')!.click();
+  assert.equal(findById(rendered, 'setting-waiting-choose-skills-review')?.attrs['aria-expanded'], 'true');
+  assert.ok(findById(rendered, 'walk-use-skills-review-claude-cli'), 'copy question opens under the row');
+  assert.equal(pressEscape(), true);
+  assert.equal(findById(rendered, 'walk-use-skills-review-claude-cli'), undefined);
+  assert.equal((document.activeElement as unknown as FakeNode | null)?.attrs.id, 'setting-waiting-choose-skills-review');
+  assert.equal(applySkillCalls.length, 0);
+
+  // Worked example 2: answer one copy question -> taken in, row goes, label says one, focus goes to the list's toggle.
+  const oneWaiting = makeHome({
+    snapshots: waitingSnaps(['triage']),
+    skills: { ...emptyKind(), items: [waitingFact('triage')] },
+  });
+  refreshHome = oneWaiting;
+  findById(rendered, 'setting-waiting-choose-skills-review')!.click();
+  findById(rendered, 'walk-use-skills-review-claude-cli')!.click();
+  for (let round = 0; round < 6; round++) await settle();
+  assert.equal(applySkillCalls.length, 1);
+  assert.equal(textOf(findById(rendered, 'setting-waiting-toggle')), '1 found item waits for your choice of copy.');
+  assert.equal((document.activeElement as unknown as FakeNode | null)?.attrs.id, 'setting-waiting-toggle');
+
+  // Same Escape and post-answer focus on a differing removed row.
+  const diffRemoved = { ...waitingFact('split'), takeInAnswers: { click: { wait: 'copies-differ', latest: 'h2' }, rule: { leave: 'deleted' } } };
+  state.home = makeHome({
+    skills: { ...emptyKind(), items: [diffRemoved, deletedFact('helper')] },
+  });
+  refreshHome = makeHome({
+    skills: { ...emptyKind(), items: [deletedFact('helper')] },
+  });
+  draw();
+  findById(rendered, 'setting-taken-out-choose-skills-split')!.click();
+  assert.ok(findById(rendered, 'walk-use-skills-split-claude-cli'));
+  assert.equal(pressEscape(), true);
+  assert.equal((document.activeElement as unknown as FakeNode | null)?.attrs.id, 'setting-taken-out-choose-skills-split');
+  findById(rendered, 'setting-taken-out-choose-skills-split')!.click();
+  findById(rendered, 'walk-use-skills-split-claude-cli')!.click();
+  for (let round = 0; round < 6; round++) await settle();
+  assert.equal((document.activeElement as unknown as FakeNode | null)?.attrs.id, 'setting-taken-out-toggle');
+
+  // Worked examples 4 & 5: Use the latest for all 2 with the rule off takes both in, list goes, Settings' band says so;
+  // when one item still waits (changed meanwhile), it stays on Settings and focuses the toggle instead of jumping to Library.
+  applySkillCalls.length = 0;
+  state.home = twoWaiting;
+  refreshHome = oneWaiting;
+  draw();
+  findById(rendered, 'setting-waiting-latest')!.click();
+  for (let round = 0; round < 6; round++) await settle();
+  assert.equal(state.page, 'settings');
+  assert.equal((document.activeElement as unknown as FakeNode | null)?.attrs.id, 'setting-waiting-toggle');
+
+  applySkillCalls.length = 0;
+  state.home = twoWaiting;
+  refreshHome = makeHome();
+  draw();
+  findById(rendered, 'setting-waiting-latest')!.click();
+  for (let round = 0; round < 6; round++) await settle();
+  assert.equal(applySkillCalls.length, 1);
+  assert.equal(findById(rendered, 'setting-waiting'), undefined);
+  assert.equal(textOf(findNode(rendered, el => 'data-outcome' in el.attrs && !!el.querySelector('.band-text'))?.querySelector('.band-text')),
+    'Used the latest copy for 2 items, each with its own Undo in History.');
+  refreshHome = undefined;
+  state.outcome = undefined;
+});
+
+test('Synchronize everything puts what was taken in before its notice and waiting fold, with no Choose copies link', () => {
   const notice = { kind: 'taken-in', items: ['notes'], keys: ['notes'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes'] };
   state.outcome = undefined;
   state.history.data = undefined;
@@ -260,9 +401,12 @@ test('Synchronize everything puts what was taken in before what waits with Choos
     .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
   const addedIndex = rowKids.findIndex(child => child.className.split(/\s+/).includes('setting-added'));
   const noticeIndex = rowKids.findIndex(child => child.attrs.id === 'setting-sync-everything-notice');
-  assert.ok(addedIndex >= 0 && noticeIndex > addedIndex, `expected .setting-added (${addedIndex}) before #setting-sync-everything-notice (${noticeIndex})`);
+  const waitingIndex = rowKids.findIndex(child => child.attrs.id === 'setting-waiting');
+  assert.ok(addedIndex >= 0 && noticeIndex > addedIndex && waitingIndex > noticeIndex,
+    `expected .setting-added (${addedIndex}) before #setting-sync-everything-notice (${noticeIndex}) and #setting-waiting (${waitingIndex})`);
   assert.equal(textOf(findById(rendered, 'setting-sync-everything-notice')),
-    'Automatic sync is off, so it takes items in at Sync once. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
+    'Automatic sync is off, so it takes items in at Sync once.');
+  assert.equal(textOf(findById(rendered, 'setting-waiting-toggle')), '1 found item waits for your choice of copy.');
 });
 
 test('An added line has its own Undo once History is read, where one of its take-ins still offers it, and none on a line the band’s Undo takes back as items stand now', () => {

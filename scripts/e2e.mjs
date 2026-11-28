@@ -9264,10 +9264,10 @@ async function syncEverythingFlow() {
     [null, 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools.', false]);
   await a.click('#nav-settings');
   for (let tries = 0; tries < 30 && !(await a.exists('#setting-sync-everything')); tries++) await wait(100);
-  same('Settings › This home: Synchronize everything is off, shows the switch difference under its title with live aria-describedby, and says what it would add now and what waits',
-    [await ruleOn(), await ruleSays(), /Automatic sync/.test(await a.text('#setting-sync-everything-hint') ?? ''), await a.run(`document.getElementById('setting-sync-everything-info')?.getAttribute('aria-label')`), await a.run(`document.getElementById('sync-everything-on')?.getAttribute('aria-describedby')`)],
-    ['false', 'Turning it on puts the 2 items found in your tools into every tool Central Knot manages now. 1 found item has copies that differ and waits for your choice of copy.', true, 'About Synchronize everything', 'setting-sync-everything-info-card setting-sync-everything-hint setting-sync-everything-notice']);
-  await checkCard(a, 'setting-sync-everything-info', /every tool Central Knot manages/, 'Synchronize everything card');
+  same('Settings › This home: Synchronize everything is off, drops the repeated hint, keeps live aria-describedby, says what it would add now, and lists waiting items in a fold',
+    [await ruleOn(), await ruleSays(), await a.exists('#setting-sync-everything-hint'), await a.text('#setting-waiting-toggle'), await a.run(`document.getElementById('setting-sync-everything-info')?.getAttribute('aria-label')`), await a.run(`document.getElementById('sync-everything-on')?.getAttribute('aria-describedby')`)],
+    ['false', 'Turning it on puts the 2 items found in your tools into every tool Central Knot manages now.', false, '1 found item waits for your choice of copy.', 'About Synchronize everything', 'setting-sync-everything-info-card setting-sync-everything-notice']);
+  await checkCard(a, 'setting-sync-everything-info', /Automatic sync in the status bar keeps what’s already in Central Knot in step\./, 'Synchronize everything card');
   await fitsAtMinimum(a, 'Settings with Synchronize everything off');
   await a.shot('everything-off');
   await openAgainOnSettings('before switching on');
@@ -9275,14 +9275,14 @@ async function syncEverythingFlow() {
   // pass soon after takes it in by itself (takenInSoon), whose read keeps the notices no page has shown yet.
   const freshSaved = await switchOnWhileSaving(join(skill(claude, 'fresh', text('fresh', 'Just saved.')), 'SKILL.md'));
   const record = JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8'));
-  same('turned on, it is kept in the home’s sync record, and the row says what still waits for a choice', [await ruleOn(), record.syncEverything, await ruleSays()], ['true', true, '1 found item has copies that differ and waits for your choice of copy.']);
+  same('turned on, it is kept in the home’s sync record, and the waiting fold counts what still waits for a choice', [await ruleOn(), record.syncEverything, await a.exists('#setting-sync-everything-notice'), await a.text('#setting-waiting-toggle')], ['true', true, false, '1 found item waits for your choice of copy.']);
   for (let tries = 0; tries < 40 && !(await a.exists('[data-outcome] #outcome-undo')); tries++) await wait(100);
   same('the Settings band says Synchronize everything is on and offers History’s Undo with its help',
     await a.run(`(() => { const o = document.querySelector('[data-outcome]'), u = o?.querySelector('#outcome-undo'); return [o?.querySelector('.band-text')?.textContent, u?.textContent, u?.title, u?.getAttribute('aria-description')]; })()`),
     ['Synchronize everything is on: it added 2 items.', 'Undo', 'Switches Synchronize everything off. It takes back the items it added, but for any changed since.', null]);
   same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
   same('and Settings puts what it added above what waits, a line per kind without repeating the title, with no Undo of its own while the band’s Undo covers it',
-    [await a.all('.setting-added .setting-message', 'e.textContent'), await a.run(`(() => { const a = document.querySelector('#setting-sync-everything .setting-added'), n = document.getElementById('setting-sync-everything-notice'); return !!a && !!n && !!(a.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING); })()`)],
+    [await a.all('.setting-added .setting-message', 'e.textContent'), await a.run(`(() => { const a = document.querySelector('#setting-sync-everything .setting-added'), w = document.getElementById('setting-waiting'); return !!a && !!w && !!(a.compareDocumentPosition(w) & Node.DOCUMENT_POSITION_FOLLOWING); })()`)],
     [['Added skill notes from Claude Code.', 'Added MCP server files from Codex.'], true]);
   await takenInSoon('fresh', text('fresh', 'Just saved.'), freshSaved, 'a skill saved just before is taken in soon after, with no click, once it has settled');
   // The read after that pass reaches the page: the sidebar's dot names both skills' notices, neither shown yet.
@@ -9376,7 +9376,7 @@ async function syncEverythingFlow() {
   await a.click('#nav-settings');
   await a.click('#sync-everything-on');
   for (let tries = 0; tries < 40 && await ruleOn() !== 'false'; tries++) await wait(100);
-  same('turned off, its fold counts what was undone, which isn’t added again by itself', [await ruleOn(), await a.text('#setting-taken-out-toggle'), await ruleSays()], ['false', '1 removed item stays out of Central Knot.', '2 found items have copies that differ and wait for your choice of copy.']);
+  same('turned off, its folds count what was undone and what waits for a choice', [await ruleOn(), await a.text('#setting-taken-out-toggle'), await a.text('#setting-waiting-toggle'), await a.exists('#setting-sync-everything-notice')], ['false', '1 removed item stays out of Central Knot.', '2 found items wait for your choice of copy.', false]);
   await openAgainOnSettings('switched on and off');
   // Saved just before the rule is switched on again, with nothing else for that pass to write, and still being saved as it
   // runs: that pass leaves it, and a pass soon after takes it in (takenInSoon).
@@ -9424,10 +9424,10 @@ async function syncEverythingFlow() {
   const twoUndone = 'Undone: switched off, and 2 items it took in are out of Central Knot again, each tool they were found in keeping its own.';
   same('Settings inline Undo turns the rule off, takes back both kinds like History’s Undo, leaves originals and conflict, clears undone taken-in lines, and reads as History’s',
     [uRecord().syncEverything, existsSync(join(uCodex, 'notes')), readNow(join(uClaude, 'notes/SKILL.md')), readNow(join(uClaude, 'review/SKILL.md')), readNow(join(uCodex, 'review/SKILL.md')), 'files' in (JSON.parse(readNow(join(uHome, '.claude.json'))).mcpServers ?? {}), /\[mcp_servers\.files\]/.test(readNow(join(uHome, '.codex/config.toml'))), await uBand(),
-      await b.all('.setting-added .setting-message', 'e.textContent'), await b.exists('#nav-library .nav-unseen'), await b.text('#setting-taken-out-toggle'), await b.text('#setting-sync-everything-notice .setting-message-text')],
+      await b.all('.setting-added .setting-message', 'e.textContent'), await b.exists('#nav-library .nav-unseen'), await b.text('#setting-taken-out-toggle'), await b.text('#setting-waiting-toggle'), await b.exists('#setting-sync-everything-notice')],
     [false, false, text('notes', 'Take notes.'), text('review', 'Review gently.'), text('review', 'Review hard.'), false, true, [twoUndone, null, null, false, false],
-      [], false, '2 removed items stay out of Central Knot.', '1 found item has copies that differ and waits for your choice of copy.']);
-  check('Choose copies sits beside the last sentence (waiting), not up on the first line', await b.run(`(() => { const t = document.querySelector('#setting-sync-everything-notice .setting-message-text')?.getBoundingClientRect(), a = document.querySelector('#setting-sync-everything-notice-action')?.getBoundingClientRect(); return !!t && !!a && a.bottom >= t.bottom - 4; })()`));
+      [], false, '2 removed items stay out of Central Knot.', '1 found item waits for your choice of copy.', false]);
+  check('no Choose copies link appears anywhere on Settings', !(await b.text('#settings-scroll') ?? '').includes('Choose copies'));
   await b.click('#nav-history');
   for (let tries = 0; tries < 30 && !(await b.exists('.history-row[data-kind="everything"]')); tries++) await wait(100);
   same('History records the same Undo sentence and marks the switch-on Undone',
@@ -9580,20 +9580,122 @@ async function syncEverythingFlow() {
   settleOld([skill(uCodex, 'later', text('later', 'Later, another way.')), join(uCodex, 'later/SKILL.md')]);
   for (let tries = 0; tries < 100 && !(await b.exists('#setting-taken-out-choose-skills-later')); tries++) await wait(100);
   await b.settle();
-  same('a removed item whose copies came to differ has copies differ, its hover saying why, and Choose copy in Add’s place',
-    [await b.all('.setting-taken-out-row', 'e.textContent'), await b.run(`document.querySelector('#setting-taken-out .row-tag-differs')?.title`)],
-    [['later skillcopies differChoose copy', 'files MCP serverAdd'], 'Its tools’ copies differ, so adding it needs a choice of copy.']);
+  same('a removed item whose copies came to differ has Choose copy in Add’s column beside copies differ, its hover saying why',
+    [await b.all('.setting-taken-out-row', 'e.textContent'), await b.run(`document.querySelector('#setting-taken-out .row-tag-differs')?.title`),
+      await b.run(`Math.abs(document.getElementById('setting-taken-out-choose-skills-later').getBoundingClientRect().left - document.getElementById('setting-taken-out-add-mcp-files').getBoundingClientRect().left) < 1`)],
+    [['later skillChoose copycopies differ', 'files MCP serverAdd'], 'Its tools’ copies differ, so adding it needs a choice of copy.', true]);
   await b.shot('settings-taken-out-differ-860-light');
   await b.click('#setting-taken-out-choose-skills-later');
   for (let tries = 0; tries < 40 && !(await b.exists('.setting-taken-out-list .compare-block')); tries++) await wait(100);
   await b.settle();
   check('Choose copy opens the copy question under its row, nothing cut off', await b.exists('.setting-taken-out-list .compare-block') && (await b.run(CUT_OFF)).length === 0, await b.run(CUT_OFF));
   await b.shot('settings-taken-out-choose-860-light');
+  await b.press('Escape');
+  await b.settle();
+  same('Escape closes the removed list’s copy question back to Choose copy without writing',
+    [await b.exists('.setting-taken-out-list .compare-block'), await b.run(`document.activeElement?.id`), readNow(join(uCodex, 'later/SKILL.md'))],
+    [false, 'setting-taken-out-choose-skills-later', text('later', 'Later, another way.')]);
+  await b.click('#setting-taken-out-choose-skills-later');
+  for (let tries = 0; tries < 40 && !(await b.exists('.setting-taken-out-list .compare-block')); tries++) await wait(100);
   await b.run(`document.querySelector('.setting-taken-out-list .compare-choices button.version[id$="claude-cli"]').click()`);
   for (let tries = 0; tries < 80 && readNow(join(uCodex, 'later/SKILL.md')) !== text('later', 'Later skill.'); tries++) await wait(100);
   await b.settle();
-  same('choosing Claude Code’s copy takes later in, puts that copy in Codex, says so in the band, and the list no longer names it',
-    [readNow(join(uCodex, 'later/SKILL.md')), !!(await b.text('[data-outcome] .band-text')), await b.all('.setting-taken-out-row', 'e.textContent')], [text('later', 'Later skill.'), true, ['files MCP serverAdd']]);
+  same('choosing Claude Code’s copy takes later in, puts that copy in Codex, says so in the band, focuses the toggle, and the list no longer names it',
+    [readNow(join(uCodex, 'later/SKILL.md')), !!(await b.text('[data-outcome] .band-text')), await b.all('.setting-taken-out-row', 'e.textContent'), await b.run(`document.activeElement?.id`)],
+    [text('later', 'Later skill.'), true, ['files MCP serverAdd'], 'setting-taken-out-toggle']);
+
+  // Waiting-for-choice fold: two waiting skills (distinct timestamps so Use the latest works), marks on waiting and removed rows,
+  // 860 with sidebar open (light) and 1316 (dark), Escape, answer refocus to toggle, and Use the latest for all 2 with the rule off.
+  if (await b.exists('#outcome-dismiss')) await b.click('#outcome-dismiss');
+  const twoHoursAgo = new Date(Date.now() - 2 * 3_600_000), tenMinAgo = new Date(Date.now() - 600_000);
+  const stamp = (paths, at) => { for (const path of paths) utimesSync(path, at, at); };
+  stamp([join(uClaude, 'review'), join(uClaude, 'review/SKILL.md')], twoHoursAgo);
+  stamp([join(uCodex, 'review'), join(uCodex, 'review/SKILL.md')], tenMinAgo);
+  stamp([skill(uClaude, 'triage', text('triage', 'Triage first.')), join(uClaude, 'triage/SKILL.md')], twoHoursAgo);
+  stamp([skill(uCodex, 'triage', text('triage', 'Triage latest.')), join(uCodex, 'triage/SKILL.md')], tenMinAgo);
+  await b.click('#header-refresh');
+  for (let tries = 0; tries < 80 && await b.text('#setting-waiting-toggle') !== '2 found items wait for your choice of copy.'; tries++) await wait(100);
+  await b.settle();
+  await withSidebarOpen(b, ...SMALLEST, async () => {
+    await setTheme(b, 'light');
+    await b.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+    await b.settle();
+    same('at 860 with sidebar open, waiting fold starts shut with 2 items, no Choose copies link, and nothing cut off',
+      [await b.text('#setting-waiting-toggle'), await b.run(`document.getElementById('setting-waiting')?.open`), !(await b.text('#settings-scroll') ?? '').includes('Choose copies'), await b.run(CUT_OFF)],
+      ['2 found items wait for your choice of copy.', false, true, []]);
+    await b.shot('settings-waiting-shut-860-light');
+    await b.click('#setting-waiting-toggle');
+    await b.run(`document.getElementById('setting-waiting')?.scrollIntoView({ block: 'nearest' })`);
+    await b.settle();
+    same('opened at 860 with sidebar open, waiting fold lists both skills with marks, kind, Choose copy and Use the latest for all 2, nothing cut off',
+      [await b.text('#setting-waiting-latest'), await b.all('.setting-waiting-row', 'e.textContent'), await b.all('.setting-waiting-row .row-file-btn', 'e.id'), await b.run(CUT_OFF)],
+      ['Use the latest for all 2', ['review skillChoose copy', 'triage skillChoose copy'], ['file-skills-review-waiting', 'file-skills-triage-waiting'], []]);
+    // Waiting mark opens found copy; removed mark beside it still opens kept version.
+    await b.click('#file-skills-review-waiting');
+    for (let tries = 0; tries < 40 && !(await b.text('#file-panel-settings pre.content') ?? '').includes('Review'); tries++) await wait(100);
+    await b.settle();
+    same('waiting mark opens its found copy under its row with nothing cut off', [await b.exists('#file-panel-settings select'), await b.run(CUT_OFF)], [true, []]);
+    await b.press('Escape');
+    const keptMarkId = await b.run(`document.querySelector('#setting-taken-out .row-file-btn')?.id`);
+    await b.click(`#${keptMarkId}`);
+    for (let tries = 0; tries < 40 && !(await b.text('#file-panel-settings pre.content') ?? '').includes('files-mcp'); tries++) await wait(100);
+    same('removed row beside it still opens its kept version', [keptMarkId?.startsWith('file-kept-mcp-files-'), (await b.text('#file-panel-settings .file-open-head') ?? '').includes('last version kept')], [true, true]);
+    await b.press('Escape');
+    await b.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+    await b.settle();
+    await b.shot('settings-waiting-open-860-light');
+    await b.click('#setting-waiting-choose-skills-review');
+    for (let tries = 0; tries < 40 && !(await b.exists('.setting-waiting-list .compare-block')); tries++) await wait(100);
+    await b.run(`document.getElementById('setting-waiting')?.scrollIntoView({ block: 'start' })`);
+    await b.settle();
+    check('at 860 with sidebar open, Choose copy opens the copy question under the row, nothing cut off', await b.exists('.setting-waiting-list .compare-block') && (await b.run(CUT_OFF)).length === 0, await b.run(CUT_OFF));
+    await b.shot('settings-waiting-choose-860-light');
+    await b.press('Escape');
+    await b.settle();
+    same('at 860, Escape closes the waiting copy question back to Choose copy without writing',
+      [await b.exists('.setting-waiting-list .compare-block'), await b.run(`document.activeElement?.id`), readNow(join(uCodex, 'review/SKILL.md'))],
+      [false, 'setting-waiting-choose-skills-review', text('review', 'Review hard.')]);
+  });
+  await withSidebarOpen(b, 1316, 819, async () => {
+    await setTheme(b, 'dark');
+    await b.click('#setting-waiting-toggle');
+    await b.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+    await b.settle();
+    same('at 1316 dark, waiting fold shut fits with nothing cut off', await b.run(CUT_OFF), []);
+    await b.shot('settings-waiting-shut-1316-dark');
+    await b.click('#setting-waiting-toggle');
+    await b.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+    await b.settle();
+    same('at 1316 dark, waiting fold open fits with nothing cut off', await b.run(CUT_OFF), []);
+    await b.shot('settings-waiting-open-1316-dark');
+    await b.click('#setting-waiting-choose-skills-review');
+    for (let tries = 0; tries < 40 && !(await b.exists('.setting-waiting-list .compare-block')); tries++) await wait(100);
+    await b.run(`document.getElementById('setting-waiting')?.scrollIntoView({ block: 'start' })`);
+    await b.settle();
+    same('at 1316 dark, waiting copy question open fits with nothing cut off', await b.run(CUT_OFF), []);
+    await b.shot('settings-waiting-choose-1316-dark');
+    await b.run(`document.querySelector('.setting-waiting-list .compare-choices button.version[id$="claude-cli"]').click()`);
+    for (let tries = 0; tries < 80 && readNow(join(uCodex, 'review/SKILL.md')) !== text('review', 'Review gently.'); tries++) await wait(100);
+    await b.settle();
+    same('answering Choose copy takes review in with Claude Code’s copy, says so in Settings’ band, updates count to 1, and focuses the toggle',
+      [readNow(join(uCodex, 'review/SKILL.md')), !!(await b.text('[data-outcome] .band-text')), await b.text('#setting-waiting-toggle'), await b.run(`document.activeElement?.id`)],
+      [text('review', 'Review gently.'), true, '1 found item waits for your choice of copy.', 'setting-waiting-toggle']);
+  });
+  // Rule off + Use the latest for all 2: both taken in with their latest copies, list goes, Settings' band says so.
+  stamp([skill(uClaude, 'polish', text('polish', 'Polish old.')), join(uClaude, 'polish/SKILL.md')], twoHoursAgo);
+  stamp([skill(uCodex, 'polish', text('polish', 'Polish new.')), join(uCodex, 'polish/SKILL.md')], tenMinAgo);
+  await b.click('#sync-everything-on');
+  for (let tries = 0; tries < 80 && (await uRuleOn() !== 'false' || await b.text('#setting-waiting-toggle') !== '2 found items wait for your choice of copy.'); tries++) await wait(100);
+  await b.settle();
+  same('with the rule off, waiting fold still lists both items and offers Use the latest for all 2',
+    [await uRuleOn(), await b.text('#setting-waiting-toggle'), await b.text('#setting-waiting-latest')],
+    ['false', '2 found items wait for your choice of copy.', 'Use the latest for all 2']);
+  await b.click('#setting-waiting-latest');
+  for (let tries = 0; tries < 80 && (readNow(join(uClaude, 'triage/SKILL.md')) !== text('triage', 'Triage latest.') || readNow(join(uClaude, 'polish/SKILL.md')) !== text('polish', 'Polish new.')); tries++) await wait(100);
+  await b.settle();
+  same('Use the latest for all 2 takes both in with their latest copies, removes the list, and says so in Settings’ band',
+    [readNow(join(uClaude, 'triage/SKILL.md')), readNow(join(uClaude, 'polish/SKILL.md')), await b.exists('#setting-waiting'), await b.text('[data-outcome] .band-text')],
+    [text('triage', 'Triage latest.'), text('polish', 'Polish new.'), false, 'Used the latest copy for 2 items, each with its own Undo in History.']);
   await setTheme(b, '');
   await fullSize(b);
   same('no page errors, Settings inline Undo', b.pageErrors, []);
@@ -9949,7 +10051,7 @@ async function firstSetupFlow() {
     }
   }
 
-  // Settings -> Choose copies -> "Use the latest for the rest" runs the plugin switch for chosen items held off through a plugin.
+  // Overview (rule on) -> Choose copies -> "Use the latest for the rest" runs the plugin switch for chosen items held off through a plugin.
   const bulk = homeFor('setup-bulk-plugin'), bulkCopilot = join(bulk.home, '.copilot/skills'), bulkCodexToml = join(bulk.home, '.codex/config.toml');
   writeFileSync(join(bulk.home, '.local/bin/copilot'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0\nexit 9\n');
   chmodSync(join(bulk.home, '.local/bin/copilot'), 0o755);
@@ -9963,9 +10065,10 @@ async function firstSetupFlow() {
   opened(bulk.home, bulkData);
   const p = await launch(bulkData, [], real);
   try {
-    await p.click('#nav-settings');
-    for (let tries = 0; tries < 40 && !(await p.exists('#setting-sync-everything-notice button')); tries++) await wait(100);
-    await p.click('#setting-sync-everything-notice button');
+    for (let tries = 0; tries < 40 && !(await p.exists('#setup-yes')); tries++) await wait(100);
+    await p.click('#setup-yes');
+    for (let tries = 0; tries < 40 && !(await p.exists('#setup-choose')); tries++) await wait(100);
+    await p.click('#setup-choose');
     for (let tries = 0; tries < 40 && !(await p.exists('#walk-use-latest')); tries++) await wait(100);
     same('before Use the latest for the rest, Codex’s plugin skill is off',
       [/name = "team-pack:plug-bulk"[^[]*enabled = false/.test(readNow(bulkCodexToml)), await cellState(p, 'skills', 'plug-bulk', 'codex-cli')], [true, 'plugin-off']);

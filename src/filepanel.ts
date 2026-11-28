@@ -322,10 +322,10 @@ function thisVisit(place: PagePlace) {
   const on = `${state.home?.home} ${state.visit}`;
   if (place.on !== on) Object.assign(place, { on, view: {}, occurrenceId: undefined, drawn: undefined });
 }
-/** The mark at a name of an item Central Knot holds (found and plugin rows too where the place opens them), at its occurrence. */
-export function itemFile(place: PagePlace, kind: PageKind, key: string, occurrenceId?: string): FileMark | undefined {
+/** The mark at a name of an item Central Knot holds (found and plugin rows too where the place or caller asks for them), at its occurrence. */
+export function itemFile(place: PagePlace, kind: PageKind, key: string, occurrenceId?: string, found = false): FileMark | undefined {
   thisVisit(place);
-  const target = inLibrary(state.home?.[kind].library[key]) || place.foundAndPlugins ? rowOf(kind, key) : undefined;
+  const target = inLibrary(state.home?.[kind].library[key]) || place.foundAndPlugins || found ? rowOf(kind, key) : undefined;
   return target && nameMark(place, target, occurrenceId);
 }
 /** The mark at a name of an item Central Knot deleted, at its occurrence: the last version its tombstone keeps (KeptTarget). */
