@@ -46,7 +46,7 @@ export function pluginsHere(home: HomeView): Set<string> {
   return found.get(home)!;
 }
 const found = new WeakMap<HomeView, Set<string>>();
-/** The sources with a row of a kind this home holds, by their links: a source's row offers Show in the Library only then (sourcespage.ts). */
+/** The sources with a row of a kind this home holds, by their links: a source's row offers Open in the Library only then (sourcespage.ts). */
 export const sourcesHere = (home: HomeView) => new Set(heldKinds(home).flatMap(kind => originsIn(home, kind).flatMap(origins => origins.source ?? [])));
 
 /** The From menu's choice: Anywhere (every row), Your own, any plugin or one (pluginFrom), any Library source or one (sourceFrom). */

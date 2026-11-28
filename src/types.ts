@@ -994,7 +994,7 @@ export interface HookRunResult {
   outcome: HookRunOutcome; detail?: HookNotAddedDetail; added?: string; allPrinted: string; stderr: string;
   exitCode?: number; signal?: NodeJS.Signals; source?: string; durationMs: number; at: string; cwd: string; emptyPrompt: boolean;
   overLimit?: { limit: number; unit: 'chars' | 'tokens' }; limitSec?: number; program?: string; problem?: string;
-  missingOptions?: true;
+  missingOptions?: true; pluginVersion?: string;
 }
 /** What a plugin holds, read from its files (catalogdetail.ts); the row counts come from the same read. */
 export interface PluginContents {
@@ -1237,7 +1237,7 @@ export interface PassResult {
    * (which change nothing a person sees), with the History entry that says it, whether the item is On once the step is done
    * (`on`), and for the item a click on Merge asked for, what Merge did (`merge`).
    */
-  sourced?: { name: string; answer: SourceAnswer; history?: string; on?: true; merge?: MergeDone; /** A take that can't land in its tool: why, and nothing changed (library.ts TAKE). */ held?: string }[];
+  sourced?: { key?: string; name: string; answer: SourceAnswer; history?: string; on?: true; merge?: MergeDone; /** A take that can't land in its tool: why, and nothing changed (library.ts TAKE). */ held?: string }[];
 }
 /**
  * What a click on Merge did (library.ts MERGE; librarypass.ts mergeIn): the merged version made current (`merged`); merged to
