@@ -1320,12 +1320,13 @@ span.ins-confirm { margin-top: 0; }
 
 /* ---------- The Sessions page (sessionspage.ts) ----------
    The period's choice; its dollars, date and unpriced count; a line of the tools' sums; a row a session and, opened, its models
-   and its agents' rows (for 7 days, a line for each day with sessions, its rows under it once opened); By model, folded. Every row and model line shares one set of columns (--sessions-columns): the project's
-   takes the room there is, so a row's dollars begin where its name's column ends and are one column with an opened row's Cost,
-   and the rows span the page. The rows scroll with the page. A narrow content area gives the project the room the token columns
-   had: a model's tokens go to a second line. */
+   and its agents' rows (for 7 days, a line for each day with sessions, its rows under it once opened); By model, folded. Every
+   session row, nested agent and model line shares one set of columns (--sessions-columns) ending in the right-aligned cost column,
+   while a day's summary is flex with the same horizontal padding so its amount shares that right edge; qualifiers stack beneath
+   each amount so the dollar digits themselves align down one edge. Left-aligned lines use hanging CSS separators clipped at wrap.
+   The rows scroll with the page. A narrow content area drops the four token columns: a model's tokens go to a second line. */
 .sessions-scroll { padding: 16px var(--pad-end) 32px 16px; }
-.sessions-content { --sessions-columns: 12px 128px 100px minmax(0, 1fr) 190px repeat(4, 86px);
+.sessions-content { --sessions-columns: 12px 128px 100px minmax(0, 1fr) repeat(4, 86px) 190px;
   display: flex; flex-direction: column; gap: 10px; }
 .sessions-content > * { flex: none; }
 .sessions-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 32px; }
@@ -1333,27 +1334,33 @@ span.ins-confirm { margin-top: 0; }
 .sessions-collecting { font-size: 12.5px; color: var(--ink-soft); }
 .sessions-result { display: flex; align-items: flex-start; gap: 6px; margin: 0; max-width: var(--measure); font-size: 12.5px; line-height: 1.5; color: var(--danger); }
 .sessions-result > svg { flex: none; margin-top: 2px; }
-.sessions-sep { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; }
-.sessions-sep > :not(:last-child)::after, .sessions-estimate:has(+ .sessions-unpriced)::after { content: "·"; margin-left: 8px; font-weight: 400; color: var(--ink-faint); }
-.sessions-head { font-size: 16px; }
+.sessions-sep { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; margin: 0; overflow-x: clip; }
+.sessions-sep > :not(:first-child)::before, .sessions-tool-total > .sessions-estimate + .sessions-unpriced::before { content: "·"; display: inline-block; flex: none; width: 18px; margin-left: -18px; text-align: center; font-weight: 400; color: var(--ink-faint); text-decoration: none; }
+.sessions-sep > .sessions-tool-total:not(:first-child)::before { margin-right: -6px; }
+.sessions-tool-total > .sessions-estimate:has(+ .sessions-unpriced) { margin-right: 12px; }
+.sessions-head { padding-right: 4px; font-size: 16px; }
 .sessions-head .sessions-estimate { font-size: 18px; }
-.sessions-head-part { display: inline-flex; align-items: center; }
-.sessions-head-part > .info-wrap { margin-left: 4px; }
+.sessions-head-part { display: inline-flex; align-items: baseline; }
+.sessions-head-part > .info-wrap { align-self: center; margin-left: 4px; }
 .sessions-heading { margin: 0; font-size: inherit; font-weight: 400; }
-.sessions-caption, .sessions-aside { margin: 0; max-width: var(--measure); font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
+.sessions-caption { margin: 0; max-width: var(--measure); font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
+.sessions-aside { margin: 0 8px 0 30px; font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
 .sessions-tools { font-size: 13px; }
-.sessions-tool, .sessions-tool-total { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 6px; }
-.sessions-cost { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+.sessions-tool, .sessions-tool-total { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; }
+.sessions-tool > .brand-mark, .sessions-tool-total > .brand-mark { align-self: center; }
+.sessions-tool, .sessions-when { color: var(--ink-soft); }
+.sessions-cost, .sessions-line-cost { grid-column: -2 / -1; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: right; }
+.sessions-cost-note { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 0 14px; max-width: 100%; overflow-x: clip; font-size: 11px; line-height: 1.3; font-weight: 400; color: var(--ink-soft); }
+.sessions-cost-note > :not(:last-child)::after { content: "·"; display: inline-block; width: 14px; margin-right: -14px; text-align: center; color: var(--ink-faint); text-decoration: none; }
+.sessions-estimate[title], .sessions-more[title], .sessions-unpriced[title] { text-decoration: underline dotted color-mix(in oklab, currentColor 45%, transparent); text-underline-offset: 3px; }
 .sessions-unpriced { color: var(--ink-soft); }
 .sessions-rows, .sessions-children, .sessions-days { list-style: none; margin: 0; padding: 0; }
 .sessions-day + .sessions-day { border-top: 1px solid var(--line); }
-/* A day's line: its figure at the line's end, so the days' figures stand in a column; open, it stays in view at the page's top
-   edge (less .sessions-scroll's top padding, which a sticky line keeps clear), a hairline under it, while its rows, set in by its
-   chevron and gap, scroll. */
-.sessions-day > details > summary { display: flex; font-size: 13px; }
+/* A day's line: its figure at the line's end, sharing the right edge with its session rows; open, it stays in view at the page's top
+   edge (less .sessions-scroll's top padding, which a sticky line keeps clear), a hairline under it, while its rows scroll beside a quiet guide. */
+.sessions-day > details > summary { display: flex; padding: 8px 8px; font-size: 13.5px; }
 .sessions-day > details[open] > summary { position: sticky; top: -16px; z-index: 1; background: var(--surface); box-shadow: inset 0 -1px 0 var(--line); }
-.sessions-day > details > summary > .sessions-cost { justify-content: flex-end; }
-.sessions-day .sessions-rows { padding-left: 22px; }
+.sessions-day .sessions-rows { margin: 2px 0 6px 13px; padding-left: 9px; border-left: 1px solid var(--line); }
 .sessions-day-label { flex: 1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
 .sessions-day-name { font-weight: 600; }
 .sessions-day-count { color: var(--ink-soft); }
@@ -1364,21 +1371,30 @@ span.ins-confirm { margin-top: 0; }
 .sessions-row summary:hover, .sessions-day summary:hover { background: var(--row-hover); }
 details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .sessions-row summary > *, .sessions-day summary > *, .sessions-line > * { min-width: 0; }
-.sessions-when, .sessions-cost, .sessions-counts > * { font-variant-numeric: tabular-nums; }
-.sessions-project { color: var(--ink-soft); overflow-wrap: anywhere; }
+.sessions-when, .sessions-cost, .sessions-line-cost, .sessions-counts > * { font-variant-numeric: tabular-nums; }
+.sessions-project { grid-column: 4 / -2; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+.sessions-agents { font-size: 12px; font-weight: 400; color: var(--ink-soft); }
+.sessions-children { margin: 4px 0 0 13px; padding-left: 9px; border-left: 1px solid var(--line); }
+.sessions-children > .sessions-row > details > summary { font-size: 12px; }
+.sessions-children > .sessions-row > details > summary > .sessions-project { font-weight: 400; color: var(--ink-soft); }
+.sessions-children > .sessions-row > details > summary .sessions-estimate { font-weight: 500; }
 .sessions-body { padding-bottom: 8px; }
 .sessions-line { padding-top: 2px; padding-bottom: 2px; font-size: 12px; }
 .sessions-line-head { color: var(--ink-soft); font-weight: 500; }
-.sessions-span { grid-column: 2 / 5; }
+.sessions-span { grid-column: 2 / 5; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; }
+.sessions-span > .info-wrap { align-self: center; }
 .sessions-model { font-family: var(--mono); overflow-wrap: break-word; }
-.sessions-as { display: block; color: var(--ink-faint); }
-.sessions-counts { display: contents; }
+.sessions-line-cost { grid-row: 1; }
+.sessions-counts { grid-column: 5 / -2; grid-row: 1; display: grid; grid-template-columns: subgrid; }
 .sessions-counts > * { text-align: right; }
-.sessions-aside { margin-left: 30px; }
+.sessions-line + .sessions-aside { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--cell-line); }
+.sessions-aside + .sessions-aside { margin-top: 4px; }
 .sessions-by-model summary { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
 @container content (width < 1000px) {
   .sessions-content { --sessions-columns: 12px 128px 100px minmax(0, 1fr) 150px; }
-  .sessions-counts { display: flex; flex-wrap: wrap; gap: 0 12px; grid-column: 2 / -1; color: var(--ink-soft); }
+  .sessions-span { grid-column: 2 / 4; }
+  .sessions-line-cost { grid-column: 4 / -1; }
+  .sessions-counts { display: flex; flex-wrap: wrap; gap: 0 12px; grid-column: 2 / -1; grid-row: 2; color: var(--ink-soft); }
   .sessions-counts > span::after { content: " " attr(data-label); }
   .sessions-line-head > .sessions-counts { display: none; }
 }
@@ -2350,7 +2366,7 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .repo-change-removed { color: var(--danger); }
 .repo-change-held { color: var(--ink-soft); }
 .repo-field-below { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-.repo-field-below .mono { font-size: 11.5px; white-space: nowrap; }
+.repo-field-head { display: inline-flex; align-items: center; gap: 4px; min-height: 20px; }
 .band-danger #repo-try-again { margin-left: auto; height: 26px; padding: 0 10px; flex: none; color: var(--ink); }
 .repo-row-held .repo-row-name { color: var(--ink-soft); }
 .repo-empty-side { margin: 0; padding: 10px 0; color: var(--ink-soft); }
@@ -2366,10 +2382,11 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .band.repo-confirm { justify-content: flex-end; }
 .band.repo-confirm .band-text { flex: 0 1 auto; text-align: right; }
 /* The start page begins at the top, as the connected page does, not floating mid-window. */
-.repo-page > .scroll > .empty { justify-content: flex-start; padding-top: 40px; }
+.repo-page > .scroll > .empty { justify-content: flex-start; padding-top: 16px; padding-bottom: 16px; }
+.repo-page > .scroll > .empty > .empty-tile { margin-bottom: 0; }
 .repo-page > .scroll { container-type: inline-size; }
 .repo-start { width: 100%; display: flex; flex-direction: column; gap: 12px; margin-top: 8px; text-align: left; }
-.repo-fold-body { container-type: inline-size; display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.repo-fold-body { container-type: inline-size; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .repo-connect { container-type: inline-size; display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--lift); }
 .repo-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 /* The form's fields take their column's width (the Plugins page sizes its own add field at short heights). */
@@ -2377,7 +2394,7 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .repo-fields { display: flex; flex-direction: column; gap: 12px; }
 @container (min-width: 540px) { .repo-fields { display: grid; grid-template-columns: minmax(0, 1fr) 160px; align-items: start; gap: 12px 16px; } }
 .repo-field-hint { margin-left: 6px; font-weight: 400; color: var(--ink-faint); }
-.repo-connect-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.repo-connect-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .repo-start .btn { margin-top: 0; }
 .repo-connect-note { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-layout { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; font-size: 12px; line-height: 18px; }
