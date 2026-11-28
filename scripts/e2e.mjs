@@ -2567,6 +2567,18 @@ async function practiceFlow() {
   await switchFromBar('Incident');
   check('the switch’s result shows on Skills, with Undo switch', /^Switched to Incident/.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
   same('a skill it leaves out is under Off, in Central Knot only', [(await sectionsNow(a, 'skills')).find(([section]) => section === 'off')?.[1], folders('standup')], [['release-notes', 'review', 'standup'], gone]);
+  /** One picture at `size` in `theme`, with the sidebar open (under --shots), after `ready` (run at that size); the window is left at that size. */
+  const shotOpen = async (name, [width, height], theme, ready = async () => {}) => {
+    if (!shots) return;
+    await withSidebarOpen(a, width, height, async () => {
+      await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+      await wait(80);
+      await ready();
+      await a.shot(name);
+      await a.run(`window.centralKnot.setAppearance('system')`);
+      await wait(80);
+    });
+  };
   // History’s Undo ending the profile in use says so after its own words, keeping warnings and buttons; an Undo that leaves it,
   // a refused one, a profile switch’s own Undo, and an Undo with no profile in use add nothing.
   {
@@ -2733,18 +2745,6 @@ async function practiceFlow() {
   check('undoing a profile’s own switch from History adds no profile sentence',
     /^Undone: 3 items turned on\./.test(profileUndoText) && !/stopped being the profile|· changed/.test(profileUndoText) && (await a.text('#status-profile'))?.trim() === 'No profile',
     [profileUndoText, await a.text('#status-profile')]);
-  /** One picture at `size` in `theme`, with the sidebar open (under --shots), after `ready` (run at that size); the window is left at that size. */
-  const shotAt = async (name, [width, height], theme, ready = async () => {}) => {
-    if (!shots) return;
-    await withSidebarOpen(a, width, height, async () => {
-      await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
-      await wait(80);
-      await ready();
-      await a.shot(name);
-      await a.run(`window.centralKnot.setAppearance('system')`);
-      await wait(80);
-    });
-  };
   await openKind(a, 'skills');
   await switchFromBar('Incident');
   // Every ordinary act that ends Incident says so; its Undo, on-then-off in one run, a keep-out, and a switch from the bar say none.
@@ -2754,7 +2754,7 @@ async function practiceFlow() {
   same('before the click, the opened row says the profile is then Incident · changed, Incident staying saved on hover',
     [(await a.text(standupEnds))?.trim(), await a.run(`document.querySelector(${JSON.stringify(standupEnds)})?.title`)],
     ['If on, only this item changes: the profile is then Incident · changed.', 'Incident stays saved: Undo, or switching to it again, puts it back in use.']);
-  await shotAt('profile-changed-forecast-860-light', SMALLEST, 'light', () => a.run(`document.querySelector(${JSON.stringify(standupEnds)})?.scrollIntoView({ block: 'center' })`));
+  await shotOpen('profile-changed-forecast-860-light', SMALLEST, 'light', () => a.run(`document.querySelector(${JSON.stringify(standupEnds)})?.scrollIntoView({ block: 'center' })`));
   await fullSize(a);
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
   const rowEndsText = await headerResultWords(a);
@@ -2763,7 +2763,7 @@ async function practiceFlow() {
     [rowEndsText, await a.text('#status-profile')]);
   await withSidebarOpen(a, ...SMALLEST, async () => {
     await checkCard(a, 'profile-changed-info', 'The next switch sets it as Incident says.', 'the result’s (?) beside Incident · changed says what the next switch does');
-    await shotAt('profile-changed-result-card-860-light', SMALLEST, 'light', () => a.click('#profile-changed-info'));
+    await shotOpen('profile-changed-result-card-860-light', SMALLEST, 'light', () => a.click('#profile-changed-info'));
     if (shots) await a.press('Escape');
   });
   await fullSize(a);
@@ -2916,8 +2916,8 @@ async function practiceFlow() {
     [await a.text('.profile-header h2'), await a.text('.profile-row.selected .profile-changed'), await a.run(`document.querySelector('.profile-row.selected .profile-changed')?.title`),
       await a.exists('.profile-row .profile-in-use'), await a.text('#profile-preview')],
     ['Incident · changed', 'Changed', 'Incident was switched to last, and what is on has changed since. The next switch sets it as Incident says.', false, 'Switching turns 1 off']);
-  await shotAt('profile-changed-bar-header-860-light', SMALLEST, 'light');
-  await shotAt('profile-changed-bar-header-1316-dark', [1316, 819], 'dark');
+  await shotOpen('profile-changed-bar-header-860-light', SMALLEST, 'light');
+  await shotOpen('profile-changed-bar-header-1316-dark', [1316, 819], 'dark');
   await fullSize(a);
   await a.click('#status-profile');
   same('the status bar’s menu names Incident as changed, unticked, a click away from switching back', [await a.all('.pf-menu-item .pf-menu-name', 'e.textContent'), await a.exists('.pf-menu-item[aria-checked="true"]')],
@@ -2925,7 +2925,7 @@ async function practiceFlow() {
   await a.click('#status-profile');
   await a.click('#nav-harnesses');
   same('Harnesses names it the same way: Profile: Incident · changed.', [(await a.text('.tools-note > span'))?.includes('Profile: Incident · changed.'), await a.text('#harnesses-profile')], [true, 'Incident · changed']);
-  await shotAt('profile-changed-harnesses-860-light', SMALLEST, 'light');
+  await shotOpen('profile-changed-harnesses-860-light', SMALLEST, 'light');
   await fullSize(a);
   // On History, the switch's Undo turns back only what is still as the switch left it: standup, turned on since, stays.
   await a.click('#nav-history');
