@@ -4,7 +4,9 @@
 // time, beside it a (?) holding what a check does on this computer (mcpsignin.ts checkLine) and how many cells need a sign-in now
 // (signinsNeeded); a cell that needs a sign-in offers that tool's own command to copy, or, where its cell offers that tool's sign-in
 // (mcpsignin.ts offersSignin), Sign in (signIn), with Stop while it waits;
-// nothing else is started. What each check and sign-in said lives in app.ts state.mcpSignin for the home it was made in, until
+// nothing else is started. Each server of your own gets the file mark after its name, opening its entry in a full-width row
+// under it (signinFiles → filepanel.ts itemFile, filepanel.ts placePanel; plugins' servers get no mark yet). What each check
+// and sign-in said lives in app.ts state.mcpSignin for the home it was made in, until
 // Central Knot quits; nothing is stored. The rows keep the places they had when he came to the page (inPlace). The rows, which cells a check holds for, the
 // cells' words, which cells a row has (cellTools), the count, a column's own time, a session-only head, the line, the cards and the
 // commands are mcpsignin.ts's; the controls', `MCP server`, Local, `In the plugin …`, the marks' labels, a check's refusal and the
@@ -12,6 +14,7 @@
 import { pinnedRows, rerender, state } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, emptyState, h, infoMark } from './dom.ts';
+import { itemFile, pagePlace, placePanel, type FileMark } from './filepanel.ts';
 import { pin } from './itemrow.ts';
 import { askedNow, cannotRun, cellNow, cellTools, checkLine, connectedCard, grouped, IN_SESSION, listCommand, LOCAL_CARD, offersSignin, ownTime, SAID,
   SESSION_CARD, signinRows, signinsNeeded, signinStarted, type CellSays, type SigninRow } from './mcpsignin.ts';
@@ -108,10 +111,18 @@ function columnHead(tool: HarnessId, mark: Mark, does: string | undefined) {
       when ? h('span.signin-when', { id: `signin-when-${tool}` }, when) : null) : h('span.signin-when', {}, keep(IN_SESSION[tool]?.head, mark('session'))));
 }
 
-/** A row's first cell: the server's name, Local where it runs on this computer (by its transport alone), and the plugin it comes in. */
-const nameCell = (row: SigninRow, mark: Mark) => h('th.signin-name', { scope: 'row' }, h('span.signin-server', {}, row.name),
-  row.transport === 'stdio' ? h('span.signin-local', {}, 'Local', mark('local')) : null,
-  row.plugin ? h('span.signin-plugin', {}, `In the plugin ${row.plugin}`) : null);
+/** MCP sign-in as a file panel's place (filepanel.ts pagePlace): a server of your own opens its entry under its row (found ones too, or a home with nothing taken in would show no mark; plugins' have no reader yet). */
+const signinFiles = pagePlace('mcpsignin', { foundAndPlugins: true });
+
+/** A row's first cell: the server's name with its file mark bound to its last few letters (or short last segment) so wrapping never orphans it or widens the column, Local, and the plugin it comes in. */
+const nameCell = (row: SigninRow, mark: Mark, file?: FileMark) => {
+  const seg = file ? /(?:^|[\s-])([^\s-]+-*)$/.exec(row.name)?.[1] ?? row.name : '';
+  const tail = seg.length <= 5 ? seg : [...seg].slice(-3).join('');
+  return h('th.signin-name', { scope: 'row' },
+    h('span.signin-server', {}, ...(file ? [row.name.slice(0, row.name.length - tail.length), h('span.signin-keep', {}, tail, file.mark)] : [row.name])),
+    row.transport === 'stdio' ? h('span.signin-local', {}, 'Local', mark('local')) : null,
+    row.plugin ? h('span.signin-plugin', {}, `In the plugin ${row.plugin}`) : null);
+};
 
 /** Sign in or Try again, which starts the tool's own sign-in, or Stop: a cell's sign-in button (mcpsignin.ts CellSays act). */
 function actButton(tool: HarnessId, row: SigninRow, act: NonNullable<CellSays['act']>, id: string) {
@@ -141,13 +152,17 @@ function cellView(tool: HarnessId, row: SigninRow, mark: Mark, offers: boolean) 
 
 export function mcpSigninPage() {
   const home = state.home;
-  if (!home) return notRead();
-  if (!home.sync.managed.length) return h('div.page', {}, noToolsState('mcpsignin'));
+  if (!home || !home.sync.managed.length) {
+    placePanel(signinFiles, []);
+    return home ? h('div.page', {}, noToolsState('mcpsignin')) : notRead();
+  }
   const rows = inPlace(signinRows(home));
+  const marks = rows.map(row => (row.plugin ? undefined : itemFile(signinFiles, 'mcp', row.id)));
+  const file = placePanel(signinFiles, marks);
+  if (!rows.length) return h('div.page', {}, emptyState('plug', 'No MCP servers in your tools.', undefined));
   const tools = columnsOf(home, rows);
   const checked = tools.filter(tool => listCommand[tool]);
   const mark = marksOnce(tools);
-  if (!rows.length) return h('div.page', {}, emptyState('plug', 'No MCP servers in your tools.', undefined));
   const runs = checked.filter(tool => !cannotRun(state.mcpSignin, home, tool));
   const openCode = home.snapshots.find(snapshot => snapshot.harness === 'opencode-cli')?.probe.version, line = checkLine(rows, runs, openCode);
   const all = state.mcpSignin.all, needed = signinsNeeded(rows, state.mcpSignin, runs);
@@ -162,5 +177,11 @@ export function mcpSigninPage() {
         keep(needed.words, needed.stillToCheck ? infoMark('signin-needed-mark', 'the columns still to check', needed.stillToCheck) : null)) : null) : null,
     h('table.signin-table', {},
       h('thead', {}, h('tr', {}, h('th.signin-name', { scope: 'col' }, 'MCP server'), ...tools.map(tool => columnHead(tool, mark, runs.includes(tool) ? checkLine(rows, [tool], openCode) : undefined)))),
-      h('tbody', {}, ...rows.map(row => h('tr', { 'data-row': row.id }, nameCell(row, mark), ...tools.map(tool => cellView(tool, row, mark, offers[tool]!))))))));
+      h('tbody', {}, ...rows.flatMap((row, index) => {
+        const panel = file && file.mark === marks[index] ? file.panel : null;
+        return [
+          h(`tr${panel ? '.file-anchored' : ''}`, { 'data-row': row.id }, nameCell(row, mark, marks[index]), ...tools.map(tool => cellView(tool, row, mark, offers[tool]!))),
+          panel ? h('tr.signin-file', {}, h('td', { colspan: tools.length + 1 }, panel)) : null,
+        ];
+      })))));
 }
