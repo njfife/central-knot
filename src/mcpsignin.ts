@@ -167,17 +167,17 @@ export function grouped(rows: SigninRow[], checks: SigninChecks): SigninRow[] {
 /**
  * The head's count (mcpsigninpage.ts): how many of the cells the page draws (cellTools) need a sign-in now (CellSays need), in
  * words; "At least" while a column whose check can run here (`checkable`) has a cell its check hasn't answered, not checked since
- * or its check failed, those columns in its hover (`title`); a session-only tool's, one that can't tell or a server it couldn't
+ * or its check failed, those columns said for its (?) (`stillToCheck`); a session-only tool's, one that can't tell or a server it couldn't
  * reach never makes it so. None while no cell needs one.
  */
-export function signinsNeeded(rows: SigninRow[], checks: SigninChecks, checkable: HarnessId[]): { words: string; title?: string } | undefined {
+export function signinsNeeded(rows: SigninRow[], checks: SigninChecks, checkable: HarnessId[]): { words: string; stillToCheck?: string } | undefined {
   const cells = rows.flatMap(row => cellTools(checks, row).map(tool => ({ tool, row, need: cellNow(checks, tool, row, false).need })));
   const count = cells.filter(cell => cell.need).length;
   if (!count) return undefined;
   const unanswered = (tool: HarnessId, row: SigninRow) => { const answer = answerFor(checks, tool, row); return !answer || 'failed' in answer || 'unreadable' in answer; };
   const toCheck = checkable.filter(tool => cells.some(cell => cell.tool === tool && cell.need === undefined && unanswered(tool, cell.row)));
   const words = `${plural(count, 'sign-in')} needed`;
-  return toCheck.length ? { words: `At least ${words}`, title: `Still to check: ${andList(toCheck.map(tool => toolNames[tool]))}` } : { words };
+  return toCheck.length ? { words: `At least ${words}`, stillToCheck: `Still to check: ${andList(toCheck.map(tool => toolNames[tool]))}` } : { words };
 }
 
 // ---------- Which cells a check holds for ----------
@@ -367,9 +367,10 @@ function endWords(tool: HarnessId, end: Exclude<SigninEnd, { signedIn: true }>):
  */
 export function cellNow(checks: SigninChecks, tool: HarnessId, row: SigninRow, offers: boolean): CellSays {
   if (signinWaits(checks, tool, row)) {
-    // Its Stop stays whatever became of the copy; the need is the copy's there now: what its column says of it (Off: none), or none
-    // where the tool no longer has the server.
-    const cell = row.cells[tool], same = !!cell && !cell.off && checks.signins![signinKey(tool, row.id)]!.copy === cellKey(row, cell);
+    // Its Stop stays whatever became of the copy. It needs a sign-in while its copy has stayed on there since it started (SigninRun
+    // gone); else the need is the copy's there now: what its column says of it (Off: none), or none where the tool no longer has it.
+    const cell = row.cells[tool], run = checks.signins![signinKey(tool, row.id)]!;
+    const same = !!cell && !cell.off && !run.gone && run.copy === cellKey(row, cell);
     const need = same || (cell ? cellSays(tool, row, answerFor(checks, tool, row)).need : false);
     return { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true, ...(need === undefined ? {} : { need }) };
   }

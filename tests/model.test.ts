@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
-import { atMostEvery, caughtUpNames, clockTime, dayWords, holdingBuild, oneTurn, plural, timeAgo, timeOrDay, timesApart } from '../src/model.ts';
+import { atMostEvery, caughtUpNames, clockTime, dayWords, holdingBuild, nearDay, oneTurn, plural, timeAgo, timeOrDay, timesApart } from '../src/model.ts';
 
 test('plural words read naturally', () => {
   assert.equal(plural(1, 'copy', 'copies'), '1 copy');
@@ -63,6 +63,19 @@ test('A kept time says its clock time on the day it was kept, then its day (yest
   assert.deepEqual([back(0), back(1), back(3)].map(timeOrDay), [whole(clockTime(back(0))), 'yesterday', whole(dayWords(back(3)))]);
   assert.notEqual(timeOrDay(back(3)), 'yesterday');
   assert.match(timeOrDay(back(0, 1)), new RegExp(String(new Date(back(0, 1)).getFullYear())));
+});
+
+test('Yesterday is the calendar day before, the night the clocks go back too (a day of 25 hours)', () => {
+  const zone = process.env.TZ;
+  process.env.TZ = 'Europe/London';
+  // 23:30 on 25 October 2026 in London, whose clocks went back an hour at 02:00 that day: 24 hours earlier is still the 25th.
+  mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-25T23:30:00Z') });
+  try {
+    assert.deepEqual(['2026-10-25T08:00:00Z', '2026-10-24T09:00:00Z'].map(nearDay), ['today', 'yesterday']);
+  } finally {
+    mock.timers.reset();
+    if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone;
+  }
 });
 
 test('What holds this build, one install at a time: nothing is written before the first look answers, then the first other build found holds it; none found, or whether one is here can’t be told, holds nothing', () => {

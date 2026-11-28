@@ -11866,6 +11866,9 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('above the table only Check all and what a check does: no paragraphs, no time before a check',
     [await a.exists('.signin-intro'), await a.exists('#signin-checked'), ...await top()],
     [false, false, 'Check starts local servers in Claude Code, Pi and OpenCode; OpenCode adds $schema to its config files.', true]);
+  same('each column’s Check says in its hover what that check does on this computer, in the words beside Check all',
+    await a.all('[id^="signin-check-"]:not(#signin-check-all)', '[e.id.slice(13), e.title]'), [['claude-cli', 'Check starts local servers in Claude Code.'],
+      ['codex-cli', 'Check contacts remote servers in Codex.'], ['pi-cli', 'Check starts local servers in Pi.'], ['opencode-cli', 'Check starts local servers in OpenCode; OpenCode adds $schema to its config files.']]);
   same('what a check does is behind a (?) right beside Check all, not a sentence on the page', await a.run(`(() => {
     const button = document.querySelector('#signin-check-all').getBoundingClientRect(), mark = document.querySelector('#signin-line-mark')?.getBoundingClientRect();
     return [!!document.querySelector('#signin-line'), !!mark && mark.left >= button.right && mark.left - button.right <= 8 && Math.abs(mark.top + mark.bottom - button.top - button.bottom) <= 4]; })()`), [false, true]);
@@ -12279,7 +12282,33 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   // come first, in sight under the head at 860. Another page and back starts nothing. Codex's sign-in of oauth makes it one. Checks
   // made yesterday and three days ago (the page's clock set back by calendar days while each ran) say so, on one line, when the page
   // is drawn again; this home opened again says nothing of them.
-  const needed = async () => [await a.text('#signin-needed'), await a.run(`document.querySelector('#signin-needed')?.getAttribute('title') ?? null`)];
+  /** The count as it reads (its (?) aside), and what its (?) holds. */
+  const needed = async () => [await a.run(`(count => count && [...count.childNodes].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''))(document.querySelector('#signin-needed'))`),
+    await a.text('#signin-needed-mark-card')];
+  /**
+   * At this size, each (?) after a cell's words: the ids of those more than a pixel and a half off the middle of their word, or
+   * whose word sits off the row of the words before it on that line.
+   */
+  const OFF_ROW = `[...document.querySelectorAll('.signin-cell .signin-keep')].flatMap(keep => {
+    const mark = keep.querySelector('.info-mark'), range = document.createRange(), before = keep.previousSibling;
+    if (!mark) return [];
+    range.selectNodeContents(keep.firstChild);
+    const word = range.getBoundingClientRect(), own = mark.getBoundingClientRect();
+    range.selectNodeContents(before ?? keep.firstChild);
+    const line = before?.nodeType === 3 && before.textContent.trim() ? [...range.getClientRects()].at(-1) : word, apart = Math.abs(line.top - word.top);
+    return Math.abs(own.top + own.bottom - word.top - word.bottom) / 2 > 1.5 || (apart > 0.5 && apart < word.height) ? [mark.id] : [];
+  })`;
+  /** The (?) `mark` opened at 860 with the page at its top: whether its card stays off the words it belongs to. */
+  const clearOfWords = async mark => {
+    await sizeTo(a, ...SMALLEST); await shape(false);
+    await a.run(`document.querySelector('#mcpsignin-scroll').scrollTop = 0`);
+    await a.click(byId(mark));
+    const clear = await a.run(`((card, words) => !!card && (card.bottom <= words.top || card.top >= words.bottom || card.right <= words.left || card.left >= words.right))(
+      document.getElementById(${JSON.stringify(`${mark}-card`)})?.getBoundingClientRect(), document.getElementById(${JSON.stringify(mark)}).closest('.signin-words, .signin-need').getBoundingClientRect())`);
+    if (await a.run(`!!document.getElementById(${JSON.stringify(`${mark}-card`)})?.matches(':popover-open')`)) await a.click(byId(mark));
+    await fullSize(a);
+    return clear;
+  };
   /** The page from its top, at `size`, in `theme`, with the (?) `mark` held open where one is named (with --shots). */
   const headShot = async (name, [width, height], theme, mark) => {
     if (!shots) return;
@@ -12302,12 +12331,13 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('before any check the head counts nothing', await a.exists('#signin-needed'), false);
   await a.click('#signin-check-claude-cli');
   await checked('claude-cli');
-  same('Claude Code checked: at least one sign-in needed, the columns still to check in its hover; its server it couldn’t reach not counted',
+  same('Claude Code checked: at least one sign-in needed, the columns still to check behind its (?); its server it couldn’t reach not counted',
     [...await needed(), (await column('claude-cli')).down], ['At least 1 sign-in needed', 'Still to check: Codex, Pi and OpenCode', 'Couldn’t reach']);
   await a.click('#signin-check-codex-cli');
   await checked('codex-cli');
   same('Codex checked too: oauth needs a sign-in in both, at least two', [...await needed(), (await column('claude-cli')).oauth, (await codexCell('oauth'))[0]],
     ['At least 2 sign-ins needed', 'Still to check: Pi and OpenCode', 'Needs sign-in', 'Needs sign-in']);
+  same('… its (?) is a button of its own after the words', await a.run(`document.querySelector('#signin-needed .info-mark')?.id ?? null`), 'signin-needed-mark');
   const pageFrom = started().length;
   await a.click('#nav-library');
   await a.click('#nav-mcpsignin');
@@ -12319,8 +12349,13 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
     const area = document.querySelector('#mcpsignin-scroll').getBoundingClientRect(), cell = document.getElementById(${JSON.stringify(await cellId('claude-cli', 'oauth'))}).getBoundingClientRect();
     return cell.top >= area.top && cell.bottom <= area.bottom; })()`)], [['oauth', 'broken (tracker)'], true]);
   await fullSize(a);
+  await sizeTo(a, 1316, 819); await shape(false);
+  same('at 1316 each (?) in a cell sits on the middle of its word, its word on the row of the words before it', await a.run(OFF_ROW), []);
+  await fullSize(a);
+  same('a fault’s card, opened at 860, stays off its words', await clearOfWords(`signin-why-claude-cli-${await rowIdOf('down')}`), true);
   await headShot('two', SMALLEST, 'light');
   await headShot('two', [1316, 819], 'dark');
+  await headShot('more', SMALLEST, 'light', 'signin-needed-mark');
   await headShot('line', SMALLEST, 'light', 'signin-line-mark');
   await headShot('fault', SMALLEST, 'light', `signin-why-claude-cli-${await rowIdOf('down')}`);
   writeFileSync(join(said, 'codex.login'), 'accept');
@@ -12358,10 +12393,30 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('at 860 a time or a date stays on one line', [await timeLines('claude-cli'), await timeLines('codex-cli'), await timeLines('pi-cli')], [1, 1, 1]);
   await fullSize(a);
   await headShot('dated', SMALLEST, 'light');
+  // Codex's only server needs a sign-in, which waits; then Codex no longer has it while Claude Code still does: Codex's column
+  // stays, with that cell's Stop, which ends it.
+  write('.codex/config.toml', `[mcp_servers.oauth]\nurl = "${P(47202)}"\n`);
+  await a.click('#header-refresh');
+  await a.click('#signin-check-codex-cli');
+  await checked('codex-cli');
+  writeFileSync(join(said, 'codex.login'), 'wait');
+  const goneFrom = listened().length;
+  await a.click(await act('oauth'));
+  await until(async () => listened().length === goneFrom + 1, 'the sign-in on Codex’s only server to listen');
+  write('.codex/config.toml', '');
+  await a.click('#header-refresh');
+  same('Codex’s only server gone from Codex while its sign-in waits: Codex’s column stays, that cell with its Stop',
+    [await a.exists('.signin-head[data-tool="codex-cli"]'), await a.text(await act('oauth'))], [true, 'Stop']);
+  await headShot('gone', SMALLEST, 'light');
+  if (await a.exists(await act('oauth'))) await a.click(await act('oauth'));
+  await until(async () => !(await a.exists('.signin-head[data-tool="codex-cli"]')), 'the stopped sign-in to end, and Codex’s column with it');
+  write('.codex/config.toml', codexConfig);
+  await a.click('#header-refresh');
+  const switchFrom = started().length;
   await a.click('#home-actual');
   await a.click('#nav-mcpsignin');
   await wait(500);
-  same('this home opened again: no count, and nothing started', [await a.exists('#signin-needed'), started().length - dayFrom], [false, 0]);
+  same('this home opened again: no count, and nothing started', [await a.exists('#signin-needed'), started().length - switchFrom], [false, 0]);
   writeFileSync(join(said, 'claude'), outputs.claude);
   rmSync(ports);
   // A tool's only local server switched off there (Pi's tickets): it isn't started, so Pi, with only remote servers on, isn't named.

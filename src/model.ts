@@ -66,10 +66,14 @@ export const DAY_MS = 86_400_000;
 /** How many days History can keep changes and deleted items (Settings), and how many it keeps unless told otherwise. */
 export const historyDayChoices: readonly HistoryDays[] = [7, 30, 90];
 export const defaultHistoryDays: HistoryDays = 30;
-/** 'today' or 'yesterday' for a time on one of those days, in the person's own time zone; undefined otherwise. */
+/**
+ * 'today' or 'yesterday' for a time on one of those days, in the person's own time zone; undefined otherwise. Yesterday is the
+ * calendar day before, not 24 hours back: the night the clocks go back has 25.
+ */
 export function nearDay(iso: string): 'today' | 'yesterday' | undefined {
-  const day = new Date(iso).toDateString();
-  return day === new Date().toDateString() ? 'today' : day === new Date(Date.now() - DAY_MS).toDateString() ? 'yesterday' : undefined;
+  const day = new Date(iso).toDateString(), before = new Date();
+  before.setDate(before.getDate() - 1);
+  return day === new Date().toDateString() ? 'today' : day === before.toDateString() ? 'yesterday' : undefined;
 }
 /** "today", "yesterday", else "Nov 8" (with the year when it isn't this one). */
 export function dayWords(iso: string): string {

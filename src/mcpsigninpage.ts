@@ -21,8 +21,8 @@ import { copyButton, noToolsState, notRead } from './pages.ts';
 import { toolNames } from './words.ts';
 import type { HarnessId, HomeView } from './types.ts';
 
-/** The tools with a column: the managed tools that have one of the servers, in the tools' order. */
-const columnsOf = (home: HomeView, rows: SigninRow[]) => home.mcp.tools.filter(tool => rows.some(row => row.cells[tool]));
+/** The tools with a column: the managed tools with a cell in some row (mcpsignin.ts cellTools: a sign-in that waits keeps its own), in the tools' order. */
+const columnsOf = (home: HomeView, rows: SigninRow[]) => home.mcp.tools.filter(tool => rows.some(row => cellTools(state.mcpSignin, row).includes(tool)));
 /** Why every Check waits: the check under way, if one is. */
 const waitsFor = () => (state.mcpSignin.checking ? `Checking ${toolNames[state.mcpSignin.checking.tool]}…` : false);
 
@@ -93,15 +93,18 @@ function marksOnce(tools: HarnessId[]) {
 }
 type Mark = ReturnType<typeof marksOnce>;
 
-/** A column's head: the tool's name, then its Check and its own time where it shows one (mcpsignin.ts ownTime), or where a session-only tool's sign-in shows. */
-function columnHead(tool: HarnessId, mark: Mark) {
+/**
+ * A column's head: the tool's name, then its Check, whose hover is what that check does here (`does`: mcpsignin.ts checkLine of this
+ * column), and its own time where it shows one (mcpsignin.ts ownTime); or where a session-only tool's sign-in shows.
+ */
+function columnHead(tool: HarnessId, mark: Mark, does: string | undefined) {
   const own = ownTime(state.mcpSignin, tool);
   const failed = state.mcpSignin.failed?.[tool];
   const when = state.mcpSignin.checking?.tool === tool ? 'Checking…' : failed ? `Couldn’t run the check: ${failed}` : own ? `Checked ${own}` : '';
   return h('th.signin-head', { scope: 'col', 'data-tool': tool },
     h('span.signin-tool', {}, brandMark(tool, 14), toolNames[tool]),
     listCommand[tool] ? h('span.signin-check', {},
-      button({ size: 'small', label: 'Check', name: `Check: run ${toolNames[tool]}’s own command for its MCP servers`, id: `signin-check-${tool}`, disabled: waitsFor(), onclick: () => void checkColumns([tool]) }),
+      button({ size: 'small', label: 'Check', name: `Check: run ${toolNames[tool]}’s own command for its MCP servers`, id: `signin-check-${tool}`, disabled: waitsFor(), attrs: { title: does }, onclick: () => void checkColumns([tool]) }),
       when ? h('span.signin-when', { id: `signin-when-${tool}` }, when) : null) : h('span.signin-when', {}, keep(IN_SESSION[tool]?.head, mark('session'))));
 }
 
@@ -128,7 +131,7 @@ function cellView(tool: HarnessId, row: SigninRow, mark: Mark, offers: boolean) 
   const copy = says.command ? copyButton(says.command, says.command, `signin-copy-${id}`, says.act ? 'Copy command' : 'Copy', 'Copied: run it in a terminal') : null;
   // A sign-in's button, with Copy where it has one, on a line of their own under the words; else Copy beside the words.
   return h(`td.signin-cell${says.tone ? `.tone-${says.tone}` : ''}`, { id: `signin-cell-${id}`, title: says.title },
-    h('span.signin-words', {}, says.words === SAID.connected ? keep(says.words, mark('connected'))
+    h('span.signin-words', { 'data-info-block': '' }, says.words === SAID.connected ? keep(says.words, mark('connected'))
       : says.why ? keep(says.words, infoMark(`signin-why-${id}`, `what ${toolNames[tool]} said`, says.why)) : says.words, says.act ? null : copy),
     says.act ? h('span.signin-acts', {}, actButton(tool, row, says.act, `signin-act-${id}`), copy) : null,
     shown ? h('code.signin-command', {}, shown) : null);
@@ -144,7 +147,7 @@ export function mcpSigninPage() {
   const mark = marksOnce(tools);
   if (!rows.length) return h('div.page', {}, emptyState('plug', 'No MCP servers in your tools.', undefined));
   const runs = checked.filter(tool => !cannotRun(state.mcpSignin, home, tool));
-  const line = checkLine(rows, runs, home.snapshots.find(snapshot => snapshot.harness === 'opencode-cli')?.probe.version);
+  const openCode = home.snapshots.find(snapshot => snapshot.harness === 'opencode-cli')?.probe.version, line = checkLine(rows, runs, openCode);
   const all = state.mcpSignin.all, needed = signinsNeeded(rows, state.mcpSignin, runs);
   const platform = pagePlatform(navigator.userAgent), offers = Object.fromEntries(tools.map(tool => [tool, offersSignin(tool, home.mode === 'actual' && home.sync.access.allowed, platform)]));
   return h('div.page', {}, h('div.scroll.signin-scroll', { id: 'mcpsignin-scroll' },
@@ -153,8 +156,9 @@ export function mcpSigninPage() {
         button({ label: 'Check all', name: 'Check all: run each tool’s own command, one after another', id: 'signin-check-all', disabled: waitsFor(), onclick: () => void checkColumns(checked, true) }),
         line ? infoMark('signin-line-mark', 'what Check does', line) : null),
       all ? h('span.signin-when', { id: 'signin-checked' }, `Checked ${timeOrDay(all)}`) : null,
-      needed ? h('span.signin-need.tone-warning', { id: 'signin-needed', title: needed.title }, needed.words) : null) : null,
+      needed ? h('span.signin-need.tone-warning', { id: 'signin-needed' },
+        keep(needed.words, needed.stillToCheck ? infoMark('signin-needed-mark', 'the columns still to check', needed.stillToCheck) : null)) : null) : null,
     h('table.signin-table', {},
-      h('thead', {}, h('tr', {}, h('th.signin-name', { scope: 'col' }, 'MCP server'), ...tools.map(tool => columnHead(tool, mark)))),
+      h('thead', {}, h('tr', {}, h('th.signin-name', { scope: 'col' }, 'MCP server'), ...tools.map(tool => columnHead(tool, mark, runs.includes(tool) ? checkLine(rows, [tool], openCode) : undefined)))),
       h('tbody', {}, ...rows.map(row => h('tr', { 'data-row': row.id }, nameCell(row, mark), ...tools.map(tool => cellView(tool, row, mark, offers[tool]!))))))));
 }

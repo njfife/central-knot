@@ -289,11 +289,11 @@ test('The head counts the sign-ins needed: each cell that needs one, “At least
     'codex-cli': { at, answer: { servers: { oauth: { is: 'needs-sign-in' } } }, asked: asked('codex-cli', [oauth]) } } };
   // Claude Code and Codex both need oauth signed in; Claude Code couldn't reach down, which isn't counted. Pi, which can be checked
   // here, isn't yet: at least two. Copilot CLI's sign-in shows only in its own sessions: it is never waited for.
-  assert.deepEqual(signinsNeeded([down, oauth], checks, ['claude-cli', 'codex-cli', 'pi-cli']), { words: 'At least 2 sign-ins needed', title: 'Still to check: Pi' });
+  assert.deepEqual(signinsNeeded([down, oauth], checks, ['claude-cli', 'codex-cli', 'pi-cli']), { words: 'At least 2 sign-ins needed', stillToCheck: 'Still to check: Pi' });
   // Pi's check failed, or its answer couldn't be read: still at least.
   for (const answer of [{ failed: 'timeout' }, { unreadable: 'Error' }] as const) {
     checks.columns['pi-cli'] = { at, answer, asked: asked('pi-cli', [oauth]) };
-    assert.deepEqual(signinsNeeded([down, oauth], checks, ['claude-cli', 'codex-cli', 'pi-cli']), { words: 'At least 2 sign-ins needed', title: 'Still to check: Pi' }, Object.keys(answer)[0]);
+    assert.deepEqual(signinsNeeded([down, oauth], checks, ['claude-cli', 'codex-cli', 'pi-cli']), { words: 'At least 2 sign-ins needed', stillToCheck: 'Still to check: Pi' }, Object.keys(answer)[0]);
   }
   // Pi answered, needing nothing; a fault and the session-only column leave the count whole.
   checks.columns['pi-cli'] = { at, answer: { servers: { oauth: { is: 'connected' } } }, asked: asked('pi-cli', [oauth]) };
@@ -322,6 +322,15 @@ test('A sign-in that waits keeps its Stop whatever became of its copy; the cell 
     assert.equal(cellTools(checks, each).includes('codex-cli'), true, what);
     assert.deepEqual(signinsNeeded([each], checks, ['codex-cli']), count, what);
   }
+  // Switched off and on again while it waits: neither its column's answer nor the sign-in holds for that copy any more (SigninRun
+  // gone), so the cell keeps its Stop and counts nothing.
+  const homeOf = (off: boolean) => view(['codex-cli'], [fact('oauth', { 'codex-cli': 'oauth' }, off ? { switchedOff: ['codex-cli'] as HarnessId[] } : {})]);
+  const [first] = signinRows(homeOf(false)), key = cellKey(first, first.cells['codex-cli']!);
+  const again: SigninChecks = { home: '/h', signins: kept({ tool: 'codex-cli', row: first.id, copy: key }),
+    columns: { 'codex-cli': { at: '2026-11-27T10:00:00Z', answer: { servers: { oauth: { is: 'needs-sign-in' } } }, asked: [key] } } };
+  for (const each of [homeOf(true), homeOf(false)]) followView(again, each);
+  const [back] = signinRows(homeOf(false));
+  assert.deepEqual([cellNow(again, 'codex-cli', back, true), signinsNeeded([back], again, ['codex-cli'])], [stop, undefined]);
 });
 
 test('What Codex said last is text: its colours and every other control character left out, cut past 200 characters', () => {
