@@ -6,19 +6,19 @@ import type { AppPreferences, HarnessId, HistoryEvent, HomeView } from '../src/t
 import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
-let onRestore: ((choice?: string) => void) | undefined;
+let onRestore: ((choice?: string) => Partial<{ results: unknown[]; harnessWrites: number; reloads: unknown[]; made: string[]; stopped?: string }> | void) | undefined;
 const settings: AppPreferences = { appearance: 'system', historyDays: 30, pluginUpdates: true, pluginText: true, signIn: { on: false, available: true } };
 const noop = () => {};
 installDom({
   getSettings: async () => ({ ...settings }),
-  restore: async (_id: string, _home: string, choice?: string) => { onRestore?.(choice); return { results: [], harnessWrites: 1, reloads: [], made: [] }; },
+  restore: async (_id: string, _home: string, choice?: string) => ({ results: [], harnessWrites: 1, reloads: [], made: [], ...(onRestore?.(choice) ?? {}) }),
   refresh: async () => state.home!,
   history: async () => ({ events: state.history.data ?? [], days: 30 }),
   onPluginTextChanged: noop, onUpdatesChanged: noop, onPluginUpdatesChanged: noop, onNavigate: noop,
   onSettingsChanged: noop, onSyncChanged: noop, onSessionCostsChanged: noop, onSaid: noop,
 }, { byId: id => findById(rendered, id) ?? null });
 
-const { setRenderer, state } = await import('../src/app.ts');
+const { restoreEvent, setRenderer, state } = await import('../src/app.ts');
 const { loadSettings } = await import('../src/settingspage.ts');
 const { forgetHistoryFolds, historyPage } = await import('../src/historypage.ts');
 
@@ -269,4 +269,59 @@ test('History: a deleted item restored while its last version kept is open under
   delete (state.home!.skills.library.gone as { deleted?: unknown }).deleted;
   marked.draw();
   assert.deepEqual([!!inRow('gone-deleted', 'details-file-only'), inRow('gone-deleted', 'row-file-btn')?.attrs.id], [false, 'file-skills-gone-gone-deleted']);
+});
+
+test('History band after Use names the pressed version choice with Undo, groups shared tools, keeps the new row’s sentence, and leaves refusals as today', async () => {
+  forgetHistoryFolds();
+  state.page = 'history';
+  state.busy = undefined;
+  state.outcome = undefined;
+  state.home = makeHome(six, six);
+  const madeAt = '2026-11-27T10:00:00.000Z';
+  const versions = [
+    { hash: 'w', at: madeAt, from: { how: 'edited' as const, harness: 'codex-cli' as HarnessId } },
+    { hash: 'x', at: madeAt, from: { how: 'edited' as const, harness: 'copilot-cli' as HarnessId } },
+    { hash: 'y', at: madeAt, from: { how: 'edited' as const, harness: 'pi-cli' as HarnessId } },
+    { hash: 'p', at: madeAt, from: { how: 'found' as const, harness: 'claude-cli' as HarnessId } },
+  ];
+  state.home.skills.library['active-skill'] = { key: 'active-skill', name: 'active-skill', on: true, hash: 'w', versions, except: [], applied: {}, own: {} };
+  const base = { at: madeAt, key: 'active-skill', of: 'skill' as const, item: 'active-skill', kind: 'conflict' as const, winner: { tool: 'codex-cli' as HarnessId, hash: 'w' }, previous: 'p', orderProved: true };
+  state.history.state = 'ready';
+  state.history.data = [
+    { ...base, id: 'c1', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }] },
+    { ...base, id: 'c-shared', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'x' }] },
+  ];
+  let seq = 0;
+  onRestore = choice => {
+    const id = `made-${++seq}`;
+    state.home!.skills.library['active-skill']!.hash = choice!;
+    state.history.data = [...state.history.data!, {
+      id, at: madeAt, key: 'active-skill', of: 'skill', item: 'active-skill', kind: 'current', version: choice!, previous: 'w',
+      losers: [{ tool: 'claude-cli', hash: 'w' }, { tool: 'codex-cli', hash: 'w' }], orderProved: true,
+    }];
+    return { results: [], harnessWrites: 2, reloads: [], made: [id] };
+  };
+  await restoreEvent('c1', 'x');
+  let page = draw();
+  assert.equal(textOf(findNode(page, el => el.classList.contains('band-text'))), 'active-skill: Copilot CLI’s version is now current.');
+  assert.equal(textOf(findById(page, 'outcome-undo')), 'Undo');
+  assert.match(textOf(findNode(findById(page, 'history-row-made-1'), el => el.classList.contains('history-about'))), /^The version edited in Copilot CLI \(.*\) was made current, in Claude Code and Codex\.$/);
+
+  state.home.skills.library['active-skill']!.hash = 'w';
+  await restoreEvent('c-shared', 'x');
+  page = draw();
+  assert.equal(textOf(findNode(page, el => el.classList.contains('band-text'))), 'active-skill: Copilot CLI and Pi’s version is now current.');
+  assert.equal(textOf(findById(page, 'outcome-undo')), 'Undo');
+
+  onRestore = () => ({ results: [], harnessWrites: 0, reloads: [], made: [], stopped: 'That version is no longer in Central Knot’s store, so it can’t be made current.' });
+  await restoreEvent('c1', 'x');
+  page = draw();
+  assert.deepEqual([
+    textOf(findNode(page, el => el.classList.contains('band-text'))),
+    findById(page, 'outcome-undo'),
+    !!findNode(page, el => el.classList.contains('tone-warning')),
+  ], ['active-skill: That version is no longer in Central Knot’s store, so it can’t be made current.', undefined, true]);
+  onRestore = undefined;
+  state.outcome = undefined;
+  forgetHistoryFolds();
 });

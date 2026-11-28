@@ -12,7 +12,7 @@ import { noToolsState } from './pages.ts';
 import { andList, toolName, touchedTools } from './words.ts';
 import { changeWords, entryTurns, NO_PROFILE, undoOffered, undoWords, wholeCounts } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
-import { doneWords, entriesNow, entryKind, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
+import { doneWords, entriesNow, entryKind, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices, whoseVersion } from './historyactions.ts';
 import { inLibrary, libraryWords } from './libraryrow.ts';
 import { button, emptyState, fold, h, icon, rereadBand, type Child } from './dom.ts';
 import { itemFile, keptFile, pagePlace, placePanel, versionFile, type FileMark } from './filepanel.ts';
@@ -32,7 +32,6 @@ export function forgetHistoryFolds() {
 }
 type ToolFormat = (touched: string[], inHome: string[]) => string;
 interface RowChoice { choice: { tool: HarnessId; tools: HarnessId[]; hash: string }; mark?: FileMark }
-const whoseVersion = (tools: readonly HarnessId[]) => `${andList(tools.map(toolName))}’s version`;
 /** Moves keyboard focus after a version choice vanishes: the row's next Use, its single link, or the row itself. */
 function focusAfterUse(eventId: string, index: number) {
   const list = document.getElementById(`history-versions-list-${eventId}`);

@@ -1,5 +1,5 @@
 // History's entries about items in Central Knot's library (skills, MCP servers and agents), in one place: whose they are (libraryEntry),
-// what each says (librarySentence), what it still offers (libraryAction, versionChoices), and what its row shows once its
+// what each says (librarySentence), what it still offers (libraryAction, versionChoices, choiceTools, whoseVersion), and what its row shows once its
 // action was used (doneWords). Read by History's page (the row and its buttons), by app.ts (what is said after a click), by
 // librarypass.ts restore (the click an action runs, through each kind's Kind.historyAction) and by the tests. Pure: no
 // files, no DOM. The entries of profiles, the base instructions and a tool's Manage switch are historypage.ts's own.
@@ -144,7 +144,7 @@ export function librarySentence(
   const named = (tool: HarnessId) => event.losers.some(loser => loser.tool === tool);
   // A click that wrote over a copy a tool had of its own (tookFrom, and written: in `losers`), which is kept as a version.
   const over = (event.tookFrom ?? []).filter(copy => named(copy.tool)).map(copy => toolName(copy.tool));
-  const overSaid = over.length ? ` ${andList(over)}’s own ${over.length === 1 ? 'copy was' : 'copies were'} written over and kept as a version.` : '';
+  const overSaid = !options?.choices && over.length ? ` ${andList(over)}’s own ${over.length === 1 ? 'copy was' : 'copies were'} written over and kept as a version.` : '';
   // Several harnesses' keep-outs changed at once while it stayed On (a profile switch's Undo): each named.
   if (event.exceptOnly && event.wasExcept && event.nowExcept) {
     return { glyph: event.kind === 'off' ? 'circle-off' : 'circle-check', text: `${keptOutWords(event.wasExcept, event.nowExcept, 'Kept out of')}.` };
@@ -458,15 +458,25 @@ function switchAction(turnOn: boolean, only: HarnessId | undefined, item: Librar
     : { label: turnIt(false, there), help: `Take ${name} out of ${there}; Central Knot keeps it`, change: { ...now, except: [...item.except, only] } };
 }
 
+/** How History names a kept version choice: "Copilot CLI’s version" or "Copilot CLI and Pi’s version" (list and result band). */
+export const whoseVersion = (tools: readonly HarnessId[]) => `${andList(tools.map(toolName))}’s version`;
+/** The copies an entry says gave way, skipping empty hashes, `previous` and the winner (shared by versionChoices and choiceTools). */
+function gaveWayCopies(event: HistoryEvent) {
+  if (!['conflict', 'chosen', 'kept-edit', 'on'].includes(event.kind)) return [];
+  const skip = new Set<string>(['', event.previous ?? '', event.winner?.hash ?? '']);
+  const copies = event.kind === 'on' ? event.losers.filter(loser => event.tookFrom?.some(copy => copy.tool === loser.tool)) : event.losers;
+  return copies.filter(copy => !skip.has(copy.hash));
+}
+/** The tools an entry offered under `hash` (the same grouping as versionChoices), read after Use for its band. */
+export const choiceTools = (event: HistoryEvent, hash: string): HarnessId[] =>
+  [...new Set(gaveWayCopies(event).filter(copy => copy.hash === hash).map(copy => copy.tool))];
 /** The copies an entry says gave way, each of which is a version that can be made current now: one "Use <harness>’s" each, grouping tools that share a hash in `tools`. */
 export function versionChoices(event: HistoryEvent, item: LibraryItem | undefined): { tool: HarnessId; tools: HarnessId[]; hash: string }[] {
   // An On entry offers the copies of a tool's own its click wrote over (each kept as a version), as the others offer theirs.
-  if (!item || item.deleted || event.undoneBy || !['conflict', 'chosen', 'kept-edit', 'on'].includes(event.kind)) return [];
-  const skip = new Set<string>([event.previous ?? '', event.winner?.hash ?? '']);
+  if (!item || item.deleted || event.undoneBy) return [];
   const byHash = new Map<string, { tool: HarnessId; tools: HarnessId[]; hash: string }>();
-  const gaveWay = event.kind === 'on' ? event.losers.filter(loser => event.tookFrom?.some(copy => copy.tool === loser.tool)) : event.losers;
-  for (const { tool, hash } of gaveWay) {
-    if (!isVersion(item, hash) || skip.has(hash)) continue;
+  for (const { tool, hash } of gaveWayCopies(event)) {
+    if (!isVersion(item, hash)) continue;
     const held = byHash.get(hash);
     if (held) { if (!held.tools.includes(tool)) held.tools.push(tool); continue; }
     byHash.set(hash, { tool, tools: [tool], hash });

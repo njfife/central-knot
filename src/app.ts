@@ -29,7 +29,7 @@ import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { pageOfPart } from './pluginstatus.ts';
 import { clickResults, heldWhole, keptBack } from './clickplan.ts';
-import { entriesNow, everythingAction, everythingDone, everythingPlan, libraryAction, libraryEntry, librarySentence, oneUndoCovers, restorePlan, undoneAddedWords } from './historyactions.ts';
+import { choiceTools, entriesNow, everythingAction, everythingDone, everythingPlan, libraryAction, libraryEntry, librarySentence, oneUndoCovers, restorePlan, undoneAddedWords, whoseVersion } from './historyactions.ts';
 import { asksWhichCopy, copiesDiffer, libraryWords, placeOf, stillReadWords } from './libraryrow.ts';
 import { andList, changedName, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, profileLeftUse, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
@@ -1430,7 +1430,7 @@ export const addTakenOut = (kind: PageKind, key: string) => busy('Applying…', 
 
 /**
  * After a History action on a library item, a skill, an MCP server or an agent (historyactions.ts): what it did, in the words of the entry
- * it made, with that entry's own action as the way back. A refusal is said on the page, where the action was clicked.
+ * it made (or, for a version choice, whoseVersion of what was pressed), with that entry's own action as the way back. A refusal is said on the page, where the action was clicked.
  */
 function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult, did = true, choice?: string) {
   const entry = libraryEntry(past)!, rows = [entry];
@@ -1443,10 +1443,12 @@ function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult, d
       && libraryEntry(event)?.kind === entry.kind && libraryEntry(event)?.key === entry.key)
     : state.history.data?.find(event => event.id === past.undoneBy);
   const item = view?.library[entry.key];
-  const said = made && librarySentence(made, libraryWords[entry.kind], view?.tools ?? [], item, !choice)?.text;
+  const picked = choice && made ? choiceTools(past, choice) : [];
+  const said = made && !picked.length ? librarySentence(made, libraryWords[entry.kind], view?.tools ?? [], item, !choice)?.text : undefined;
+  const body = picked.length ? `${whoseVersion(picked)} is now current.` : said ? said.replace(/^./, first => first.toLowerCase()) : 'done.';
   const back = made && libraryAction(made, item, entriesNow(state.home!)(made).now);
   const notDone = result.results.filter(keptBack).map(entry => entry.message);
-  const text = [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...notDone].filter(Boolean).join(' ');
+  const text = [`${past.item}: ${body}`, ...notDone].filter(Boolean).join(' ');
   tellWritten({ page, item: past.item, rows, warn: notDone.length > 0, historyBand: !!choice && !!made, text,
     undo: back && made ? { id: made.id, label: back.label } : undefined }, result.reloads, did);
   flashRow(entry);
