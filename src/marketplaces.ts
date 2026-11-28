@@ -21,7 +21,7 @@ import { harnessIds } from './harnesses.ts';
 import { errorCode, liftFirst, syncGate, writeDurably, type ShareContext } from './share.ts';
 import type { Listed } from './plugintext.ts';
 import { readRecord as readPartsRecord, type PartsRecord, type PluginNow } from './partsmigrate.ts';
-import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, blocked, cantInstallAgain, copyDiffers, partWords, firstReadWaits, heldReason, inUseIn, installId, keptOff, keptReason, marketTitle, notCarried, recordUnread, stateOf, toolNow, unavailable, uninstallsWhole, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
+import { MARKET_UNREAD, NO_LONGER_OFFERED, SKILL_SWITCH_TESTED_FROM, blocked, cantInstallAgain, copyDiffers, partWords, firstReadWaits, heldReason, inUseIn, installId, keptOff, keptReason, marketTitle, notCarried, recordUnread, stateOf, toolNow, unavailable, uninstallsWhole, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
 import { readLink } from './sourcelink.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
 import { leftOutSentence, pageNames, toPluginsLabel, toolName } from './words.ts';
@@ -114,8 +114,7 @@ const toolIds = (value: unknown): PluginTool[] => onlyAllowed(value, pluginTools
 const withoutFileBytes = (reports: ActionReport[]): ActionReport[] => reports.map(report => ({ ...report, runs: report.runs.map(run => ({ ...run, changed: run.changed.map(change => ({ path: change.path, before: null, after: null })) })) }));
 /** How long a Git source that couldn't be fetched (with no copy to show) waits before it is tried again on its own. */
 const RETRY_MS = 60_000;
-/** Said of a plugin a tool still has that its marketplace's catalog dropped, beside its "No longer offered" mark. */
-export const NO_LONGER_OFFERED = 'Stays installed as it is until you uninstall it.';
+export { NO_LONGER_OFFERED };
 /** A plugin's contents with nothing in them, for a plugin whose files couldn't be read (its `problem` says why). */
 const empty: PluginDetail = { skills: [], commands: [], agents: [], instructions: [], onlyInstructions: false, hooks: [], hooksByTool: {}, mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: false };
 

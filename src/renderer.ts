@@ -197,8 +197,8 @@ function writeFact(sync: SyncView): { glyph: IconName; text: string; short?: str
  * sync starts once something is.
  */
 function syncSwitch(home: HomeView) {
-  // A narrow status bar calls it "Sync" (style.css): the switch and its state keep their words, and the tooltip names it whole.
-  const label = h('span.sync-label', {}, h('span.fact-long', {}, 'Automatic sync'), h('span.fact-short', {}, 'Sync'));
+  // Keeps its full name at every width so it matches Settings' wording.
+  const label = h('span.sync-label', {}, 'Automatic sync');
   // With no tool managed there is nothing to sync: the switch is shown, not offered.
   if (!home.sync.managed.length) {
     return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: `${noToolManagedSentence(home)} So there is nothing to sync.` },
@@ -209,10 +209,11 @@ function syncSwitch(home: HomeView) {
       label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'));
   }
   const idle = home.syncOn && !anythingOn();
-  const title = idle ? `Automatic sync is on: it starts once ${home.sync.syncEverything ? 'something turns up in one of your tools (Synchronize everything takes it in)' : 'you turn something on'}. Click to turn it off.`
-    : home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.'
-    : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.';
-  return h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(home.syncOn), 'aria-label': 'Automatic sync', disabled: !!acting(), title, onclick: () => void setSync(!home.syncOn) },
+  const diff = 'Synchronize everything decides whether new items found in tools are added.';
+  const title = idle ? `Automatic sync is on: starts once ${home.sync.syncEverything ? 'something turns up in a tool' : 'you turn something on'}, keeping items in Central Knot in step across tools. ${diff} Click to turn it off.`
+    : home.syncOn ? `Automatic sync is on: keeps items already in Central Knot in step across tools on its own. ${diff} Click to turn it off.`
+    : `Automatic sync is off: edits to items in Central Knot wait until you turn it on or use Sync once. ${diff} Click to turn it on.`;
+  return h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(home.syncOn), 'aria-label': 'Automatic sync', 'aria-description': title, disabled: !!acting(), title, onclick: () => void setSync(!home.syncOn) },
     label, h(`span.sync-track${home.syncOn ? '.on' : ''}${idle ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, !home.syncOn ? 'Off' : idle ? 'On · nothing synced' : 'On'));
 }
 
@@ -358,10 +359,10 @@ function renderWindow() {
   // After the header, which marks the notices it draws seen: the sidebar's dot is for those it didn't.
   renderSidebar();
   recordDraw(visitOffsets);
-  // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
-  runAfterLayout();
+  // Fit the status bar and header/toolbars first so afterLayout steps measure the settled list height (dom.ts fitBars, afterLayout).
   renderStatus();
   fitBars();
+  runAfterLayout();
   // What was selected, then the scroll places, each where it was (scrolledNow), and over them the place of a visit Back or Forward
   // opened (places.ts putBack); keepingFocus puts the focus back after, without scrolling to it (dom.ts keepSelection neither
   // focuses nor scrolls).

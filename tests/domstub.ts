@@ -7,22 +7,46 @@ export interface FakeNode {
   style: Record<string, unknown>;
   classList: { toggle: (name: string, on?: boolean) => void; add: () => void; remove: () => void; contains: (name: string) => boolean };
   children: unknown[];
+  parent?: FakeNode;
   content: { firstElementChild?: FakeNode };
   onclick?: (event: unknown) => void;
   focused: number;
+  scrollTop: number;
+  rect: { top: number; bottom: number; height: number };
+  childElementCount: number;
   textContent: string;
   setAttribute: (key: string, value: string) => void;
   addEventListener: () => void;
   replaceChildren: (...kids: unknown[]) => void;
   append: (...kids: unknown[]) => void;
   after: (...kids: unknown[]) => void;
-  focus: () => void;
+  focus: (opts?: { preventScroll?: boolean }) => void;
   scrollTo: () => void;
+  scrollIntoView: (opts?: unknown) => void;
+  closest: (selector: string) => FakeNode | null;
+  getBoundingClientRect: () => { top: number; bottom: number; height: number };
   click: () => void;
   querySelector: (selector: string) => FakeNode | null;
 }
 
+const isDisabled = (el: FakeNode) => 'disabled' in el.attrs;
+const canFocus = (el: FakeNode) => !isDisabled(el) && (['button', 'input', 'textarea', 'select', 'summary', 'a'].includes(el.tag) || 'tabindex' in el.attrs);
+
+const matchesSimple = (el: FakeNode, raw: string): boolean => {
+  const notDisabled = raw.includes(':not(:disabled)');
+  const sel = raw.replace(':not(:disabled)', '');
+  if (notDisabled && isDisabled(el)) return false;
+  if (sel === '[tabindex="0"]') return el.attrs.tabindex === '0';
+  if (sel.startsWith('#')) return el.attrs.id === sel.slice(1);
+  if (sel.startsWith('.')) return el.className.split(/\s+/).includes(sel.slice(1));
+  return el.tag === sel;
+};
+
 const queryIn = (root: FakeNode, selector: string): FakeNode | null => {
+  const parts = selector.split(',').map(part => part.trim()).filter(Boolean);
+  if (parts.length > 1 || parts[0]?.includes(':not(') || parts[0]?.startsWith('[') || /^[a-z]+$/i.test(parts[0] ?? '')) {
+    return findNode(root, el => el !== root && parts.some(part => matchesSimple(el, part))) ?? null;
+  }
   let scope: FakeNode | undefined = root;
   for (const part of selector.trim().split(/\s+/)) {
     if (!scope) return null;
@@ -44,6 +68,11 @@ export const makeElement = (tag = 'div'): FakeNode => {
     children: [],
     content: {},
     focused: 0,
+    scrollTop: 0,
+    rect: { top: 0, bottom: 0, height: 0 },
+    get childElementCount() {
+      return node.children.filter(child => typeof child === 'object' && child !== null).length;
+    },
     get textContent() {
       return textOf(node);
     },
@@ -52,19 +81,37 @@ export const makeElement = (tag = 'div'): FakeNode => {
     },
     setAttribute(key: string, value: string) {
       this.attrs[key] = value;
+      if (key.startsWith('data-')) this.dataset[key.slice(5).replace(/-([a-z])/g, (_, ch: string) => ch.toUpperCase())] = value;
     },
     addEventListener() {},
     replaceChildren(...kids: unknown[]) {
       this.children = [...kids];
+      for (const kid of kids) if (kid && typeof kid === 'object' && 'tag' in kid) (kid as FakeNode).parent = this;
     },
     append(...kids: unknown[]) {
       this.children.push(...kids);
+      for (const kid of kids) if (kid && typeof kid === 'object' && 'tag' in kid) (kid as FakeNode).parent = this;
     },
     after() {},
     focus() {
+      if (!canFocus(this)) return;
       this.focused++;
+      const doc = (globalThis as { document?: { activeElement?: FakeNode | null } }).document;
+      if (doc) doc.activeElement = this;
     },
     scrollTo() {},
+    scrollIntoView() {},
+    closest(selector: string) {
+      let cur: FakeNode | undefined = this;
+      while (cur) {
+        if (matchesSimple(cur, selector)) return cur;
+        cur = cur.parent;
+      }
+      return null;
+    },
+    getBoundingClientRect() {
+      return this.rect;
+    },
     click() {
       if ('disabled' in this.attrs) return;
       this.onclick?.({ stopPropagation() {} });
@@ -73,6 +120,15 @@ export const makeElement = (tag = 'div'): FakeNode => {
       return queryIn(node, selector);
     },
   };
+  if (tag === 'template') {
+    Object.defineProperty(node, 'innerHTML', {
+      set(html: string) {
+        const svg = makeElement('svg');
+        svg.className = /class="([^"]*)"/.exec(html)?.[1] ?? '';
+        node.content.firstElementChild = svg;
+      },
+    });
+  }
   return node;
 };
 

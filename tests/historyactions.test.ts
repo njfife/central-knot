@@ -105,10 +105,51 @@ test('Competing edits and a choice among found copies offer each copy that gave 
   assert.equal(offered(chosen, item({ hash: 'x' })), undefined, 'not once it has moved on');
 });
 
+test('A conflict with three or more losing tools formats them through options.tools without formatting unused event.losers', () => {
+  const six = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
+  const multi = entry({
+    kind: 'conflict',
+    winner: { tool: 'codex-cli', hash: 'b' },
+    previous: 'a',
+    losers: [
+      { tool: 'claude-cli', hash: 'a' },
+      { tool: 'copilot-cli', hash: 'x' },
+      { tool: 'pi-cli', hash: 'y' },
+      { tool: 'opencode-cli', hash: 'z' },
+    ],
+  });
+  const calls: string[][] = [];
+  const formatted = librarySentence(multi, libraryWords.agents, six, undefined, false, {
+    row: true,
+    tools: (touched, inHome) => {
+      calls.push(touched);
+      return `[${touched.length}/${inHome.length}]`;
+    },
+  });
+  assert.deepEqual(calls, [['copilot-cli', 'pi-cli', 'opencode-cli']]);
+  assert.equal(formatted?.text, 'Codex’s edit was the latest, so it became the current version. Edits from [3/6] are kept as versions.');
+  assert.equal(librarySentence(multi, libraryWords.agents, six)?.text,
+    'Codex’s edit was the latest, so it became the current version. Edits from Copilot CLI, Pi and OpenCode are kept as versions.');
+});
+
+test('A library conflict with no losing tools recorded reads its prefix alone without calling options.tools', () => {
+  const noLosers = entry({ kind: 'conflict', winner: { tool: 'codex-cli', hash: 'b' }, previous: 'a', losers: [{ tool: 'claude-cli', hash: 'a' }] });
+  const calls: string[][] = [];
+  const opts = { row: true, tools: (touched: string[]) => { calls.push(touched); return 'UNEXPECTED'; } };
+  assert.equal(librarySentence(noLosers, libraryWords.agents, tools, undefined, false, opts)?.text,
+    'Codex’s edit was the latest, so it became the current version.');
+  assert.equal(librarySentence({ ...noLosers, losers: [], orderProved: false }, libraryWords.agents, tools, undefined, false, opts)?.text,
+    'Codex’s edit became the current version, though the times can’t tell which edit came last.');
+  assert.deepEqual(calls, []);
+});
+
 test('A deletion offers Restore while the agent is deleted; every other entry of a deleted agent offers nothing', () => {
   const deleted = entry({ kind: 'deleted', losers: tools.map(tool => ({ tool: tool as 'claude-cli', hash: 'b' })) });
   const gone = item({ deleted: { at } });
   assert.equal(librarySentence(deleted, libraryWords.agents, tools)?.text, 'Deleted from Central Knot and removed from all 3 tools. History keeps it.');
+  assert.equal(librarySentence(deleted, libraryWords.agents, tools, undefined, false, { row: true })?.text, 'Deleted from Central Knot and removed from all 3 tools.');
+  const gaveBackDel = entry({ kind: 'deleted', losers: [{ tool: 'codex-cli', hash: 'b' }], gaveBack: ['claude-cli'] });
+  assert.equal(librarySentence(gaveBackDel, libraryWords.agents, tools, undefined, false, { row: true })?.text, 'Undone: taken out of Central Knot again and removed from Codex; Claude Code keeps its own copy, as before.');
   assert.deepEqual(offered(deleted, gone), ['Restore', { ...asIs, deleted: false }]);
   assert.equal(offered(deleted, item()), undefined, 'it is back already');
   assert.equal(offered(entry({ kind: 'edit', previous: 'a' }), gone), undefined);
@@ -228,6 +269,10 @@ test('A switch-on, a switch-off and an Undo say what they did; the Undo’s entr
   // An Undo an earlier build recorded, which left in a server found in Claude Code (LeftIn `claude-code`), still says so.
   const undo = rule('undo', false, { everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['gone'], left: [{ item: 'docs', why: 'claude-code' }], keptIn: [] } } });
   assert.equal(everythingSentence(undo).text, 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: docs (found in Claude Code: no Undo).');
+  const twoUndone = rule('undo2', false, { everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['gone', 'gone2'], left: [], keptIn: [] } } });
+  assert.equal(everythingSentence(twoUndone).text, 'Undone: switched off, and 2 items it took in are out of Central Knot again, each tool they were found in keeping its own.');
+  assert.equal(everythingAction(rule('on', true), [rule('on', true), ruleTook('t1'), ruleTook('t2')], about())?.help,
+    'Switch Synchronize everything off and take back the 2 items it took in since, each tool they were found in keeping its own');
   assert.deepEqual(everythingAction(undo, [deleted, undo], about(item({ deleted: { at } }))), { label: 'Restore', help: 'Switch Synchronize everything on again and put back the 1 item this took out of Central Knot, which the switch-on’s Undo then takes back again' });
   assert.equal(everythingAction(undo, [deleted, undo], about(item())), undefined, 'added again since: nothing to restore');
   // Added again, edited and deleted since the Undo: its own Restore is offered, but the Undo's Restore passes it over.

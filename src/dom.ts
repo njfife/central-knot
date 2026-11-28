@@ -95,6 +95,19 @@ export const pathText = (text: string, full = text): HTMLElement => {
 /** A disabled control's reason, as its tooltip and its accessible description. */
 export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria-description': why } : undefined);
 
+/** Scrolls only the enclosing `.scroll` area (never `body`/`html`) so `element` lands at its top, centre, or nearest edge. */
+export function scrollIntoBox(element: Element | null | undefined, block: 'start' | 'center' | 'nearest' = 'start', pad = 12): void {
+  const box = element?.closest('.scroll');
+  if (!element || !box) return;
+  const rect = element.getBoundingClientRect();
+  const view = box.getBoundingClientRect();
+  if (block === 'center') box.scrollTop += rect.top + rect.height / 2 - (view.top + view.height / 2);
+  else if (block === 'nearest') {
+    if (rect.top < view.top) box.scrollTop += rect.top - view.top - pad;
+    else if (rect.bottom > view.bottom) box.scrollTop += rect.bottom - view.bottom + pad;
+  } else box.scrollTop += rect.top - view.top - pad;
+}
+
 /** The character offset in `text`'s whole text of the place (node, offset) inside it. */
 const offsetOf = (text: Element, node: Node, offset: number) => {
   const before = document.createRange();
@@ -310,6 +323,13 @@ export function fitBars(): void {
       else if (!iconsOnly && 'tipShown' in button.dataset) { button.removeAttribute('title'); delete button.dataset.tipShown; }
     }
   }
+  // A harness's tab-and-switcher bar stacks the whole switcher onto row 2 rather than collapsing labels inside .fit-bar.
+  const harnessBar = document.querySelector<HTMLElement>('.harness-bar');
+  const tabList = harnessBar?.querySelector<HTMLElement>('.harness-tabs');
+  if (harnessBar && tabList && harnessBar.querySelector('.harness-switch') && harnessBar.clientWidth) {
+    harnessBar.classList.remove('harness-bar-stacked');
+    if (harnessBar.scrollWidth > harnessBar.clientWidth + 1 || tabList.scrollWidth > tabList.clientWidth + 1) harnessBar.classList.add('harness-bar-stacked');
+  }
 }
 
 /**
@@ -483,7 +503,7 @@ if (typeof document !== 'undefined') {
   window.addEventListener('resize', () => syncInfoCard(true));
 }
 /**
- * A small circled-`?` button (`icon('circle-question-mark', 14)`) with a top-layer detail card beside it (text only, ≤2 sentences).
+ * A small circled-`?` button (`icon('circle-question-mark', 14)`, or custom `face` with optional extra class `look`) with a top-layer detail card beside it (text only, ≤2 sentences).
  * - `id` must be unique on the page and stable across redraws (redraws reopen the card and keep focus by it).
  * - The card's id is `infoCardId(id)` (`<id>-card`); use it for `aria-describedby` on related controls too.
  * - Do not place the mark inside a `<button>` or `<label>`.
@@ -493,9 +513,9 @@ if (typeof document !== 'undefined') {
  *   New native `title` attributes only name an icon, a mark, a "—", a label cut short, or a command's hint (older disabled
  *   reasons in whyOff/lockAttrs and checkbox's help still use `title`).
  */
-export function infoMark(id: string, label: string, text: string): HTMLElement {
+export function infoMark(id: string, label: string, text: Child | readonly Child[], { face = icon('circle-question-mark', 14), look = '' }: { face?: Child | Child[]; look?: string } = {}): HTMLElement {
   const enter = hoverInfo(id, true), leave = hoverInfo(id, false);
-  const mark = h('button.info-mark', {
+  const mark = h(`button.info-mark${look ? `.${look}` : ''}`, {
     type: 'button', id, 'aria-label': `About ${label}`, 'aria-describedby': infoCardId(id),
     onpointerenter: enter, onpointerleave: leave,
     onfocus: (event: FocusEvent) => {
@@ -513,8 +533,11 @@ export function infoMark(id: string, label: string, text: string): HTMLElement {
       if (openCard?.id === id && openCard.pinned) closeInfoCard();
       else openInfoCard(id, true);
     },
-  }, icon('circle-question-mark', 14));
-  const card = h('span.info-card', { id: infoCardId(id), role: 'tooltip', popover: 'manual', onpointerenter: enter, onpointerleave: leave }, text);
+  }, face);
+  const body: Child[] = Array.isArray(text) && text.every((line): line is string => typeof line === 'string')
+    ? text.flatMap((line, at) => (at ? ['\n', h('span.info-line', {}, line)] : [h('span.info-line', {}, line)]))
+    : Array.isArray(text) ? [...text] : [text as Child];
+  const card = h('span.info-card', { id: infoCardId(id), role: 'tooltip', popover: 'manual', onpointerenter: enter, onpointerleave: leave }, ...body);
   return h('span.info-wrap', {}, mark, card);
 }
 
