@@ -145,15 +145,20 @@ function tomlHooks(tables: ReturnType<typeof readTomlTables>): Record<string, un
   return hooks;
 }
 
-/** One skill's or agent's file, as each tool's installed copy of its plugin has it: only that plugin's copies are read. */
+/** One skill's or agent's file, or one MCP server's formatted JSON entry, as each tool's installed copy of its plugin has it: only that plugin's copies are read. */
 export async function readItemTexts(context: PluginContext, tools: HarnessId[], item: { plugin: string; marketName: string; kind: PartKind; name: string }): Promise<{ tool: HarnessId; text: string }[]> {
   const found: { tool: HarnessId; text: string }[] = [];
   for (const tool of tools.filter(takesPlugins)) {
     // Codex copies a plugin's agents and never loads them, so it has none to show.
-    if (item.kind === 'mcp' || (tool === 'codex-cli' && item.kind === 'agent')) continue;
+    if (tool === 'codex-cli' && item.kind === 'agent') continue;
     for (const install of (await installedPlugins(context, tool).catch(() => [])).filter(candidate => candidate.plugin === item.plugin && candidate.marketplace === item.marketName)) {
       if (install.state.state !== 'installed') continue;
       const contents = await installedContents(tool, install.state.path, install.entry, install.atMarketplaceRoot).catch(() => undefined);
+      if (item.kind === 'mcp') {
+        const server = contents?.mcpServers.find(candidate => samePart({ kind: 'mcp', name: candidate.name }, item));
+        if (server) found.push({ tool, text: JSON.stringify(JSON.parse(server.entry), null, 2) });
+        continue;
+      }
       const part = (item.kind === 'skill' ? contents?.skills : contents?.agents)?.find(candidate => samePart({ kind: item.kind, name: candidate.name }, item));
       if (part) found.push({ tool, text: part.text });
     }

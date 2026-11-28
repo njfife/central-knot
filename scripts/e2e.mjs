@@ -4541,10 +4541,14 @@ async function practiceFlow() {
   await openKind(a, 'agents');
   for (let tries = 0; tries < 40 && !(await a.exists(reviewEl('open', 'agents'))); tries++) await wait(100);
   await a.click(reviewEl('open', 'agents'));
-  same('the agent of the same plugin named review opens with its own file unshown, not the skill’s', [await a.exists('.plugin-file'), await a.text(reviewEl('pfile', 'agents'))], [false, 'Show its agent file']);
-  await a.click(reviewEl('pfile', 'agents'));
-  for (let tries = 0; tries < 40 && !(await fileShown())?.includes('The agent’s prompt.'); tries++) await wait(100);
-  check('and shows its own when asked', (await fileShown())?.includes('The agent’s prompt.') && !(await fileShown())?.includes('The skill’s steps.'), await fileShown());
+  same('the agent of the same plugin named review has no Show its agent file link and has a row file mark',
+    [await a.exists('.plugin-file'), await a.exists(reviewEl('pfile', 'agents')), await a.exists(reviewEl('file', 'agents'))], [false, false, true]);
+  await a.click(reviewEl('file', 'agents'));
+  const agentFileText = () => a.text('.file-open-box pre.content');
+  for (let tries = 0; tries < 40 && !(await agentFileText())?.includes('The agent’s prompt.'); tries++) await wait(100);
+  check('its file mark opens the agent’s prompt (not the skill’s) with no path footer',
+    (await agentFileText())?.includes('The agent’s prompt.') && !(await agentFileText())?.includes('The skill’s steps.') && !(await a.exists('.file-open-foot')), await agentFileText());
+  await a.press('Escape');
   if (installedRecord) writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), installedRecord); else rmSync(join(practice, '.claude/plugins/installed_plugins.json'), { force: true });
   rmSync(join(practice, '.claude/plugins/cache/ck-outside/same-names'), { recursive: true, force: true });
   await a.click('#header-refresh');
@@ -13767,6 +13771,26 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('at 860 a 50+ char settings path keeps every column width unchanged, no horizontal scroll, a 1-line foot and an uncut filename',
     [ghEntry.anchored, ghFoot.pathLen >= 50, ghFoot.fullWidth, (await markMetrics()).ths, ghFoot.noScrollX, ghFoot.footOneLine, ghFoot.tail, ghFoot.tailUncut, ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)],
     [true, true, true, colsBefore, true, true, '/mcp-config.json', true]);
+  const ownIssues = await openEntry('issues', 'http://127.0.0.1:47205/mcp');
+  const ownIssuesHasPath = await a.exists('#file-panel-mcpsignin .file-open-foot .path-text');
+  const pluginIssues = await openEntry('issues (tracker)', 'http://127.0.0.1:47212/mcp');
+  const pluginPanel = await a.run(`(() => {
+    const scroll = document.getElementById('mcpsignin-scroll'), panel = document.getElementById('file-panel-mcpsignin');
+    return { now: panel?.querySelector('.file-open-now')?.textContent ?? null, label: panel?.querySelector('.file-open-name')?.textContent ?? null,
+      foot: !!panel?.querySelector('.file-open-foot'), noScrollX: scroll.scrollWidth <= scroll.clientWidth };
+  })()`);
+  same('at 860 with sidebar open, own issues opens his entry with path and plugin issues (tracker) opens the plugin’s formatted entry with no path and nothing cut off',
+    [ownIssues.text.includes('47205') && !ownIssues.text.includes('47212'), ownIssuesHasPath, pluginIssues.anchored, pluginIssues.colspan, pluginIssues.boxes,
+      pluginIssues.text.includes('47212') && !pluginIssues.text.includes('47205'), pluginPanel, ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)],
+    [true, true, true, '7', 1, true, { now: 'current version', label: 'Claude Code’s copy · 1.0.0', foot: false, noScrollX: true }]);
+  if (shots) {
+    await a.run(`document.querySelector('tr[data-row="${await rowIdOf('issues (tracker)')}"]')?.scrollIntoView({ block: 'center' })`);
+    await fileShot('plugin-server-860', 'light');
+    await sizeTo(a, 1316, 819); await shape(false);
+    await a.run(`document.querySelector('tr[data-row="${await rowIdOf('issues (tracker)')}"]')?.scrollIntoView({ block: 'center' })`);
+    await fileShot('plugin-server-1316', 'dark');
+    await sizeTo(a, ...SMALLEST); await shape(false);
+  }
   const fsEntry = await openEntry('Filesystem', 'http://127.0.0.1:47215/mcp');
   same('at 860 pressing a second capitalised server’s mark moves the panel under it with that server’s entry',
     [fsEntry.anchored, fsEntry.colspan, fsEntry.boxes, fsEntry.text.includes('http://127.0.0.1:47215/mcp')], [true, '7', 1, true]);
@@ -17211,8 +17235,8 @@ async function libraryFlow() {
   await letGo('unused');
   await press(`#${rowPart('switch', 'skills', 'idle')}`);
   await done(a);
-  // The Overview's Most used names zulu, a plugin's own skill (kit's): with Find hiding it, its link lets Find go and opens it.
-  const zuluUse = `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'kit:zulu' } }] }, timestamp: ago(1).toISOString() })}\n`;
+  // The Overview's Most used names zulu (kit's skill) and alpha (kit's agent): with Find hiding zulu, its link lets Find go and opens it, and alpha has its file mark there, on the Library and on Claude Code's Agents tab.
+  const zuluUse = `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'kit:zulu' } }, { type: 'tool_use', name: 'Agent', input: { subagent_type: 'kit:alpha' } }] }, timestamp: ago(1).toISOString() })}\n`;
   for (const session of ['s4', 's5']) writeFileSync(join(A.home, `.claude/projects/-work/${session}.jsonl`), zuluUse);
   await find(a, '');
   await a.click('#collect-usage');
@@ -17220,11 +17244,30 @@ async function libraryFlow() {
   await find(a, 'body');
   await a.click('#nav-overview');
   const zuluLink = `[...document.querySelectorAll('[id^="overview-skills-top-"]')].find(e => e.textContent.includes('zulu'))`;
-  check('the Overview’s Most used names zulu', await a.run(`!!${zuluLink}`), await a.text('#overview-skills'));
+  const alphaFileId = rowPart('file', 'agents', 'kit@local-market/alpha');
+  check('the Overview’s Most used names zulu and marks kit’s plugin agent alpha', await a.run(`!!${zuluLink}`) && await a.exists(byId(alphaFileId)), await a.text('#overview-agents-usage'));
+  if (shots) {
+    await withSidebarOpen(a, ...SMALLEST, async () => { await theme(a, 'light'); await a.shot('overview-plugin-agent-860-light'); });
+    await fullSize(a);
+  }
   await a.run(`${zuluLink}?.click()`);
   await a.settle();
   same('its link: the Library, Find let go since it hid the plugin’s row, the row open', [await a.text('.page-title'), await a.run(`document.querySelector('#find').value`), await opened(a)], ['Library', '', [rowPart('', 'skills', 'kit@local-market/zulu')]]);
   await find(a, '');
+  // Plugin agent alpha on the Library: no Show its agent file in its opened details, and its file mark opens its text.
+  await a.click('#library-kind-agents');
+  await a.click(byId(rowPart('open', 'agents', 'kit@local-market/alpha')));
+  same('kit’s plugin agent row on the Library has no Show its agent file link and has its file mark',
+    [await a.exists(byId(rowPart('pfile', 'agents', 'kit@local-market/alpha'))), await a.exists(byId(alphaFileId))], [false, true]);
+  if (shots) {
+    await a.click(byId(rowPart('open', 'agents', 'kit@local-market/alpha')));
+    await withSidebarOpen(a, ...SMALLEST, async () => {
+      await a.run(`document.querySelector('${row('agents', 'kit@local-market/alpha')}')?.scrollIntoView({ block: 'center' })`);
+      await theme(a, 'light'); await a.shot('library-plugin-agent-860-light');
+    });
+    await fullSize(a);
+  }
+  await a.click('#library-kind-skills');
   // The Overview's MCP servers card opens the Library on MCP servers.
   await a.click('#nav-overview');
   await a.click('#overview-mcp');
@@ -17236,6 +17279,16 @@ async function libraryFlow() {
   for (const tab of ['skills', 'agents']) {
     await a.click(`#harness-tab-${tab}`);
     same(`Claude Code’s ${tab} tab lists that kind only, with no kind switch`, [await a.exists('.kind-switch'), (await listed(a))[tab] > 0, Object.entries(await listed(a)).filter(([kind]) => kind !== tab).every(([, count]) => count === 0)], [false, true, true]);
+    if (tab === 'agents') {
+      check('Claude Code’s Agents tab marks kit’s plugin agent alpha', await a.exists(byId(alphaFileId)));
+      if (shots) {
+        await withSidebarOpen(a, ...SMALLEST, async () => {
+          await a.run(`document.querySelector('${row('agents', 'kit@local-market/alpha')}')?.scrollIntoView({ block: 'center' })`);
+          await theme(a, 'light'); await a.shot('harness-tab-plugin-agent-860-light');
+        });
+        await fullSize(a);
+      }
+    }
     await pictures(a, `harness-tab-${tab}`);
   }
   // A change to a kind not on show isn't lost: with Skills chosen, the agent review is edited in Claude Code by hand.
@@ -22478,6 +22531,51 @@ async function profilePluginsFlow() {
   await a.click(byId('pf-mcp:tracker')); await done();
   same('the plugin’s tracker, sharing its name with his tracker in Copilot CLI, shows the shared-name note while Codex turns it off', [await a.all(`${trackerRow} .pf-note`, 'e.textContent'), await a.run(`document.querySelector('${trackerRow} .pf-state').dataset.state`)],
     [['Stays on in Copilot CLI, which runs the plugin’s “tracker” instead of yours (same name).'], 'Turns off in Codex']);
+  // A plugin installed in Claude Code holding a server and an agent: each opens its text under its row on Profiles, Escape closes it and refocuses its mark.
+  const claudePluginDir = join(home, '.claude/plugins/cache/ck-test-market/issue-tracker/2.0.0');
+  writeFileSync(join(claudePluginDir, '.mcp.json'), JSON.stringify({ mcpServers: { ...JSON.parse(servers).mcpServers, alerts: { command: 'npx', args: ['-y', 'alerts'] } } }));
+  mkdirSync(join(claudePluginDir, 'agents'), { recursive: true });
+  writeFileSync(join(claudePluginDir, 'agents/reviewer.md'), '---\nname: reviewer\ndescription: Reviews triage notes.\n---\n\nCheck each linked issue before closing.\n');
+  await a.click('#header-refresh');
+  const alertsId = 'plugin:mcp:issue-tracker@ck-test-market/alerts', reviewerId = 'plugin:agent:issue-tracker@ck-test-market/reviewer';
+  for (let tries = 0; tries < 50 && (!(await a.exists(row(alertsId))) || !(await a.exists(row(reviewerId)))); tries++) await wait(100);
+  const openPluginPf = async (id, expect) => {
+    await a.click(`${row(id)} .pf-title .row-file-btn`);
+    for (let tries = 0; tries < 50 && !(await a.text('.file-open-box pre.content'))?.includes(expect); tries++) await wait(100);
+    await a.settle();
+    return a.run(`(() => { const r = document.querySelector('${row(id)}'), b = r?.querySelector('.file-open-box');
+      return { anchored: !!r?.classList.contains('file-anchored'), now: b?.querySelector('.file-open-now')?.textContent ?? null,
+        label: b?.querySelector('.file-open-name')?.textContent ?? null, text: b?.querySelector('pre.content')?.textContent ?? '',
+        foot: !!b?.querySelector('.file-open-foot') }; })()`);
+  };
+  await withSidebarOpen(a, ...SMALLEST, async () => {
+    same('at 860 with sidebar open, plugin server and agent rows on Profiles each have a file mark',
+      [await a.exists(`${row(alertsId)} .pf-title .row-file-btn`), await a.exists(`${row(reviewerId)} .pf-title .row-file-btn`)], [true, true]);
+    const srv = await openPluginPf(alertsId, '"alerts"');
+    same('at 860 with sidebar open, pressing the plugin server’s mark opens its formatted entry under its row with nothing cut off',
+      [srv.anchored, srv.now, srv.label, srv.text.includes('"command": "npx"'), srv.foot, ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)],
+      [true, 'current version', 'Claude Code’s copy · 2.0.0', true, false]);
+    if (shots) { await a.run(`window.centralKnot.setAppearance('light')`); await wait(80); await a.shot('profiles-plugin-server-860-light'); }
+    const ag = await openPluginPf(reviewerId, 'Check each linked issue before closing.');
+    same('at 860 with sidebar open, pressing the plugin agent’s mark opens its text under its row with nothing cut off',
+      [ag.anchored, ag.now, ag.label, ag.text.includes('Check each linked issue before closing.'), ag.foot, ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)],
+      [true, 'current version', 'Claude Code’s copy · 2.0.0', true, false]);
+    if (shots) { await a.run(`window.centralKnot.setAppearance('light')`); await wait(80); await a.shot('profiles-plugin-agent-860-light'); await a.run(`window.centralKnot.setAppearance('system')`); }
+    await a.press('Escape');
+    same('Escape closes the plugin agent’s panel and returns focus to its mark',
+      [await a.exists('.file-open-box'), await a.run(`document.activeElement === document.querySelector('${row(reviewerId)} .pf-title .row-file-btn')`)],
+      [false, true]);
+  });
+  if (shots) {
+    await withSidebarOpen(a, 1316, 819, async () => {
+      await a.run(`window.centralKnot.setAppearance('dark')`); await wait(80);
+      await openPluginPf(alertsId, '"alerts"'); await a.shot('profiles-plugin-server-1316-dark');
+      await openPluginPf(reviewerId, 'Check each linked issue before closing.'); await a.shot('profiles-plugin-agent-1316-dark');
+      await a.press('Escape');
+      await a.run(`window.centralKnot.setAppearance('system')`);
+    });
+  }
+  await fullSize(a);
   same('no page errors', a.pageErrors, []);
   await a.quit();
 

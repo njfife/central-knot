@@ -30,7 +30,7 @@
 // under the toolbar, and Turn on, Turn off and Delete of many (selectControl, selectBar, turnTicked, deleteTicked), decided by
 // cantTurn, alreadyAs and cantDelete; writing controls on an opened row (and Resume, Turn these off) dim via app.ts writeOff. It goes
 // by the rows drawn, in their order on screen (drawTable: Table selectable), which holds a pinned row the chip dropped too.
-// A library, found or plugin skill's row, an ordinary agent's and an ordinary MCP server's also open its file (filepanel.ts, a
+// Every skill's, agent's and MCP server's row (library, found or plugin) also opens its file (filepanel.ts, a
 // table its place: fileHooks): alone under a closed row, or, the row open, in its details' place (openedPart) under "‹ Back to details".
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
@@ -188,34 +188,33 @@ export const idOf = (row: ItemRow | PluginRow) => rowId(kindOf(row), row.key);
 const rowKey = (row: ItemRow | PluginRow): RowKey => ({ kind: kindOf(row), key: row.key });
 /** The id of a drawn row's element (itemrow.ts partId): its part, the row's id, and what within it, a tool or a place. */
 const elId = (part: string, row: ItemRow | PluginRow, ...within: string[]) => partId(part, idOf(row), ...within);
-/** Plugin items whose file is shown, by row id (a redraw keeps it open): each tool's text once read, and the versions read from. */
+/** Plugin skills whose SKILL.md is shown in details, by row id (a redraw keeps it open): each tool's text once read, and the versions read from. */
 const filesShown = new Map<string, { from: string; texts?: { tool: HarnessId; text: string }[] }>();
-/** The versions of its plugin a plugin item's file is read from: each tool's installed one. */
+/** The versions of its plugin a plugin skill's file is read from: each tool's installed one. */
 const versionsOf = (row: PluginRow) => Object.values(row.installs).map(install => install?.version).join();
-/** Reads a plugin item's file from each tool's copy, as installed now. */
+/** Reads a plugin skill's SKILL.md from each tool's copy, as installed now. */
 function readFile(row: PluginRow) {
   const id = idOf(row), from = versionsOf(row);
   filesShown.set(id, { from });
   const read = (texts: { tool: HarnessId; text: string }[]) => { if (filesShown.get(id)?.from === from) { filesShown.set(id, { from, texts }); rerender(); } };
   void window.centralKnot.pluginItemTexts(row.plugin, row.marketName, row.kind, row.name).then(read, () => read([]));
 }
-/** Shows or hides a plugin item's file. */
+/** Shows or hides a plugin skill's SKILL.md in details. */
 function toggleFile(row: PluginRow) {
   if (!filesShown.delete(idOf(row))) readFile(row);
   rerender();
 }
 
-/** A plugin item's details: what it is, where it comes from and is handled, each tool's copy, and its file as each tool's copy has it. */
+/** A plugin item's details: what it is, where it comes from and is handled, each tool's copy, and for a skill its SKILL.md as each tool's copy has it. */
 function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'row') {
   const [type, ...rest] = row.description.split(' · '), tools = toolsFor(t, kindOf(row));
   // Shown, and its plugin's version changed in some tool since it was read (versionsOf): read again from the copies installed now.
   // A plugin whose version doesn't change with its content (one with none, one Copilot CLI loads live) keeps the text read first.
-  if (filesShown.has(idOf(row)) && filesShown.get(idOf(row))!.from !== versionsOf(row)) readFile(row);
-  const shown = filesShown.has(idOf(row)), copies = filesShown.get(idOf(row))?.texts;
-  const file = row.kind === 'skill' ? 'SKILL.md' : 'agent file';
+  if (row.kind === 'skill' && filesShown.has(idOf(row)) && filesShown.get(idOf(row))!.from !== versionsOf(row)) readFile(row);
+  const shown = row.kind === 'skill' && filesShown.has(idOf(row)), copies = shown ? filesShown.get(idOf(row))?.texts : undefined;
   // The file shows right under the link that shows it, below the tools' lines, as in the Files view: the switches stay in view.
   const fileShown = !shown ? null : !copies?.length ? h('p.details-limits', {}, copies ? 'Its file couldn’t be read.' : 'Reading…')
-    : h('div.plugin-file', { id: elId('pfile', row, 'shown') }, fileBlocks(elId('pfile', row, 'text'), file, copies, holders => `${file} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: copies.length > 1 }));
+    : h('div.plugin-file', { id: elId('pfile', row, 'shown') }, fileBlocks(elId('pfile', row, 'text'), 'SKILL.md', copies, holders => `SKILL.md · ${andList(holders.map(holder => names[holder.tool]))}`, { named: copies.length > 1 }));
   return h(`div.compare.details.details-plugin.details-grid${placement === 'row' ? '' : '.details-bare'}`, { role: 'region', 'aria-label': `Details for ${row.name}` },
     h('div.details-head', {},
       row.kind === 'mcp' && row.description ? h('dl.details-definition', {}, h('dt', {}, 'Type'), h('dd', {}, type === 'Command' ? 'Command (stdio)' : type), h('dt', {}, type === 'Command' ? 'Command' : 'URL'), h('dd.mono', {}, rest.join(' · ')))
@@ -233,7 +232,7 @@ function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'ro
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
         h('span.details-tool-line', {}, line.text || null), line.control), line.result ?? usageLine(t, row, tool, !copy));
     })),
-    row.kind === 'mcp' ? null : h('div.details-file', {}, h('div.details-actions', {}, smallAction(shown ? `Hide its ${file}` : `Show its ${file}`, elId('pfile', row), () => toggleFile(row))), fileShown));
+    row.kind !== 'skill' ? null : h('div.details-file', {}, h('div.details-actions', {}, smallAction(shown ? 'Hide its SKILL.md' : 'Show its SKILL.md', elId('pfile', row), () => toggleFile(row))), fileShown));
 }
 
 /** A plugin item's row: its switch (each tool's switch for one item), its name with the plugin's mark, and a mark per tool. */
@@ -347,7 +346,7 @@ function rowsOf(kind: PageKind): ItemRow[] {
 export const rowByKey = (kind: PageKind, key: string) => rowsOf(kind).find(row => row.key === key);
 /** A kind's row drawn on the Library, own or standalone plugin row (showRow reveals only rows the Library draws, never folded plugin rows). */
 const libraryRowOf = (kind: PageKind, key: string): ItemRow | PluginRow | undefined => rowByKey(kind, key) ?? (state.home ? pageRows(state.home, kind).rows.find(row => row.key === key) : undefined);
-/** File target lookup for filepanel.ts alone: libraryRowOf plus plugin skills folded onto an own row (not drawn on the Library, so Library code uses libraryRowOf or rowByKey). */
+/** File target lookup for filepanel.ts alone: libraryRowOf plus plugin rows folded onto an own row (not drawn on the Library, so Library code uses libraryRowOf or rowByKey). */
 export const rowOf = (kind: PageKind, key: string): ItemRow | PluginRow | undefined => libraryRowOf(kind, key)
   ?? (state.home ? [...pageRows(state.home, kind).folded.values()].flat().find(row => row.key === key) : undefined);
 /**

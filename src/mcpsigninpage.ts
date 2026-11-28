@@ -4,8 +4,8 @@
 // time, beside it a (?) holding what a check does on this computer (mcpsignin.ts checkLine) and how many cells need a sign-in now
 // (signinsNeeded); a cell that needs a sign-in offers that tool's own command to copy, or, where its cell offers that tool's sign-in
 // (mcpsignin.ts offersSignin), Sign in (signIn), with Stop while it waits;
-// nothing else is started. Each server of your own gets the file mark after its name, opening its entry in a full-width row
-// under it (signinFiles → filepanel.ts itemFile, filepanel.ts placePanel; plugins' servers get no mark yet). What each check
+// nothing else is started. Each server (your own or a plugin's) gets the file mark after its name, opening its entry in a full-width row
+// under it (signinFiles → filepanel.ts itemFile, filepanel.ts placePanel). What each check
 // and sign-in said lives in app.ts state.mcpSignin for the home it was made in, until
 // Central Knot quits; nothing is stored. The rows keep the places they had when he came to the page (inPlace). The rows, which cells a check holds for, the
 // cells' words, which cells a row has (cellTools), the count, a column's own time, a session-only head, the line, the cards and the
@@ -111,7 +111,7 @@ function columnHead(tool: HarnessId, mark: Mark, does: string | undefined) {
       when ? h('span.signin-when', { id: `signin-when-${tool}` }, when) : null) : h('span.signin-when', {}, keep(IN_SESSION[tool]?.head, mark('session'))));
 }
 
-/** MCP sign-in as a file panel's place (filepanel.ts pagePlace): a server of your own opens its entry under its row (found ones too, or a home with nothing taken in would show no mark; plugins' have no reader yet). */
+/** MCP sign-in as a file panel's place (filepanel.ts pagePlace): each server (your own, found or a plugin's) opens its entry under its row. */
 const signinFiles = pagePlace('mcpsignin', { foundAndPlugins: true });
 
 /** A row's first cell: the server's name with its file mark bound to its last few letters (or short last segment) so wrapping never orphans it or widens the column, Local, and the plugin it comes in. */
@@ -157,7 +157,7 @@ export function mcpSigninPage() {
     return home ? h('div.page', {}, noToolsState('mcpsignin')) : notRead();
   }
   const rows = inPlace(signinRows(home));
-  const marks = rows.map(row => (row.plugin ? undefined : itemFile(signinFiles, 'mcp', row.id)));
+  const marks = rows.map(row => itemFile(signinFiles, 'mcp', row.id));
   const file = placePanel(signinFiles, marks);
   if (!rows.length) return h('div.page', {}, emptyState('plug', 'No MCP servers in your tools.', undefined));
   const tools = columnsOf(home, rows);

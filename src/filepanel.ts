@@ -1,7 +1,7 @@
 // A file panel: an item's file, read and drawn where the item is named. What it reads (FileTarget: a library, found or plugin
-// skill's row, an ordinary agent's or MCP server's row, a marketplace skill Find found, or a kept version in Central Knot—the
+// skill's, agent's or MCP server's row, a marketplace skill Find found, or a kept version in Central Knot—the
 // last version kept of a deleted item or a live item's kept version named by tool(s): KeptTarget), the copies it offers (fileCopies, or the text Central Knot holds: storedOf), its mark
-// (fileButton), the read with its guard against a later one (setFile → skillFoundFile, skillPluginFile, agentFile,
+// (fileButton), the read with its guard against a later one (setFile → skillFoundFile, skillPluginFile, pluginItemTexts, agentFile,
 // serverEntry; Central Knot's text by hash, readStored → skillVersionFile, agentVersion, serverStored), which version that text
 // is (versionWords), the panel (filePanel: tabs or a label, the copy
 // choice, its close, the text, the path), its box's height (settleFileBox) and whether a place's open file stays at a draw
@@ -22,6 +22,7 @@ import { inLibrary } from './libraryrow.ts';
 import { libraryPages } from './librarypages.ts';
 import { idOf, isPluginRow, itemOf, reloadButton, rowOf, showInFolder, toolsFor } from './matrix.ts';
 import type { PluginRow } from './pluginrows.ts';
+import { pageOfPart } from './pluginstatus.ts';
 import type { IconName } from './icons.ts';
 import type { FileRead, HarnessId, SearchHit } from './types.ts';
 import type { VersionPart } from './versionlist.ts';
@@ -51,10 +52,12 @@ const isCatalogHit = (target: FileTarget): target is CatalogTarget => target.kin
 const isKept = (target?: FileTarget): target is KeptTarget => target?.kind === 'kept';
 /** A kept agent's or server's version: one file, its definition, under a label as a row's definition is. */
 const keptDefinition = (target?: FileTarget) => isKept(target) && target.of !== 'skills';
-/** An ordinary agent's row (in Central Knot or found). A plugin's agent is a PluginRow (kind 'agent') and a Find hit a CatalogTarget: neither has a file mark yet. */
+/** An ordinary agent's row (in Central Knot or found). A Find hit (CatalogTarget) has no file mark. */
 const isAgentRow = (target?: FileTarget): target is ItemRow & { kind: 'agents' } => target?.kind === 'agents';
-/** An ordinary MCP server's row (in Central Knot or found). A plugin's server is a PluginRow of kind 'mcp' too: no file mark yet. */
+/** An ordinary MCP server's row (in Central Knot or found). */
 const isServerRow = (target?: FileTarget): target is ItemRow & { kind: 'mcp' } => target?.kind === 'mcp' && !('marketName' in target);
+/** A plugin's own agent or MCP server (PluginRow of kind 'agent' or 'mcp'): no skill folder, read through pluginItemTexts. */
+const isPluginPart = (target?: FileTarget): target is PluginRow & { kind: 'agent' | 'mcp' } => !!target && 'marketName' in target && target.kind !== 'skill';
 /** The tools whose settings file has a server's entry: one taken in (its copy's path) or not (LibraryFacts namedIn). */
 const entryTools = (row: ItemRow) => [...Object.keys(row.paths ?? {}) as HarnessId[], ...row.namedIn ?? []];
 /** A target's id: a row's (kind and key), a hit's, a kept version's kind, key and hash (its item's current version has the row's). */
@@ -75,24 +78,26 @@ interface FileCopy { tool: HarnessId; rootLabel?: string; directory?: string; re
 /**
  * The copies a target's panel offers, in column order (tab's tool first): an agent's in each tool with a file for it, a server's
  * in each tool with its entry, each read by itself (one shared hash doesn't
- * make two files the same bytes); a found or plugin skill's, collapsed by real folder, or by hash (found) / version (plugin); none
+ * make two files the same bytes); a found skill's or a plugin item's, collapsed by real folder, or by hash (found) / version (plugin); none
  * of a library skill's, a kept version's or any target on a `storedOnly` place (its stored version instead: storedOf).
  */
 function fileCopies(t: FilePlace, target: FileTarget): FileCopy[] {
   if (t.storedOnly) return [];
   if (isAgentRow(target)) return (toolsFor(t, 'agents') as HarnessId[]).filter(tool => target.paths?.[tool]).map(tool => ({ tool }));
   if (isServerRow(target)) return (toolsFor(t, 'mcp') as HarnessId[]).filter(tool => entryTools(target).includes(tool)).map(tool => ({ tool }));
-  if ((target.kind !== 'skill' && target.kind !== 'skills') || (target.kind === 'skills' && inLibrary(itemOf(target)))) return [];
+  if (target.kind !== 'skills' && target.kind !== 'skill' && !isPluginPart(target)) return [];
+  if (target.kind === 'skills' && inLibrary(itemOf(target))) return [];
   const hashes = target.kind === 'skills' ? target.folderHashes : undefined;
-  const raw = (toolsFor(t, 'skills') as HarnessId[]).flatMap<FileCopy>(tool => target.kind === 'skill'
+  const raw = (toolsFor(t, isPluginPart(target) ? pageOfPart[target.kind] : 'skills') as HarnessId[]).flatMap<FileCopy>(tool => target.kind === 'skill'
     ? (target.copies[tool]?.path ? [{ tool, part: target.copies[tool]!.path, realDirectory: target.copies[tool]!.realDirectory, version: target.installs[tool]?.version }] : [])
+    : isPluginPart(target) ? (target.copies[tool] ? [{ tool, version: target.installs[tool]?.version }] : [])
     : (state.home?.snapshots?.find(entry => entry.harness === tool)?.skills ?? [])
       .filter(entry => itemKey(entry.folder) === target.key)
       .map(entry => ({ tool, rootLabel: entry.rootLabel, directory: entry.directory, realDirectory: entry.realDirectory, hash: hashes?.[entry.realDirectory] })));
   const unique: FileCopy[] = [];
   for (const copy of raw) {
     if (!unique.some(kept => (!!kept.realDirectory && kept.realDirectory === copy.realDirectory)
-      || (target.kind === 'skill' ? !!kept.version && kept.version === copy.version : !!kept.hash && kept.hash === copy.hash))) unique.push(copy);
+      || (target.kind !== 'skills' ? !!kept.version && kept.version === copy.version : !!kept.hash && kept.hash === copy.hash))) unique.push(copy);
   }
   return unique;
 }
@@ -100,7 +105,7 @@ function fileCopies(t: FilePlace, target: FileTarget): FileCopy[] {
 const copyToken = (copy?: FileCopy) => (copy?.hash ? `${copy.hash}:${copy.realDirectory ?? ''}` : `read:${state.home?.readId ?? 0}`);
 /**
  * Whether a row has the file mark (fileButton; the reconcile in tableOf asks it too): a skill with a stored version or a copy,
- * a marketplace skill hit with its path, every ordinary agent, an ordinary server with an entry in a tool or in Central Knot.
+ * a marketplace skill hit with its path, every agent, a server with an entry in a tool or in Central Knot.
  */
 const hasFile = (t: FilePlace, target: FileTarget) => (isCatalogHit(target) ? target.hit.item?.kind === 'skill' && !!target.hit.item.path
   : !!storedOf(t, target) || fileCopies(t, target).length > 0);
@@ -126,8 +131,9 @@ function syncOpenFile(t: FilePlace, target: FileTarget, open: OpenFile) {
   const nextCopy = matched ?? copies[0]!;
   if (!matched || copyToken(nextCopy) !== open.token) setFile(t, target, matched ? open.file : undefined, false, undefined, false, nextCopy);
 }
-/** A tool's copy, as a file panel names it (its chooser; a server's one label). */
+/** A tool's copy, as a file panel names it (its chooser; a server's or plugin part's one label). */
 const copyName = (tool: HarnessId) => `${toolNames[tool]}’s copy`;
+const versionedCopy = (copy: FileCopy) => (copy.version ? `${copyName(copy.tool)} · ${copy.version}` : copyName(copy.tool));
 /** The last part of a path: an agent's file name in a tool. */
 const fileName = (path: string) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
 /** What a file panel's read brings: a file's text (types.ts FileRead), or an agent's definition as the parts Read shows. */
@@ -175,10 +181,12 @@ export function setFile(t: FilePlace, target?: FileTarget, asked?: string, refoc
   // A copy is shown (the one chosen, else the first offered) unless the stored text is asked for (a server's chooser) or none is offered.
   const chosen = target && !catalog && !(offered && asked === DEFINITION) ? (copy ?? fileCopies(t, target)[0]) : undefined;
   const stored = chosen ? undefined : offered;
-  // An agent has one file, named as the chosen tool has it; a server, its copy in the chosen tool; a skill opens SKILL.md first.
+  // An agent has one file, named as the chosen tool has it; a server or plugin part, its copy in the chosen tool; a skill opens SKILL.md first.
   const first = isAgentRow(target) ? (chosen ? fileName(target.paths![chosen.tool]!) : DEFINITION)
-    : isServerRow(target) ? (chosen ? copyName(chosen.tool) : DEFINITION) : keptDefinition(target) ? DEFINITION : 'SKILL.md';
-  const file = isAgentRow(target) || isServerRow(target) || keptDefinition(target) ? first : asked ?? first;
+    : isServerRow(target) ? (chosen ? copyName(chosen.tool) : DEFINITION)
+    : isPluginPart(target) ? (chosen ? versionedCopy(chosen) : '')
+    : keptDefinition(target) ? DEFINITION : 'SKILL.md';
+  const file = isAgentRow(target) || isServerRow(target) || isPluginPart(target) || keptDefinition(target) ? first : asked ?? first;
   const sameHolder = !!prev && prev.id === id && prev.copy?.tool === chosen?.tool && prev.copy?.rootLabel === chosen?.rootLabel;
   const sameFile = sameHolder && prev.file === file;
   const next: OpenFile | undefined = id && (stored || catalog || chosen)
@@ -195,6 +203,8 @@ export function setFile(t: FilePlace, target?: FileTarget, asked?: string, refoc
   const load: Promise<PanelRead | null> = isKept(target) ? readStored(target.of, target.key, target.hash, file)
     : stored ? readStored((target as ItemRow).kind, (target as ItemRow).key, stored.hash, file)
     : isCatalogHit(target!) ? window.centralKnot.skillPluginFile({ marketName: catalog!.marketName, plugin: catalog!.plugin, part: catalog!.path!, from: 'marketplace', source: catalog!.source }, file)
+    : isPluginPart(target) ? window.centralKnot.pluginItemTexts(target.plugin, target.marketName, target.kind, target.name)
+      .then(texts => { const hit = texts.find(each => each.tool === chosen!.tool); return hit ? { files: [file], text: hit.text } : null; })
     : isPluginRow(target!) ? window.centralKnot.skillPluginFile({ marketName: target.marketName, plugin: target.plugin, part: chosen!.part!, from: chosen!.tool }, file)
     : isAgentRow(target) ? window.centralKnot.agentFile(state.home!.home, target.key, chosen!.tool)
     : isServerRow(target) ? window.centralKnot.serverEntry(state.home!.home, target.key, chosen!.tool)
@@ -217,7 +227,7 @@ export function setFile(t: FilePlace, target?: FileTarget, asked?: string, refoc
 /** A file mark: its id, its hover, whether its file is open, what a press does (a table's: fileButton; a page's: itemFile). */
 const markButton = (target: FileTarget, id: string, title: string, open: boolean, onclick: (event: Event) => void) => h('button.row-file-btn',
   { type: 'button', id, title, 'aria-label': isKept(target) && target.tool ? `${title} of ${fileTargetName(target)}` : `Open file: ${fileTargetName(target)}`, 'aria-pressed': String(open), onclick }, icon('file-text', 14));
-/** Open file mark right after a library, found or plugin skill's name, an ordinary agent's and an ordinary server's (Library list, Find hits, a tool's tabs). */
+/** Open file mark right after a library, found or plugin skill's, agent's or server's name (Library list, Find hits, a tool's tabs). */
 export function fileButton(t: FilePlace, target: FileTarget) {
   if (!hasFile(t, target)) return null;
   const id = fileTargetId(target), open = t.view.openFile?.id === id;
@@ -246,7 +256,7 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare
   const full = dir && (dir.includes('\\') ? `${dir}\\${leaf.replaceAll('/', '\\')}` : `${dir}/${leaf}`);
   const missing = open.loaded === undefined ? 'Reading…' : words.unread;
   const note = open.loaded ? open.loaded.note : missing;
-  const copyLabel = (entry: FileCopy) => (entry.version ? `${copyName(entry.tool)} · ${entry.version}`
+  const copyLabel = (entry: FileCopy) => (entry.version ? versionedCopy(entry)
     : entry.rootLabel && copies.filter(other => other.tool === entry.tool).length > 1 ? `${copyName(entry.tool)} (${entry.rootLabel})` : copyName(entry.tool));
   // The stored text is the last choice where copies are offered too (a server's definition, after each tool's entry).
   const choices = [...copies.map(copyLabel), ...(offered && copies.length ? [DEFINITION] : [])], shownAt = stored ? copies.length : copies.indexOf(active!);
@@ -255,7 +265,7 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare
     setFile(t, target, picked ? undefined : DEFINITION, false, undefined, true, picked);
   };
   const chooser = choices.length > 1 ? h('span.select.file-copy-select', {},
-    h('select', { id: partId('file-holder', id), 'aria-label': isServerRow(target) ? 'Entry to show' : 'Copy to show', title: choices[shownAt], onchange: chooseCopy },
+    h('select', { id: partId('file-holder', id), 'aria-label': target.kind === 'mcp' ? 'Entry to show' : 'Copy to show', title: choices[shownAt], onchange: chooseCopy },
       choices.map((label, index) => h('option', { value: String(index), selected: index === shownAt }, label))),
     icon('chevrons-up-down', 14)) : null;
   const tab = (file: string) => h(`button.file-tab${file === open.file ? '.is-active' : ''}`, { type: 'button', role: 'tab',
@@ -279,15 +289,17 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare
     : stored && !t.named ? [h('span.file-open-stored', {}, 'Stored in Central Knot')] : [];
   // An agent's or a server's panel shows one file, or its definition: its name is a label, with nothing to press. A server's
   // entry says where in the file it is, left of its chooser, or of its label after a dot (its chooser names it where there is one).
-  const label = h(`span.file-open-name${stored ? '.file-open-definition' : ''}`, {}, open.file);
+  const label = h(`span.file-open-name${stored || isPluginPart(target) ? '.file-open-definition' : ''}`, {}, open.file);
   const where = open.loaded?.holder ? h('span.file-open-where', {}, `In ${open.loaded.holder}`) : null;
   const lead = isServerRow(target) && h('span.file-open-lead', {}, where, where && !chooser ? h('span.meta-dot', { 'aria-hidden': 'true' }, '·') : null, chooser ? null : label);
-  const shows = isAgentRow(target) || keptDefinition(target) ? label : lead || h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(tab));
+  const shows = isAgentRow(target) || keptDefinition(target) ? label
+    : isPluginPart(target) ? (chooser ? (t.named ? null : h('span.file-open-lead', {})) : label)
+    : lead || h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(tab));
   return h(`div.details.details-file-only${bare ? '.details-bare' : ''}`, { role: 'region', 'aria-label': `File for ${name}` }, back ?? null, h('div.file-open-box', {},
     h('div.file-open-head', {}, t.named ? h('span.file-open-named', {}, h('strong.file-open-item', {}, name),
       ...words.now.map((part, index) => h('span.file-open-now', {}, index || !words.glyph ? null : icon(words.glyph, 12), part)), words.file ? shows : null) : shows,
       h('span.file-open-controls', {}, chooser, close)),
-    ...body, foot.length || !t.named ? h('div.file-open-foot', {}, ...foot) : null));
+    ...body, foot.length ? h('div.file-open-foot', {}, ...foot) : null));
 }
 
 // ---------- A page that names items (the header's three calls) ----------

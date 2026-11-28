@@ -46,9 +46,14 @@ test('Claude Code: what an installed plugin brings, from its own record and copy
     assert.equal(rest.length, 0, 'a project-scope install is not this person’s everywhere');
     assert.deepEqual(brief([found!]), [{ tool: 'claude-cli', plugin: 'demo', marketName: 'elsewhere', off: true, skillsOff: undefined, listed: false, problem: undefined, items: ['skill:hello', 'mcp:tracker', 'agent:checker'] }]);
     assert.equal(found!.version, '1.2.0');
-    // Its file is read only when asked for, by name as the page keys it (case aside), from that plugin's copies alone.
+    // Its file or formatted server entry is read only when asked for, by each kind's own matching rule, from that plugin's copies alone (even when turned off).
     const texts = await readItemTexts(box.context, ['claude-cli', 'pi-cli'], { plugin: 'demo', marketName: 'elsewhere', kind: 'skill', name: 'Hello' });
     assert.deepEqual([texts.map(copy => copy.tool), /Says hello/.test(texts[0]!.text)], [['claude-cli'], true]);
+    const serverTexts = await readItemTexts(box.context, ['claude-cli', 'pi-cli'], { plugin: 'demo', marketName: 'elsewhere', kind: 'mcp', name: 'tracker' });
+    assert.deepEqual(serverTexts, [{ tool: 'claude-cli', text: JSON.stringify({ command: 'npx', args: ['-y', 'tracker'] }, null, 2) }]);
+    assert.deepEqual(await readItemTexts(box.context, ['claude-cli'], { plugin: 'demo', marketName: 'elsewhere', kind: 'mcp', name: 'Tracker' }), [], 'MCP server names match case exactly');
+    const agentTexts = await readItemTexts(box.context, ['claude-cli', 'pi-cli'], { plugin: 'demo', marketName: 'elsewhere', kind: 'agent', name: 'Checker' });
+    assert.deepEqual([agentTexts.map(copy => copy.tool), /Checks things/.test(agentTexts[0]!.text)], [['claude-cli'], true]);
     assert.equal(found!.items[1]!.runs, 'npx -y tracker');
   } finally { await box.cleanup(); }
 });
@@ -100,6 +105,9 @@ test('Codex: its plugin table turned off, a skill switched off by name, and no a
     await copy(join(box.home, '.codex/plugins/cache/m/demo/1.2.0'));
     await put(join(box.home, '.codex/config.toml'), '[plugins."demo@m"]\nenabled = false\n\n[[skills.config]]\nname = "demo:hello"\nenabled = false\n');
     assert.deepEqual(brief(await readPluginItems(box.context, ['codex-cli'])), [{ tool: 'codex-cli', plugin: 'demo', marketName: 'm', off: true, skillsOff: ['hello'], listed: false, problem: undefined, items: ['skill:hello', 'mcp:tracker'] }]);
+    assert.deepEqual(await readItemTexts(box.context, ['codex-cli'], { plugin: 'demo', marketName: 'm', kind: 'mcp', name: 'tracker' }),
+      [{ tool: 'codex-cli', text: JSON.stringify({ command: 'npx', args: ['-y', 'tracker'] }, null, 2) }]);
+    assert.deepEqual(await readItemTexts(box.context, ['codex-cli'], { plugin: 'demo', marketName: 'm', kind: 'agent', name: 'checker' }), []);
   } finally { await box.cleanup(); }
 });
 

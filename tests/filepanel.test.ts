@@ -23,6 +23,9 @@ const { dispatch } = installDom({
     : key === 'docs' && hash === 's3' ? { files: [], text: '{ "command": "pi-docs" }' }
     : key === 'tracker' && hash === 's1' ? { files: [], text: '{ "command": "tracker" }' } : null),
   serverEntry: async () => ({ files: ['.claude.json'], directory: '/home', holder: 'mcpServers', text: '{ "command": "claude-edit" }' }),
+  pluginItemTexts: async (plugin: string, _market: string, kind: string, name: string) => (name === 'missing' ? []
+    : kind === 'mcp' ? [{ tool: 'claude-cli', text: `{\n  "command": "${plugin}-claude"\n}` }, { tool: 'codex-cli', text: `{\n  "command": "${plugin}-codex"\n}` }]
+    : [{ tool: 'claude-cli', text: `${name} in Claude Code.` }, { tool: 'copilot-cli', text: `${name} in Copilot CLI.` }]),
 });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
@@ -240,4 +243,74 @@ test('versionFile opens a live item’s kept version by hash with tool heading, 
     textOf(findNode(missingPanel, el => el.classList.contains('file-open-state'))),
   ], [['Pi’s version'], false, 'Central Knot no longer keeps this version.']);
   drawMissing().mark.click();
+});
+
+test('a plugin’s agent or server opens through pluginItemTexts: differing versions offer each tool’s copy, same versions collapse to one, a turned-off plugin still opens, and an empty read says it couldn’t be read', async () => {
+  const three: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+  const withPlugins = (home: string, versions: [string, string], off = false): HomeView => ({
+    ...homeAt(home),
+    sync: { managed: three, present: three, caughtUp: [], gate: { state: 'open' }, access: { allowed: true } },
+    skills: { ...homeAt(home).skills, tools: three },
+    agents: { ...homeAt(home).agents, tools: three },
+    mcp: { ...homeAt(home).mcp, tools: three },
+    pluginItems: [
+      { tool: 'claude-cli', plugin: 'kit', marketName: 'team', version: versions[0], ...(off ? { off: true } : {}), listed: true,
+        items: [{ kind: 'agent', name: 'helper', description: '' }, { kind: 'agent', name: 'missing', description: '' }, { kind: 'mcp', name: 'issues', description: '' }] },
+      { tool: 'copilot-cli', plugin: 'kit', marketName: 'team', version: versions[1], ...(off ? { off: true } : {}), listed: true,
+        items: [{ kind: 'agent', name: 'helper', description: '' }] },
+      { tool: 'codex-cli', plugin: 'kit', marketName: 'team', version: versions[1], ...(off ? { off: true } : {}), listed: true,
+        items: [{ kind: 'mcp', name: 'issues', description: '' }] },
+    ],
+  } as unknown as HomeView);
+  const anyRow = pagePlace('profiles', { foundAndPlugins: true });
+  state.page = 'profiles';
+  const drawRow = (of: 'agents' | 'mcp', key: string) => {
+    const mark = itemFile(anyRow, of, key);
+    return { mark: mark?.mark as unknown as FakeNode | undefined, panel: placePanel(anyRow, [mark])?.panel as unknown as FakeNode | undefined };
+  };
+  // Differing versions of an agent (2.0.0 vs 1.0.0) while plugin is turned off: both copies offered, chooser switches copy, no footer or tablist.
+  state.home = withPlugins('/tmp/filepanel-plugin-diff', ['2.0.0', '1.0.0'], true);
+  let shown = drawRow('agents', 'kit@team/helper');
+  assert.ok(shown.mark, 'turned-off plugin agent gets a mark');
+  shown.mark!.click();
+  await new Promise(resolve => setTimeout(resolve));
+  shown = drawRow('agents', 'kit@team/helper');
+  const select = findNode(shown.panel, el => el.tag === 'select') as (FakeNode & { onchange?: (e: unknown) => void }) | undefined;
+  assert.deepEqual([
+    select?.attrs['aria-label'], allOf(select, el => el.tag === 'option').map(textOf),
+    allOf(shown.panel, el => el.classList.contains('file-open-now')).map(textOf),
+    textOf(findNode(shown.panel, el => el.tag === 'pre')), !!findNode(shown.panel, el => el.attrs.role === 'tablist'),
+    !!findNode(shown.panel, el => el.classList.contains('file-open-foot')),
+  ], ['Copy to show', ['Claude Code’s copy · 2.0.0', 'Copilot CLI’s copy · 1.0.0'], ['current version'], 'helper in Claude Code.', false, false]);
+  select!.onchange?.({ target: { value: '1' } });
+  await new Promise(resolve => setTimeout(resolve));
+  assert.equal(textOf(findNode(drawRow('agents', 'kit@team/helper').panel, el => el.tag === 'pre')), 'helper in Copilot CLI.');
+  shown.mark!.click();
+  // Same version in both tools (2.0.0): collapsed to one copy, no chooser, label shows Claude Code's copy · 2.0.0.
+  state.home = withPlugins('/tmp/filepanel-plugin-same', ['2.0.0', '2.0.0']);
+  shown = drawRow('agents', 'kit@team/helper');
+  shown.mark!.click();
+  await new Promise(resolve => setTimeout(resolve));
+  shown = drawRow('agents', 'kit@team/helper');
+  assert.deepEqual([!!findNode(shown.panel, el => el.tag === 'select'), textOf(findNode(shown.panel, el => el.classList.contains('file-open-name'))), textOf(findNode(shown.panel, el => el.tag === 'pre'))],
+    [false, 'Claude Code’s copy · 2.0.0', 'helper in Claude Code.']);
+  shown.mark!.click();
+  // Plugin server with differing versions: Entry to show chooser, formatted entry, no footer; empty read shows unread note.
+  state.home = withPlugins('/tmp/filepanel-plugin-mcp', ['2.0.0', '1.0.0']);
+  shown = drawRow('mcp', 'kit@team/issues');
+  shown.mark!.click();
+  await new Promise(resolve => setTimeout(resolve));
+  shown = drawRow('mcp', 'kit@team/issues');
+  const mcpSelect = findNode(shown.panel, el => el.tag === 'select') as (FakeNode & { onchange?: (e: unknown) => void }) | undefined;
+  assert.deepEqual([mcpSelect?.attrs['aria-label'], allOf(mcpSelect, el => el.tag === 'option').map(textOf), textOf(findNode(shown.panel, el => el.tag === 'pre')), !!findNode(shown.panel, el => el.classList.contains('file-open-foot'))],
+    ['Entry to show', ['Claude Code’s copy · 2.0.0', 'Codex’s copy · 1.0.0'], '{\n  "command": "kit-claude"\n}', false]);
+  mcpSelect!.onchange?.({ target: { value: '1' } });
+  await new Promise(resolve => setTimeout(resolve));
+  assert.equal(textOf(findNode(drawRow('mcp', 'kit@team/issues').panel, el => el.tag === 'pre')), '{\n  "command": "kit-codex"\n}');
+  shown.mark!.click();
+  shown = drawRow('agents', 'kit@team/missing');
+  shown.mark!.click();
+  await new Promise(resolve => setTimeout(resolve));
+  assert.equal(textOf(findNode(drawRow('agents', 'kit@team/missing').panel, el => el.classList.contains('file-open-state'))), 'Its file couldn’t be read.');
+  shown.mark!.click();
 });

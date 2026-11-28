@@ -1650,8 +1650,8 @@ app.whenReady().then(async () => {
   handleNow('plugin-updates:view', async () => pluginUpdates?.view() ?? noPluginUpdates);
   handleNow('plugin-updates:check', async () => pluginUpdates?.check(true) ?? noPluginUpdates);
   handleNow('plugin-updates:close', async what => (pluginUpdates && (what === 'updated' || what === 'failed') ? pluginUpdates.close(what) : noPluginUpdates));
-  // One plugin item's file in each tool's copy, read when its row is opened (the home's read leaves file text out).
-  handleNow('plugin-items:texts', async (plugin, marketName, kind, name) => (current && [plugin, marketName, name].every(value => typeof value === 'string') && (kind === 'skill' || kind === 'agent')
+  // One plugin item's file or server entry in each tool's copy, read on demand (the home's read leaves file text out).
+  handleNow('plugin-items:texts', async (plugin, marketName, kind, name) => (current && [plugin, marketName, name].every(value => typeof value === 'string') && (kind === 'skill' || kind === 'agent' || kind === 'mcp')
     ? readItemTexts(pluginItemsContext(context().overrides), harnessIds, { plugin: plugin as string, marketName: marketName as string, kind, name: name as string }) : []));
   // One hook's declaring entry and script file, read from disk on click (hooksource.ts). Nothing is run, written or fetched.
   handleNow('hook:source', async (home, ref) => {
