@@ -51,7 +51,7 @@ const api = {
   applyServers: async (changes: Change[]) => applyServers(boxNow!.context, boxNow!.tools, changes),
   setPluginSkill: async (...args: unknown[]) => {
     pluginCalls.push(args);
-    return { reports: [{ tool: args[3] as HarnessId, outcome: (args[5] ? 'skill-on' : 'skill-off') as const, changed: true, message: 'Switched.', runs: [] }] };
+    return { reports: [{ tool: args[4] as HarnessId, outcome: (args[5] ? 'skill-on' : 'skill-off') as const, changed: true, message: 'Switched.', runs: [] }] };
   },
   addSource: async (token: string) => (pendingAdd ?? addSource(boxNow!.context, boxNow!.tools, token)),
   checkSource: async (id: string) => (pendingCheck ?? checkSource(boxNow!.context, async () => boxNow!.tools, id, work => work())),
@@ -141,7 +141,8 @@ test('Turn it on on Library sources matches the Library switch by making the sam
   await repo.commit({ 'SKILL.md': skillText('Take notes.', 'notes') }, '2026-11-01T10:00:00Z');
   const pluginItems: InstalledPlugin[] = [{
     tool: 'copilot-cli', source: '/market', marketName: 'team', plugin: 'kit', off: false,
-    items: [{ kind: 'skill', name: 'notes', off: true }],
+    skillsOff: ['notes'], listed: true,
+    items: [{ kind: 'skill', name: 'notes' }],
   }];
   const withPlugin = (s: HomeView['skills']): HomeView['skills'] => ({
     ...s,
@@ -159,7 +160,7 @@ test('Turn it on on Library sources matches the Library switch by making the sam
     const sid = sources.view!.sources[0]!.id;
     findById(rendered, `source-turn-on-${sid}-skill-notes`)!.click();
     await flush();
-    const sourcesPlugins = [...pluginCalls];
+    const sourcesPlugins = pluginCalls.map(call => call.slice(0, 6));
     const sourcesDisk = await everywhere(fromSources, 'notes');
 
     await openOnBox(fromLibrary, { pluginItems }, withPlugin);
@@ -167,7 +168,7 @@ test('Turn it on on Library sources matches the Library switch by making the sam
     assert.ok(libClick);
     await applyClick(libClick);
     await flush();
-    const libraryPlugins = [...pluginCalls];
+    const libraryPlugins = pluginCalls.map(call => call.slice(0, 6));
     const libraryDisk = await everywhere(fromLibrary, 'notes');
 
     assert.equal(sourcesPlugins.length, 1, 'Sources row Turn it on turns on the matching disabled plugin skill in Copilot CLI');
@@ -183,7 +184,7 @@ test('Turn it on on Library sources matches the Library switch by making the sam
       await addViaPage(multiBox, 'https://github.com/team/plugin-match-multi');
       findById(rendered, 'source-turn-made-on')!.click();
       await flush();
-      assert.deepEqual(pluginCalls, libraryPlugins, 'Sources band Turn them on also makes the same plugin switch call');
+      assert.deepEqual(pluginCalls.map(call => call.slice(0, 6)), libraryPlugins, 'Sources band Turn them on also makes the same plugin switch call');
     } finally { await multiBox.cleanup(); }
   } finally {
     await fromSources.cleanup();
@@ -223,6 +224,7 @@ test('Band Turn them on leaves out an item deleted meanwhile even when a tool ho
     // Delete notes from Central Knot and place a tool's own copy of notes in Claude Code.
     await applySkills(box.context, box.tools, [{ key: 'notes', on: false, except: [], deleted: true }]);
     await put(box, 'claude-cli', { 'SKILL.md': skillText('My own copy.', 'notes') }, [], 'notes');
+    const before = await everywhere(box, 'notes');
 
     findById(rendered, 'source-turn-made-on')!.click();
     await flush();
@@ -230,10 +232,9 @@ test('Band Turn them on leaves out an item deleted meanwhile even when a tool ho
     const text = textOf(findNode(rendered, el => el.className.includes('band-text')));
     const view = await skillsView(box.context, box.tools);
     assert.equal(view.library.notes?.deleted !== undefined, true, 'deleted skill must not be taken in from the tool copy');
-    assert.deepEqual(await everywhere(box, 'notes'), {
-      'claude-cli': { 'SKILL.md': skillText('My own copy.', 'notes') },
-      'copilot-cli': undefined, 'codex-cli': undefined, 'opencode-cli': undefined, 'pi-cli': undefined,
-    });
+    assert.deepEqual(await everywhere(box, 'notes'), before, 'tool’s own copy stays untouched and is not copied to other tools');
+    assert.equal(before['copilot-cli'], undefined);
+    assert.equal(before['codex-cli'], undefined);
     assert.match(text, /reviewer and relay/);
     assert.match(text, /notes: no longer in Central Knot/);
     assert.ok(existsSync(join(box.home, '.claude/agents/reviewer.md')));

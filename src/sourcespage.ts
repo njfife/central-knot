@@ -19,7 +19,7 @@
 // handOff), the look's one action is the hand-off button (words.ts toPluginsLabel), the Plugins page's own add (pluginstate.ts
 // addMarketplace), run on that page, which tells its outcome. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way
 // and in Central Knot's layout, while a source is read only, holds a few items, and its rows grow one per link.
-import { acting, announce, applyByKind, applyClick, busy, rerender, setHome, showPage, state, tell, tellWritten, type Click, type PageKind } from './app.ts';
+import { acting, announce, applyByKind, applyClick, busy, rerender, setHome, showPage, state, tellWritten, type Click, type PageKind } from './app.ts';
 import { button, closeButton, fold, h, icon, infoCardId, infoMark } from './dom.ts';
 import { itemKey, type ItemKind } from './library.ts';
 import { dayAndTime, groupBy, plural } from './model.ts';
@@ -158,48 +158,56 @@ function liveTurnClicks(items: readonly TurnTarget[], sourceId?: string) {
   return { built, already, skipped };
 }
 const previewClicks = (items: readonly TurnTarget[], sourceId?: string) => liveTurnClicks(items, sourceId).built.map(entry => entry.click);
-let turningOn = false;
-/** Turn on for one or more Off items from a row or band: refreshes live state first, then sends the Library's own click(s). */
-async function turnItemsOn(items: readonly TurnTarget[], sourceId?: string) {
-  if (acting() || turningOn) return;
-  turningOn = true;
-  let built: { item: TurnTarget; click: Click }[] = [], already: TurnTarget[] = [], skipped: { item: TurnTarget; why: string }[] = [];
-  try {
+/** Turn on for one or more Off items from a row or band: refreshes live state under busy, then sends the Library's own click(s). */
+function turnItemsOn(items: readonly TurnTarget[], sourceId?: string) {
+  const refreshLive = async () => {
     const fresh = await api().refresh();
     if (fresh) setHome(fresh, { reload: false });
-    ({ built, already, skipped } = liveTurnClicks(items, sourceId));
-  } finally { turningOn = false; }
-  const skipReasons = skipped.map(({ item, why }) => `${item.name}: ${why}`);
-  if (!built.length) {
+    return liveTurnClicks(items, sourceId);
+  };
+  const noneOutcome = async (already: TurnTarget[], skipped: { item: TurnTarget; why: string }[]) => {
     await loadSources();
     if (!skipped.length) {
       const called = already.map(item => item.name);
-      tell({ page: 'sources', band: true, warn: false, text: `${fewNames(called)} ${called.length === 1 ? 'is' : 'are'} already on.` });
-    } else {
-      tell({ page: 'sources', band: true, warn: true, reasons: skipReasons, text: ['Nothing was turned on.', turnTail(true, already.length, skipped.length)].filter(Boolean).join(' ') });
+      return { page: 'sources' as const, band: true, warn: false, text: `${fewNames(called)} ${called.length === 1 ? 'is' : 'are'} already on.` };
     }
-    return;
-  }
-  if (built.length === 1 && !already.length && !skipped.length) return applyClick(built[0]!.click);
-  const homeTools = state.home?.sync.managed ?? [];
-  const clicks: Click[] = [...groupBy(built, entry => entry.click.kind)].map(([page, list]) => {
-    const ops = list.flatMap(entry => entry.click.plugins?.ops ?? []);
-    const pluginSaid = list.map(entry => entry.click.plugins?.said).filter(Boolean).join(' ') || undefined;
-    const also = list.flatMap(entry => entry.click.also ?? []);
     return {
-      kind: page,
-      items: list.flatMap(entry => entry.click.items),
-      rows: list.flatMap(entry => entry.click.rows),
-      changes: list.flatMap(entry => entry.click.changes),
-      ...(ops.length ? { plugins: { ops, said: pluginSaid } } : {}),
-      ...(also.length ? { also } : {}),
-      said: '',
+      page: 'sources' as const, band: true, warn: true,
+      reasons: skipped.map(({ item, why }) => `${item.name}: ${why}`),
+      text: ['Nothing was turned on.', turnTail(true, already.length, skipped.length)].filter(Boolean).join(' '),
     };
-  });
-  return applyByKind(clicks, through => turnedWords(true, rowNames(through), rowNouns(through.map(row => row.kind))), {
+  };
+  if (items.length === 1) {
+    return applyClick(async () => {
+      const { built, already, skipped } = await refreshLive();
+      return built.length === 1 ? built[0]!.click : noneOutcome(already, skipped);
+    });
+  }
+  const homeTools = state.home?.sync.managed ?? [];
+  return applyByKind(async () => {
+    const { built, already, skipped } = await refreshLive();
+    if (!built.length) return noneOutcome(already, skipped);
+    const clicks: Click[] = [...groupBy(built, entry => entry.click.kind)].map(([page, list]) => {
+      const ops = list.flatMap(entry => entry.click.plugins?.ops ?? []);
+      const pluginSaid = list.map(entry => entry.click.plugins?.said).filter(Boolean).join(' ') || undefined;
+      const also = list.flatMap(entry => entry.click.also ?? []);
+      return {
+        kind: page,
+        items: list.flatMap(entry => entry.click.items),
+        rows: list.flatMap(entry => entry.click.rows),
+        changes: list.flatMap(entry => entry.click.changes),
+        ...(ops.length ? { plugins: { ops, said: pluginSaid } } : {}),
+        ...(also.length ? { also } : {}),
+        said: '',
+      };
+    });
+    return {
+      clicks,
+      reasons: skipped.map(({ item, why }) => `${item.name}: ${why}`),
+      tail: turnTail(true, already.length, skipped.length) || undefined,
+    };
+  }, through => turnedWords(true, rowNames(through), rowNouns(through.map(row => row.kind))), {
     now: 'on',
-    reasons: skipReasons,
-    tail: turnTail(true, already.length, skipped.length) || undefined,
     failedRow: (name, failed) => `${name}: not in ${toolsPhrase(failed, homeTools)}`,
   });
 }

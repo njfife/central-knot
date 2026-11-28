@@ -731,18 +731,22 @@ const stillRead = (rows: NamedRow[], among: NamedRow[]) => [...groupBy(rows, row
  * in the asked state or skipped); `failedRow`: per-row reason line for each row kept back in one or more tools (when given, failed
  * rows are named there instead of counted as `now`).
  */
-export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed: string[]) => string,
+type ByKindBatch = { clicks: Click[]; reasons?: string[]; tail?: string };
+export const applyByKind = (clicks: Click[] | (() => Promise<ByKindBatch | Outcome>), said: (changed: NamedRow[], stayed: string[]) => string,
   { now = 'off', withoutUndo, stays, reasons: extra = [], tail, failedRow }: {
     now?: 'on' | 'off' | 'deleted'; withoutUndo?: (count: number) => string; stays?: boolean; reasons?: string[];
     tail?: string; failedRow?: (name: string, failedTools: HarnessId[]) => string;
   } = {}) => busy('Applying…', async page => {
-  const several = new Set(clicks.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
-  for (const click of clicks) parts.push({ click, done: await carryOut(click, page) });
+  const batch = typeof clicks === 'function' ? await clicks() : { clicks, reasons: extra, tail };
+  if (!('clicks' in batch)) { tell({ ...batch, page }); return; }
+  const { clicks: list, reasons: extraReasons = extra, tail: endTail = tail } = batch;
+  const several = new Set(list.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
+  for (const click of list) parts.push({ click, done: await carryOut(click, page) });
   // Turning several items on from Library sources updates their In Central Knot, Off/On lines.
   if (state.page === 'sources') await loadSources();
   const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
   const stops = saidByKind(parts.flatMap(part => (part.done.refused ? [[part.click.kind, part.done.refused] as [PageKind, string]] : [])), several);
-  const undos = did.flatMap(part => (part.done.undo ? [part.done.undo] : [])).reverse(), regroups = clicks.some(click => click.regroups);
+  const undos = did.flatMap(part => (part.done.undo ? [part.done.undo] : [])).reverse(), regroups = list.some(click => click.regroups);
   const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: changed, regroups }, undos) : undefined;
   keepOwn(parts.map(({ done }) => done.kept));
   // Each row that didn't go through in every tool (its kind refused, its own change held, or a tool kept it back) is said first
@@ -762,8 +766,8 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed:
   const after = !changed.length ? 'Nothing changed.' : through.length ? said(through, stillRead(through, all)) : failedRow ? '' : `${countedAs(changed.length, asked.length, now)}.`;
   const back = changed.length && !undo ? withoutUndo?.(changed.length) : undefined;
   const diffReasons = differed.map(row => `${rowNames([row], all)[0]}: ${DIFFERS_REASON}`);
-  tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn) || differed.length > 0, stays,
-    text: [lead, after, tail, back].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? []), ...failedReasons, ...diffReasons, ...extra],
+  tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(list.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn) || differed.length > 0, stays,
+    text: [lead, after, endTail, back].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? []), ...failedReasons, ...diffReasons, ...extraReasons],
     act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } }, parts.flatMap(part => part.done.reloads), did.length > 0);
   for (const row of changed) flashRow(row);
   if (regroups) unpin();
