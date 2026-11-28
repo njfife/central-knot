@@ -2147,7 +2147,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* "No profile" stays whole at the narrowest window; only a longer name shortens. */
 .status-profile-wrap { position: relative; display: flex; flex: 0 3 auto; min-width: 112px; max-width: 260px; }
 /* `Everyday · changed`: only the name gives way, ` · changed` stays whole beside it (profilespage.ts profileStatus). */
-.status-profile .status-changed { flex: none; margin-left: -6px; }
+.status-profile .status-changed { flex: none; margin-left: -6px; white-space: pre; }
 .status-profile-wrap:has(.status-changed) { min-width: 150px; }
 #status-facts .status-item:has(> .fact-short) { flex: none; }
 #status-facts:has(> .status-profile-wrap) > .sync-switch { flex: none; }
