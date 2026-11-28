@@ -319,7 +319,7 @@ test('History band after Use names the pressed version choice with Undo, groups 
   assert.deepEqual([
     textOf(findNode(page, el => el.classList.contains('band-text'))),
     findById(page, 'outcome-undo'),
-    state.outcome?.warn,
+    !!findNode(page, el => el.classList.contains('tone-warning')),
   ], ['active-skill: That version is no longer in Central Knot’s store, so it can’t be made current.', undefined, true]);
   onRestore = undefined;
   state.outcome = undefined;
