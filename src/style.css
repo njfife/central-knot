@@ -853,16 +853,18 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 }
 .select.file-copy-select .icon { right: 6px; }
 .file-open-close { color: var(--ink-soft); }
-.file-open-foot { border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-soft); }
+.file-open-foot { flex-wrap: nowrap; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-soft); }
+.file-open-foot > .path-text { flex: 1 1 0; min-width: 0; }
+.file-open-foot > .path-text > .middle-tail { flex: none; max-width: 100%; }
 /* The item's name first, where nothing beside the panel names it (filepanel.ts FilePlace named: the Overview's). */
-.file-open-named { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.file-open-named { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; min-width: 0; overflow-x: clip; }
 .file-open-item { font-weight: 600; overflow-wrap: anywhere; }
-.file-open-item::after { content: "·"; margin-left: 8px; font-weight: 400; color: var(--ink-faint); }
-/* A page's panel says which version it shows (filepanel.ts versionWords), each part before a dot, a deleted item's after the bin, before its file's name. */
+/* A page's panel says which version it shows (filepanel.ts versionWords); hanging dots sit in the gap and clip on wrap so none ends or starts a line. */
 .file-open-now { display: inline-flex; align-items: center; }
 .file-open-now > .icon { margin-right: 4px; }
-.file-open-now::after { content: "·"; margin-left: 8px; color: var(--ink-faint); }
-.file-open-now:last-child::after { content: none; }
+.file-open-named > :not(:first-child)::before { content: "·"; display: inline-block; flex: none; width: 16px; margin-left: -16px; text-align: center; font-weight: 400; color: var(--ink-faint); }
+.file-open-named > .file-open-tabs::before { margin-right: -4px; }
+.file-open-named > .file-open-lead::before { margin-right: -8px; }
 .file-open-tabs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
 .file-tab { appearance: none; max-width: 100%; overflow-wrap: anywhere; border: 1px solid transparent; border-radius: 6px; padding: 2px 8px; background: transparent; color: var(--ink-soft); font: 500 11.5px/16px var(--mono); cursor: pointer; }
 .file-tab.is-active { background: var(--surface); border-color: var(--control-line); color: var(--ink); box-shadow: var(--lift); }
@@ -881,7 +883,13 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .file-open-box .content-owner { margin: 0; padding: 8px 12px 0; }
 .file-open-box .content-owner + .content { padding-top: 4px; }
 .file-open-box > .content-block { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.file-open-box .content { flex: 1 1 auto; min-height: 0; max-width: none; padding: 10px 12px; border: 0; border-radius: 0; line-height: 17.5px; overflow-y: auto; overscroll-behavior: contain; }
+.file-open-box .content {
+  flex: 1 1 auto; min-height: 0; max-width: none; padding: 10px 12px; border: 0; border-radius: 0;
+  line-height: 17.5px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: auto; scrollbar-color: auto;
+}
+.file-open-box .content::-webkit-scrollbar { width: 8px; height: 8px; }
+.file-open-box .content::-webkit-scrollbar-thumb { background: var(--cell-line); border-radius: 4px; }
+.file-open-box .content::-webkit-scrollbar-track { background: transparent; }
 .file-open-state { margin: 0; padding: 12px; font-size: 12.5px; color: var(--ink-soft); }
 .file-open-foot-actions { display: inline-flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
 
@@ -1380,6 +1388,8 @@ span.ins-confirm { margin-top: 0; }
 .signin-table tbody tr.file-anchored > * { background: var(--picked); padding-bottom: 9px; border-bottom: 0; }
 .signin-table tbody tr.file-anchored > :first-child, .signin-table tbody tr.signin-file > td { box-shadow: inset 3px 0 0 var(--accent); }
 .signin-table tbody tr.signin-file > td { padding: 4px 10px 10px; background: var(--picked); overflow-wrap: normal; }
+/* Spanning the whole auto-layout table: the panel contributes no intrinsic width so a long one-line path shortens instead of widening the columns. */
+.signin-table tbody tr.signin-file > td > .details-file-only { width: 0; min-width: 100%; }
 .signin-table tbody tr:last-child > :first-child { border-bottom-left-radius: 9px; }
 .signin-table tbody tr:last-child > :last-child { border-bottom-right-radius: 9px; }
 .signin-plugin { display: block; font-size: 11.5px; color: var(--ink-soft); }
@@ -1910,8 +1920,8 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .setting-added > .setting-message:has(.row-file-btn) { line-height: 24px; }
 .setting-added > .setting-message:has(.row-file-btn) > .icon { margin-top: 5px; }
 .setting-added > .setting-message.file-anchored { color: var(--ink); }
-.setting-added-name, .setting-added-tail { white-space: nowrap; }
-.setting-added .row-file-btn { width: 20px; height: 20px; margin: 0 1px 0 4px; vertical-align: -5px; }
+.setting-added-name { white-space: nowrap; }
+.setting-added .row-file-btn, .setting-taken-out-row .row-file-btn { width: 20px; height: 20px; margin: 0 1px 0 4px; vertical-align: -5px; }
 /* Marked lines use line-height 24px (20px marks) while a following (i) notice uses 16px, so keep the same gap as between lines. */
 .setting-added:has(> .setting-message:last-child .row-file-btn) + .setting-message { margin-top: -4px; }
 .setting-added > .details-file-only { min-width: 0; margin: -6px 0 8px; }
@@ -1939,8 +1949,17 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .setting-attention { color: var(--ink); }
 .setting-attention .icon { color: var(--warning); }
 .setting-message .text-action { margin: -2px -4px; padding: 2px 4px; line-height: 16px; }
-/* History sits inside .setting-added-tail (no .setting-message-text margin-right: 8px), so +4px margin + 4px padding keeps the 8px gap. */
-.setting-added .setting-added-tail > .text-action { margin-left: 4px; }
+/* The found items taken out earlier: a fold under the added lines, its rows a name, its kind and Add (settingspage.ts takenOutFold). */
+.setting-row > .fold { grid-column: 1 / -1; margin: -8px 0 0; }
+/* One grid, its rows' parts in columns (name and mark, kind, act), so each Add starts where the others do; a panel or the copy question spans it. */
+.setting-taken-out-list { display: grid; grid-template-columns: minmax(0, max-content) max-content minmax(0, 1fr); gap: 4px 12px; align-items: center; font-size: 12px; line-height: 24px; }
+.setting-taken-out-row { display: contents; }
+.setting-taken-out-row .item-name { overflow-wrap: anywhere; white-space: normal; }
+.setting-taken-out-act { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.setting-taken-out-list > :not(.setting-taken-out-row) { grid-column: 1 / -1; }
+/* Why an added line has no Undo, in its place: quiet, its hover the reason's cost. */
+.setting-added-why { white-space: nowrap; color: var(--ink-faint); }
+.setting-added-why[title] { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
 .setting-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 /* The log under its row (Show log): as tall as its lines, so the page scrolls, never the block; a long line wraps; its text can
    be selected and copied (the body's is not). */
@@ -2025,14 +2044,13 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .session-run-warn { font-size: 12px; color: var(--ink); font-weight: 500; }
 .session-note { font-size: 12px; color: var(--ink-soft); }
 .session-cant-run { color: var(--ink); font-weight: 500; }
-.session-note code { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
 .session-groups { display: flex; flex-direction: column; gap: 8px; }
 .session-group { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .session-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding-left: 16px; min-width: 0; font-size: 12.5px; color: var(--ink-soft); }
 .session-head > .origin-mark { margin-left: -16px; }
 .session-in, .session-warning > span { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; min-width: 0; max-width: 100%; }
 .session-in > .path-text, .session-warning .path-text { min-width: 0; max-width: 100%; }
-/* Quiet link weight matching View source and Run it; wraps cleanly beside long plugin names. */
+/* Quiet link weight matching View source and See what it adds; wraps cleanly beside long plugin names. */
 .session-head > .btn.link { max-width: 100%; height: auto; padding: 0; white-space: normal; text-align: left; }
 .session-head > .btn.link:focus-visible { outline-offset: 2px; border-radius: 4px; }
 .session-why { padding-left: 16px; font-size: 12px; color: var(--ink-soft); overflow-wrap: anywhere; }
@@ -2244,12 +2262,22 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .pf-row { display: grid; grid-template-columns: minmax(0, 1fr) clamp(208px, 26cqi, 280px); align-items: center; min-height: 37px; box-shadow: inset 0 -1px 0 var(--control-line); }
 .pf-row:not(.pf-head):hover { background: var(--hover); }
 .pf-row:not(.pf-head):focus-within { background: var(--hover); }
+/* The Profiles row an item's file is open under (profilespage.ts), tinted with its panel as one block. */
+.pf-row.file-anchored, .pf-row.file-anchored:hover, .pf-row.file-anchored:focus-within { background: var(--picked); box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--control-line); }
+.pf-row > .details-file-only { grid-column: 1 / -1; min-width: 0; padding: 4px 16px 12px; }
 .pf-head { position: sticky; top: 0; z-index: 2; background: var(--surface); min-height: 40px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
 .pf-head .pf-name { padding-left: 16px; gap: 4px; }
 .pf-name { position: relative; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; }
-.pf-name-text { flex: 0 1 auto; min-width: 48px; font-weight: 500; overflow-wrap: anywhere; }
-/* A long name wraps instead of being cut: rows grow, keeping their minimum height */
-.pf-row:not(.pf-head) .pf-name { padding-block: 6px; }
+/* A long name wraps at word breaks instead of being squeezed mid-word; its mark stays on the last line and any plugin tag wraps cleanly below it. */
+.pf-row:not(.pf-head) .pf-name { align-items: flex-start; padding-block: 6px; }
+.pf-name > .kind-mark { height: 24px; }
+.pf-main { flex: 1 1 0; min-width: 0; min-height: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.pf-title { flex: 0 1 auto; min-width: 0; max-width: 100%; line-height: 22px; overflow-wrap: break-word; }
+.pf-name-text { font-weight: 500; }
+.pf-mark-keep { white-space: nowrap; }
+.pf-mark-keep > .row-file-btn { margin-left: 6px; vertical-align: middle; }
+.pf-main > .row-tag { flex: 0 1 auto; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: break-word; align-items: flex-start; }
+.pf-main > .row-tag > svg { flex: none; margin-top: 2px; }
 /* A skill that comes on in Claude Code with the ticked row above it, its plugin being whole there (profilespage.ts withBrought). */
 .pf-row.pf-beneath .pf-name { padding-left: 40px; }
 /* How Claude Code takes a plugin whole, and what a switch turns there, under Find (profilespage.ts claudeBand) */

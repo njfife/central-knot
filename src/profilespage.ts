@@ -9,16 +9,20 @@
 // its kind), and in Claude Code what comes on with a ticked item (wholeNote, withBrought; claudeBand under Find); an older
 // profile with `switchesPluginItems` false hides plugin rows behind "Choose plugin items for this profile". Unchanged rows leave
 // their state cell blank (hover keeps live state; `Off · on in …` stays on a plugin row in use; rows left out name tools that
-// keep them on: keptOn; a row whose tools change says where: `Out of Codex`). A profile held by a plugin off in a tool offers in
-// Switch's place, and on each row held in another plugin or tool, the Library line's own press to turn it on there, its result and
-// Undo in this page's band, else the link to its page, the header saying why (wayPast, turnOnControl). Every rule and preview is
-// profileplan.ts's (listedChanges, listedChangeCount, switchPlan, pluginPlan, inUse, switchSaid, switchOffer, statusMenuRows, switchPreview, keptOn, leftOutWords, toolsOf), as profiles.ts
-// carries it out.
+// keep them on: keptOn; a row whose tools change says where: `Out of Codex`). Each library item Central Knot holds, each
+// plugin-linked library copy, and each installed plugin's skill (folded onto an own row included) gets a file mark after its name,
+// opening its current version under that row (profilesFiles, rowKey → filepanel.ts); whole-only plugin servers and agents have none.
+// A profile held by a plugin off in a tool offers in Switch's place, and on each row held in another plugin or tool, the Library
+// line's own press to turn it on there, its result and Undo in this page's band, else the link to its page, the header saying why (wayPast, turnOnControl).
+// Every rule and preview is profileplan.ts's (listedChanges, listedChangeCount, switchPlan, pluginPlan, inUse, switchSaid,
+// switchOffer, statusMenuRows, switchPreview, keptOn, leftOutWords, toolsOf), as profiles.ts carries it out.
 import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { brandMark, kindGlyph, lineFacts, openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
 import { lineControl } from './pluginline.ts';
+import { pluginRowKey } from './pluginrows.ts';
 import { lineBusy, market, turnFromLine, viewCurrent, type LineAim } from './pluginstate.ts';
 import { button, checkbox, emptyState, findInput, h, icon, infoMark } from './dom.ts';
+import { itemFile, pagePlace, placePanel } from './filepanel.ts';
 import { claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, itemRowState, nameNow, nowLead, profileNow, keptOn, leftOut, listedChangeCount, listedChanges, listedPlugins, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, statusMenuRows, switchable, switchOffer, switchPlan, switchPreview, switchSaid, takenWhole, toolsOf, withTool, wholeTurns, type LiveItem, type MenuRow, type PluginCopy, type PluginLive, type PluginTurn, type ProfileNow } from './profileplan.ts';
 import { DIRECTORY, noSingleSwitch, pageOfPart } from './pluginstatus.ts';
 import { counted } from './pluginswitch.ts';
@@ -30,6 +34,18 @@ import type { InstalledPlugin, PluginItem, Profile } from './types.ts';
 let find = '';
 /** Whether the status bar's profile menu is open. */
 let menuOpen = false;
+/** Profiles' scroll box for settleFileBox: #profiles-split under 880 px, else #profile-scroll, with its sticky table heads and panel bottom padding. */
+function profilesBoxRoom(box: HTMLElement) {
+  const split = document.getElementById('profiles-split');
+  const scroller = split && getComputedStyle(split).overflowY === 'auto' ? split : document.getElementById('profile-scroll');
+  if (!scroller) return undefined;
+  const sticky = (scroller.querySelector<HTMLElement>('.pf-head')?.offsetHeight ?? 0) + (scroller.querySelector<HTMLElement>('.pf-section')?.offsetHeight ?? 0);
+  return { scroller, sticky, padding: parseFloat(getComputedStyle(box.parentElement!).paddingBottom) || 0 };
+}
+/** Profiles as a file panel's place (filepanel.ts pagePlace), and the Library key each row opens (its own, linked library copy, or plugin row). */
+const profilesFiles = pagePlace('profiles', { foundAndPlugins: true, boxRoom: profilesBoxRoom });
+export const rowKey = (item: LiveItem | PluginLive) => ('key' in item ? item.key
+  : item.copies.map(copy => ('libraryKey' in copy.target ? copy.target.libraryKey : '')).find(Boolean) ?? pluginRowKey(item.plugin, item.marketName, item.kind, item.name));
 
 const profiles = () => state.home!.profiles;
 /** Every live library item, and each one's description from its page's row; every plugin's item some tool has (profileplan.ts pluginLive). */
@@ -142,26 +158,41 @@ const kindWords: Record<ItemKind, { one: string; many: string; title: string }> 
 const cellWords = (said: string, inChanges: boolean) => (inChanges && (said === 'Turns on' || said === 'Turns off') ? '' : said);
 /** Kind icon for a row in the Changes view, carrying its kind on hover. */
 const kindMark = (kind: ItemKind) => h('span.kind-mark', { role: 'img', 'aria-label': kindWords[kind].one, title: kindWords[kind].one }, icon(kindGlyph[pageOfPart[kind]], 13));
+/** Keeps the file mark with the name's (or Changes kind tag's) last few letters so the mark never wraps alone while a long last word still breaks. */
+function nameTitle(label: string, title: string, mark?: HTMLElement, kindWord?: string) {
+  const split = (text: string) => {
+    const tail = text.match(/[^\s-]{1,4}$/)?.[0] ?? text.match(/\S{1,4}$/)?.[0] ?? text;
+    return [text.slice(0, text.length - tail.length), tail] as const;
+  };
+  if (!mark) return h('span.pf-title', {}, h('span.pf-name-text', { title }, label, kindWord ? h('span.tone-muted', {}, ` · ${kindWord}`) : null));
+  if (kindWord) {
+    const [head, tail] = split(kindWord);
+    return h('span.pf-title', {}, h('span.pf-name-text', { title }, label, h('span.tone-muted', {}, ` · ${head}`, h('span.pf-mark-keep', {}, tail, mark))));
+  }
+  const [head, tail] = split(label);
+  return h('span.pf-title', {}, h('span.pf-name-text', { title }, head, h('span.pf-mark-keep', {}, tail, mark)));
+}
 
 /**
  * One item's row: its tick box, name (with its description on hover), and what a switch does to it; on a row the profile leaves
  * out, under its name, the tools that still load it from a copy Central Knot doesn't write, given what the switch turns of the
  * plugins' items (profileplan.ts keptOn).
  */
-function itemRow(profile: Profile, item: LiveItem, plan: Plan, inChanges = false, showKindWord = false) {
+function itemRow(profile: Profile, item: LiveItem, plan: Plan, file: { mark?: HTMLElement; panel: HTMLElement | null }, inChanges = false, showKindWord = false) {
   const included = profile.items.includes(item.id), description = descriptionOf(item);
   const change = plan.changes.byId.get(item.id), said = cellWords(change?.said ?? '', inChanges);
   const kept = included ? { tools: [] } : keptOn(item, plan.plugs), many = kept.tools.length > 1;
   const help = `${included ? `In ${profile.name}: switching to it turns ${item.name} on. Click to leave it out.` : `Not in ${profile.name}: switching to it turns ${item.name} off. Click to put it in.`} ${item.name} is ${itemRowState(item)} now.`;
-  return h(`div.pf-row${included ? '.pf-included' : ''}`, { role: 'row', 'data-item': item.id },
+  return h(`div.pf-row${included ? '.pf-included' : ''}${file.panel ? '.file-anchored' : ''}`, { role: 'row', 'data-item': item.id },
     h('span.pf-name', { role: 'cell' },
       tick(profile, { id: `pf-${item.id}`, checked: included, label: `${item.name} (${kindWords[item.kind].one}) in ${profile.name}`, help,
         itemsAfterClick: included ? profile.items.filter(entry => entry !== item.id) : [...profile.items, item.id] }),
       inChanges ? kindMark(item.kind) : null,
-      h('span.pf-name-text', { title: description || item.name }, item.name, showKindWord ? h('span.tone-muted', {}, ` · ${kindWords[item.kind].one}`) : null),
+      h('span.pf-main', {}, nameTitle(item.name, description || item.name, file.mark, showKindWord ? kindWords[item.kind].one : undefined)),
       kept.tools.length ? h('span.pf-notes', {}, h('span.pf-note', {}, `${toolList(kept.tools)} still ${many ? 'load' : 'loads'} it ${loadWords([kept])}.`)) : null),
     // Words that count tools name each behind their (?), reached by click and keyboard.
-    h(`span.pf-state${said ? '.pf-state-moves' : ''}`, { role: 'cell', 'data-state': said }, said, change?.full ? infoMark(`pf-full-${item.id}`, item.name, change.full) : null));
+    h(`span.pf-state${said ? '.pf-state-moves' : ''}`, { role: 'cell', 'data-state': said }, said, change?.full ? infoMark(`pf-full-${item.id}`, item.name, change.full) : null),
+    file.panel);
 }
 
 /** At the head of a kind, once: each tool with no switch for one item of a plugin of that kind that has such an item here, which keeps those items on (Copilot CLI's agents; Claude Code takes a plugin whole instead: wholeNote). */
@@ -253,7 +284,7 @@ function withBrought(profile: Profile, rows: PluginLive[]): { item: PluginLive; 
 }
 
 /** A plugin's item's row: its box (with live state on hover), its name and plugin (matrix.ts pluginTag), what a switch does to it (`profileplan.ts listedChanges`, or `pluginRowState` while in use), and under its name what comes on with it in Claude Code (wholeNote) and each tool whose copy it can't turn or keeps on by shared name (copyNote); set in beneath the row it comes on with (`beneath`: withBrought). */
-function pluginRow(profile: Profile, item: PluginLive, plan: Plan, beneath = false, inChanges = false, showKindWord = false) {
+function pluginRow(profile: Profile, item: PluginLive, plan: Plan, file: { mark?: HTMLElement; panel: HTMLElement | null }, beneath = false, inChanges = false, showKindWord = false) {
   const included = profile.items.includes(item.id), change = plan.changes.byId.get(item.id);
   const said = change ? cellWords(change.said, inChanges) : plan.isInUse ? pluginRowState(profile, item) : '';
   const moves = !!change && !!said;
@@ -264,15 +295,17 @@ function pluginRow(profile: Profile, item: PluginLive, plan: Plan, beneath = fal
   const except = kept ? `, except Copilot CLI (same name as ${kept.by === 'plugin' ? `${kept.plugin}’s` : 'yours'})`
     : comesWith(profile, item) ? ', except Claude Code, where it comes on with its plugin' : '';
   const help = `${included ? `In ${profile.name}: switching to it turns ${item.name} on` : `Not in ${profile.name}: switching to it turns ${item.name} off`} in each tool that can switch it${except}. Click to ${included ? 'leave it out' : 'put it in'}. ${item.name} is ${pluginLiveState(item)} now.`;
-  return h(`div.pf-row${included ? '.pf-included' : ''}${beneath ? '.pf-beneath' : ''}`, { role: 'row', 'data-item': item.id },
+  return h(`div.pf-row${included ? '.pf-included' : ''}${beneath ? '.pf-beneath' : ''}${file.panel ? '.file-anchored' : ''}`, { role: 'row', 'data-item': item.id },
     h('span.pf-name', { role: 'cell' },
       tick(profile, { id: `pf-${item.id}`, checked: included, label: `${item.name} (${kindWords[item.kind].one} from ${item.plugin}) in ${profile.name}`, help,
         itemsAfterClick: included ? profile.items.filter(entry => entry !== item.id) : [...profile.items, item.id] }),
       inChanges ? kindMark(item.kind) : null,
-      h('span.pf-name-text', { title: item.name }, item.name, showKindWord ? h('span.tone-muted', {}, ` · ${kindWords[item.kind].one}`) : null),
-      pluginTag(item.plugin, `From the plugin ${item.plugin}, in the marketplace ${item.marketName}`),
+      h('span.pf-main', {},
+        nameTitle(item.name, item.name, file.mark, showKindWord ? kindWords[item.kind].one : undefined),
+        pluginTag(item.plugin, `From the plugin ${item.plugin}, in the marketplace ${item.marketName}`)),
       notes.length ? h('span.pf-notes', {}, notes) : null),
-    h(`span.pf-state${moves ? '.pf-state-moves' : ''}`, { role: 'cell', 'data-state': said }, said));
+    h(`span.pf-state${moves ? '.pf-state-moves' : ''}`, { role: 'cell', 'data-state': said }, said),
+    file.panel);
 }
 
 /**
@@ -289,32 +322,36 @@ const planOf = (profile: Profile, all: LiveItem[], plugged: PluginLive[]): Plan 
 };
 
 /** A kind's rows under a heading with a tick box for all of them: the library's items, then the plugins' (with Find in use, `list` and `plugged` are the rows shown). */
-function tableSection(profile: Profile, kind: ItemKind, list: LiveItem[], plugged: PluginLive[], plan: Plan) {
+function tableSection(profile: Profile, kind: ItemKind, list: LiveItem[], plugged: PluginLive[], plan: Plan, forItem: (id: string) => { mark?: HTMLElement; panel: HTMLElement | null }) {
   if (!list.length && !plugged.length) return null;
   const ids = new Set([...list, ...plugged].map(item => item.id)), inside = [...ids].filter(id => profile.items.includes(id)).length, all = inside === ids.size;
   const title = kindWords[kind].title;
   const tickAll = tick(profile, { id: `pf-all-${kind}`, checked: all, mixed: inside > 0, label: `${title}: all in ${profile.name}`, help: `${all ? 'Leave every one' : 'Put every one'}${find ? ' shown' : ''} ${all ? 'out of' : 'in'} ${profile.name}`,
     itemsAfterClick: all ? profile.items.filter(entry => !ids.has(entry)) : [...new Set([...profile.items, ...ids])] });
   return [h('div.pf-section', { role: 'row' }, h('span.pf-section-label', { role: 'cell' }, tickAll, h('strong', {}, title), h('span.pf-section-count', {}, `${inside} of ${ids.size} ticked`))),
-    kindNote(kind, plugged), ...list.map(item => itemRow(profile, item, plan)),
-    ...withBrought(profile, plugged).map(({ item, beneath }) => pluginRow(profile, item, plan, beneath))];
+    kindNote(kind, plugged), ...list.map(item => itemRow(profile, item, plan, forItem(item.id))),
+    ...withBrought(profile, plugged).map(({ item, beneath }) => pluginRow(profile, item, plan, forItem(item.id), beneath))];
 }
 
 /** The items under their kinds, or under Turns on / Turns off / Changes tools while Changes is open, each with what a switch does to it. */
 function table(profile: Profile, list: LiveItem[], plugged: PluginLive[], plan: Plan, pinned?: { on: string[]; off: string[]; retooled: string[] }) {
   const byId = new Map<string, LiveItem | PluginLive>([...list, ...plugged].map(item => [item.id, item]));
   const visible = pinned ? [...pinned.on, ...pinned.off, ...pinned.retooled].flatMap(id => (byId.has(id) ? [byId.get(id)!] : [])) : [...list, ...plugged];
+  // profile.id as occurrenceId ties the open file to this profile, so switching profiles, status-bar switches or deleting closes it.
+  const marks = new Map(visible.map(item => [item.id, itemFile(profilesFiles, pageOfPart[item.kind], rowKey(item), profile.id)]));
+  const file = placePanel(profilesFiles, [...marks.values()]);
+  const forItem = (id: string) => ({ mark: marks.get(id)?.mark, panel: file && file.mark === marks.get(id) ? file.panel : null });
   const hasState = !plan.isInUse && visible.some(item => !!cellWords(plan.changes.byId.get(item.id)?.said ?? '', !!pinned));
   const head = h('div.pf-row.pf-head', { role: 'row' },
     h('span.pf-name', { role: 'columnheader', 'data-info-block': true }, 'In profile', infoMark('profile-save-info', 'Saving ticks', SAVE_NOTE_CARD)),
     h('span.pf-state', { role: 'columnheader' }, hasState ? 'Switching' : ''));
   if (!pinned) {
     return h('div.pf-table', { role: 'table', 'aria-label': `What ${profile.name} has on` }, head,
-      (['skill', 'mcp', 'agent'] as const).flatMap(kind => tableSection(profile, kind, list.filter(item => item.kind === kind), plugged.filter(item => item.kind === kind), plan) ?? []));
+      (['skill', 'mcp', 'agent'] as const).flatMap(kind => tableSection(profile, kind, list.filter(item => item.kind === kind), plugged.filter(item => item.kind === kind), plan, forItem) ?? []));
   }
   const dupNames = new Set(visible.map(item => item.name).filter((name, at, names) => names.indexOf(name) !== at));
   const render = (item: LiveItem | PluginLive, dup = dupNames.has(item.name)) =>
-    ('copies' in item ? pluginRow(profile, item, plan, false, true, dup) : itemRow(profile, item, plan, true, dup));
+    ('copies' in item ? pluginRow(profile, item, plan, forItem(item.id), false, true, dup) : itemRow(profile, item, plan, forItem(item.id), true, dup));
   const group = (label: string, ids: string[]) => {
     const rows = ids.flatMap(id => (byId.has(id) ? [render(byId.get(id)!)] : []));
     if (!rows.length) return [];
@@ -343,7 +380,7 @@ function toolsStrip(profile: Profile) {
 /** Find, the Changes N view toggle while previewing, and the count while finding. */
 function findBar(shown: number, total: number, changes: { show: boolean; count: number; open: boolean; onToggle: () => void }) {
   const input = findInput({ id: 'profile-find', label: 'Find a skill, MCP server or agent', value: find, onInput: text => { find = text; rerender(); },
-    onKeydown: event => { if (event.key === 'Escape' && find) { find = ''; rerender(); } } });
+    onKeydown: event => { if (event.key === 'Escape' && find) { event.preventDefault(); find = ''; rerender(); } } });
   return h('div.toolbar', {}, h('label.find', {}, icon('search', 16, 'find-glyph'), input,
     find ? button({ variant: 'ghost', size: 'micro', icon: 'x', name: 'Clear', id: 'profile-find-clear', onclick: () => { find = ''; rerender(); document.getElementById('profile-find')?.focus(); } }) : null),
     h('div.toolbar-end', {},
@@ -412,7 +449,7 @@ function renameField(profile: Profile) {
   };
   return h('input.profile-name-input', { id: 'profile-name', type: 'text', value: profileState.draft ?? profile.name, maxlength: '40', 'aria-label': 'Profile name', spellcheck: 'false',
     oninput: (event: Event) => { profileState.draft = (event.target as HTMLInputElement).value; },
-    onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter' || event.key === 'Escape') finish(event.key === 'Enter', event.target as HTMLInputElement, next); },
+    onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); finish(event.key === 'Enter', event.target as HTMLInputElement, next); } },
     onblur: (event: Event) => { const input = event.target as HTMLInputElement; if (input.isConnected) afterClick(() => finish(true, input, () => undefined)); } });
 }
 
@@ -425,9 +462,10 @@ function choosePluginsBand(profile: Profile) {
       onclick: () => void saveProfileDef({ id: profile.id, switchesPluginItems: true }, `${profile.name} now switches plugin items for good. Tick the ones you want on before switching.`, true) }));
 }
 
+const cancelDelete = () => { profileState.confirmDelete = undefined; rerender(); document.getElementById('profile-delete')?.focus(); };
 /** Delete's confirmation: deleting a profile changes nothing in Central Knot or the tools, and Undo makes it again. */
 function deleteActions(profile: Profile) {
-  const cancel = button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'profile-delete-cancel', onclick: () => { profileState.confirmDelete = undefined; rerender(); document.getElementById('profile-delete')?.focus(); } });
+  const cancel = button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'profile-delete-cancel', onclick: cancelDelete });
   return [h('span.profile-confirm', {}, `Delete ${profile.name}? No item changes.`), danger(button({ variant: 'outline', size: 'small', label: 'Delete', id: 'profile-delete-confirm', onclick: () => void deleteProfileDef(profile.id) })), cancel];
 }
 
@@ -483,6 +521,7 @@ function profileDetail(profile: Profile) {
     profileState.changes = pinned ? undefined : pinChanges(profile, plan.changes);
     rerender();
   };
+  if (!shownCount) placePanel(profilesFiles, []);
   return h('div.detail-column', {},
     // The title's (?) card opens below the whole header, clear of Switch, which it speaks of.
     h('div.pane-header.profile-header', { 'data-info-block': true }, icon('sliders-horizontal', 16, 'tone-muted'),
@@ -508,6 +547,8 @@ function profileDetail(profile: Profile) {
 
 export function profilesPage(): HTMLElement {
   const home = state.home;
+  const open = home?.profiles.profiles.length ? openProfile() : undefined;
+  if (!open) placePanel(profilesFiles, []);
   if (!home) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, 'Reading…')));
   const view = home.profiles, readOnly = whyReadOnly(home);
   // What couldn't be done since the last read, told here too: sync's failures, or a switch from the menu bar or tray icon that couldn't start.
@@ -521,7 +562,6 @@ export function profilesPage(): HTMLElement {
       `Make a profile for each kind of work, such as Incident or Development, and tick what it needs. Switching to it, here, from the status bar or from the ${machine.trayIcon}, turns those on and everything else off: Central Knot keeps each item, and Undo switches back.`,
       button({ variant: 'primary', icon: 'plus', label: 'New profile', id: 'profile-new', disabled: !canEditProfiles(), onclick: newProfile })));
   }
-  const open = openProfile();
   return h('div.page.profiles-page', {}, bands.length ? h('div.bands', {}, bands) : null,
     h('div.page.split.profiles-split', { id: 'profiles-split' }, listColumn(open), open ? profileDetail(open) : h('div.detail-column')));
 }
@@ -604,3 +644,8 @@ export function profileStatus(): HTMLElement | null {
 }
 // A click anywhere else closes the profile menu.
 document.addEventListener('click', event => { if (menuOpen && !(event.target as Element).closest?.('.status-profile-wrap')) { menuOpen = false; rerender(); } });
+// Escape cancels an armed Delete confirmation only while it is drawn on the page, before pagePlace's window listener closes an open file panel.
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !event.defaultPrevented && state.page === 'profiles' && profileState.confirmDelete
+    && document.getElementById('profile-delete-confirm')) { event.preventDefault(); cancelDelete(); }
+});

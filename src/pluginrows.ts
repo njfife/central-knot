@@ -82,6 +82,10 @@ export const pluginOnIn = (home: Pick<HomeView, 'pluginItems' | Page> | undefine
 
 const memo = new WeakMap<Pick<HomeView, 'pluginItems' | Page>, Partial<Record<Page, PageRows>>>();
 
+/** A plugin row's key in the Library (`PluginRow.key`): MCP servers keep their case, skills and agents fold case. */
+export const pluginRowKey = (plugin: string, marketName: string, kind: PartKind, name: string) =>
+  `${plugin}@${marketName}/${kind === 'mcp' ? name : name.normalize('NFC').toLowerCase()}`;
+
 /**
  * The page's plugin rows for a home, worked out once per read: one per item of a plugin, across the tools that have it
  * installed, left out where a row of the person's own already shows that item as there through the plugin.
@@ -93,7 +97,7 @@ export function pageRows(home: Pick<HomeView, 'pluginItems' | Page>, page: Page)
   const { facts } = kindSource(home, page);
   const byKey = new Map<string, PluginRow>();
   for (const install of home.pluginItems ?? []) for (const item of install.items.filter(entry => entry.kind === kind)) {
-    const id = `${install.plugin}@${install.marketName}/${kind === 'mcp' ? item.name : item.name.normalize('NFC').toLowerCase()}`;
+    const id = pluginRowKey(install.plugin, install.marketName, kind, item.name);
     const row = byKey.get(id) ?? { key: id, kind, name: item.name, description: '', plugin: install.plugin, marketName: install.marketName, copies: {}, installs: {} };
     row.copies[install.tool] = item;
     // An MCP server reads as the page's own do: "Command · npx -y …", "URL · https://…".

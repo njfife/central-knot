@@ -3283,6 +3283,14 @@ async function practiceFlow() {
     await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Focus')).click()`); await a.settle();
     await a.click('#profile-changes');
   } else check('Changes N button exists while previewing', false);
+  const pfMark = id => `.pf-row[data-item="${id}"] .pf-title .row-file-btn`;
+  const pfFile = () => a.run(`(() => { const box = document.querySelector('.file-open-box'), row = box?.closest('.pf-row'); return { item: row?.dataset.item ?? null, anchored: !!row?.classList.contains('file-anchored'), text: box?.querySelector('pre.content')?.textContent ?? '', boxes: document.querySelectorAll('.file-open-box').length }; })()`);
+  const openPf = async (id, line) => {
+    await a.click(pfMark(id));
+    for (let i = 0; i < 40 && !(await pfFile()).text.includes(line); i++) await wait(50);
+    await a.settle();
+    return pfFile();
+  };
   await withSidebarOpen(a, ...SMALLEST, async () => {
     const picker = await a.run(`(() => {
       const sel = document.getElementById('profile-picker');
@@ -3305,12 +3313,43 @@ async function practiceFlow() {
       same('picking Incident at 860×528 opens it and clears Changes', [await a.text('.profile-header h2'), await a.exists('#profile-changes')], ['Incident', false]);
     }
     same('nothing cut off on Profiles at 860×528 with sidebar open', [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+    // File mark after each item's name: one press opens its text under its row, a second moves it, menu/Find/Delete confirm claim Escape, next Escape closes it.
+    if (shots) { await a.run(`document.activeElement?.blur?.()`); await a.run(`window.centralKnot.setAppearance('light')`); await wait(80); await a.shot('profiles-file-marks-860-light'); await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); }
+    same('at 860, every listed item has a file mark right after its name', await a.all('.pf-row[data-item]', `!!e.querySelector('.pf-title .row-file-btn')`), [true, true, true, true]);
+    const notesFile = await openPf('skill:notes', 'Keep the facts and the writer’s intent.');
+    same('at 860, pressing notes’s mark opens its text under its row, nothing cut off', [notesFile.item, notesFile.anchored, notesFile.text.includes('Keep the facts and the writer’s intent.'), notesFile.boxes, ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], ['skill:notes', true, true, 1]);
+    const standupFile = await openPf('skill:standup', 'Read the commits.');
+    same('at 860, pressing standup’s mark moves the panel there, nothing cut off', [standupFile.item, standupFile.anchored, standupFile.text.includes('Read the commits.'), standupFile.boxes, ...await a.run(CUT_OFF)], ['skill:standup', true, true, 1]);
+    await a.click('#status-profile');
+    await a.press('Escape');
+    const menuEsc = [await a.exists('.pf-menu'), (await pfFile()).boxes];
+    await a.run(`(() => { const i = document.querySelector('#profile-find'); i.focus(); i.value = 'stand'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    await a.press('Escape');
+    const findEsc = [await a.run(`document.querySelector('#profile-find')?.value`), (await pfFile()).boxes];
+    await a.click('#profile-delete');
+    await a.press('Escape');
+    const delEsc = [await a.exists('#profile-delete-confirm'), (await pfFile()).boxes, await a.run(`document.activeElement?.id`)];
+    await a.press('Escape');
+    same('status bar menu, Find and Delete confirmation claim Escape while the file stays open; next Escape closes it and refocuses its mark',
+      [menuEsc, findEsc, delEsc, (await pfFile()).boxes, await a.run(`document.activeElement === document.querySelector(${JSON.stringify(pfMark('skill:standup'))})`)],
+      [[false, 1], ['', 1], [false, 1, 'profile-delete'], 0, true]);
   });
   await withSidebarOpen(a, 1316, 819, async () => {
-    same('at 1316×819 the list column shows, the picker hides, and nothing is cut off',
+    if (shots) { await a.run(`document.activeElement?.blur?.()`); await a.run(`window.centralKnot.setAppearance('dark')`); await wait(80); await a.shot('profiles-file-marks-1316-dark'); await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); }
+    await openPf('skill:notes', 'Keep the facts and the writer’s intent.');
+    same('at 1316×819 the list column shows, the picker hides, and nothing is cut off with a file open',
       [await a.run(`(() => { const p = document.querySelector('.pf-picker'); return p ? getComputedStyle(p).display : null; })()`), await a.run(`getComputedStyle(document.querySelector('.profiles-list .list-scroll')).display !== 'none'`),
         ...await a.run(CUT_OFF)],
       ['none', true]);
+    if (shots) {
+      await a.run(`window.centralKnot.setAppearance('dark')`);
+      await wait(80);
+      await a.shot('profiles-file-open-1316-dark');
+      await a.run(`window.centralKnot.setAppearance('system')`);
+      await wait(80);
+    }
+    await a.press('Escape');
   });
   await fullSize(a);
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Focus')).click()`); await a.settle();
@@ -5227,6 +5266,121 @@ async function practiceFlow() {
   await a.click('#plugins-undo');
   same('Undo turns it back on: config.toml is as it was', [readFileSync(codexConfig, 'utf8') === configBefore, await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`)], [true, 'true']);
   same('nothing on the plugin pages waited for a later click: no Apply, no Discard, no chosen switch', await a.run('window.ckWaiting'), []);
+  // Shared Profiles check & pictures at 860: same-named own & plugin skills (folded and different-text), long name + long `from` label, and 60-line file open under 880 px.
+  {
+    const longPlug = 'enterprise-platform-engineering-developer-tools';
+    const longSlug = 'quarterly-release-readiness-checklist-and-handoff';
+    const longBody = ['---', 'name: Quarterly release readiness checklist and post-deploy verification handoff', 'description: Long skill.', '---', '', ...Array.from({ length: 60 }, (_, i) => `Step ${i + 1} of the release checklist.`)].join('\n');
+    const standupHash = JSON.parse(readFileSync(join(practice, '.central-knot/skills.json'), 'utf8')).items.standup.hash;
+    const standupText = readFileSync(join(practice, `.central-knot/items/skills/standup/versions/${standupHash}/SKILL.md`), 'utf8');
+    const sameNotesId = `plugin:skill:${longPlug}@ck-test-market/notes`;
+    const foldedStandupId = `plugin:skill:${longPlug}@ck-test-market/standup`;
+    const longRowId = `plugin:skill:${longPlug}@ck-test-market/${longSlug}`;
+    writeClaudeInstall(practice, 'ck-test-market', longPlug, '1.0.0', {
+      'skills/notes/SKILL.md': '---\nname: notes\ndescription: Plugin notes.\n---\n\nPlugin notes body.\n',
+      'skills/standup/SKILL.md': standupText,
+      'skills/standup/extra.md': 'Plugin extra file.\n',
+      [`skills/${longSlug}/SKILL.md`]: longBody,
+      '.mcp.json': JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp'] } } }),
+    });
+    try {
+      await a.click('#nav-profiles');
+      await a.click('#header-refresh');
+      for (let i = 0; i < 40 && !(await a.exists(`.pf-row[data-item="${longRowId}"]`)); i++) await wait(100);
+      await withSidebarOpen(a, ...SMALLEST, async () => {
+        if (shots) { await a.run(`window.centralKnot.setAppearance('light')`); await wait(80); }
+        try {
+          const ownNotes = await openPf('skill:notes', 'Keep the facts and the writer’s intent.');
+          const plugNotes = await openPf(sameNotesId, 'Plugin notes body.');
+          await a.press('Escape');
+          const folded = await a.exists(pfMark(foldedStandupId)) ? await openPf(foldedStandupId, 'Read the commits.') : { item: null };
+          const foldedTabs = folded.item ? await a.all('.file-tab', 'e.textContent') : [];
+          if (folded.item) await a.press('Escape');
+          same('same-named own and plugin skills each open their own text, and a folded plugin skill opens its plugin copy',
+            [ownNotes.text.includes('Keep the facts and the writer’s intent.'), plugNotes.text.includes('Plugin notes body.'), folded.item, foldedTabs.includes('extra.md')],
+            [true, true, foldedStandupId, true]);
+          if (shots) {
+            await a.run(`document.activeElement?.blur?.()`);
+            await a.run(`document.querySelector('.pf-row[data-item="skill:standup"]')?.scrollIntoView({ block: 'center' })`);
+            await wait(80);
+            await a.shot('profiles-same-name-860-light');
+          }
+          await a.run(`document.querySelector('.pf-row[data-item="${longRowId}"]')?.scrollIntoView({ block: 'center' })`);
+          await a.settle();
+          const longFit = await a.run(`(() => { const r = document.querySelector('.pf-row[data-item="${longRowId}"]'), n = r.querySelector('.pf-name-text'), m = r.querySelector('.row-file-btn'), s = r.querySelector('.pf-state'), nr = n.getBoundingClientRect(), mr = m.getBoundingClientRect(), sr = s.getBoundingClientRect(), rects = [...n.getClientRects()], last = rects.at(-1); return { width: Math.round(nr.width), lines: rects.length, markOnLast: Math.abs((mr.top + mr.bottom) / 2 - (last.top + last.bottom) / 2) <= 6, stateWidth: Math.round(sr.width), noOverlap: r.querySelector('.pf-name').getBoundingClientRect().right <= sr.left + 1 }; })()`);
+          same('at 860, a long name beside a long from label wraps cleanly, keeps its mark on the last line, and leaves Switching uncrowded',
+            [longFit.width >= 150, longFit.lines >= 2, longFit.markOnLast, longFit.stateWidth >= 200, longFit.noOverlap, ...await a.run(CUT_OFF)],
+            [true, true, true, true, true]);
+          if (shots) { await a.run(`document.activeElement?.blur?.()`); await a.shot('profiles-long-name-860-light'); }
+          if (shots) {
+            await a.run(`document.querySelector('.pf-row[data-item="plugin:mcp:${longPlug}@ck-test-market/issues"]')?.scrollIntoView({ block: 'end' })`);
+            await wait(80);
+            await a.shot('profiles-plugin-and-own-860-light');
+            await a.run(`document.querySelector('.pf-row[data-item="${longRowId}"]')?.scrollIntoView({ block: 'center' })`);
+            await a.settle();
+          }
+          await openPf(longRowId, 'Step 1 of the release checklist.');
+          await wait(80);
+          const longBox = await a.run(`(() => {
+            const split = document.getElementById('profiles-split').getBoundingClientRect(), boxEl = document.querySelector('.file-open-box'), box = boxEl.getBoundingClientRect();
+            const row = document.querySelector('.pf-row.file-anchored'), head = document.querySelector('.pf-section')?.getBoundingClientRect(), next = row?.nextElementSibling?.getBoundingClientRect();
+            const foot = boxEl.querySelector('.file-open-foot').getBoundingClientRect(), tail = boxEl.querySelector('.file-open-foot .middle-tail');
+            const named = boxEl.querySelector('.file-open-named'), item = boxEl.querySelector('.file-open-item'), pre = boxEl.querySelector('pre.content');
+            const barW = pre.offsetWidth - pre.clientWidth;
+            return { boxH: Math.round(box.height), splitH: Math.round(split.height), footH: Math.round(foot.height), preH: pre.clientHeight, barW,
+              capped: box.height < split.height - 60, rowInSight: !!row && row.getBoundingClientRect().top >= (head?.bottom ?? split.top) - 2,
+              nextInSight: !!next && next.top < split.bottom - 8, footOneLine: foot.height <= 42, tailUncut: !!tail && tail.scrollWidth <= tail.clientWidth,
+              noHangingDot: getComputedStyle(item, '::after').content === 'none' && getComputedStyle(named).overflowX === 'clip',
+              hasScrollbar: pre.scrollHeight > pre.clientHeight && barW > 0 && barW <= 10, moreTextShown: pre.clientHeight >= 130 };
+          })()`);
+          same('at 860, a 60-line file box is capped inside .profiles-split with its row and next row in sight, 1-line uncut filename foot, no hanging head dot, visible scrollbar and text past frontmatter',
+            [longBox.capped, longBox.rowInSight, longBox.nextInSight, longBox.footOneLine, longBox.tailUncut, longBox.noHangingDot, longBox.hasScrollbar, longBox.moreTextShown, ...await a.run(CUT_OFF)],
+            [true, true, true, true, true, true, true, true]);
+          if (shots) await a.shot('profiles-long-file-860-light');
+          await a.press('Escape');
+        } finally { if (shots) { await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); } }
+      });
+      // Narrow to the exact width where the last word fits on one line and the mark does not: the mark stays with the last word, never alone on a line.
+      await sizeTo(a, 1360, 819);
+      const fullW = await a.run(`(() => { const r = document.querySelector('.pf-row[data-item="${longRowId}"]'), n = r.querySelector('.pf-name-text'), w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT); let textW = 0; for (let t; (t = w.nextNode()); ) { const rg = document.createRange(); rg.selectNodeContents(t); textW += rg.getBoundingClientRect().width; } return { textW, mainW: r.querySelector('.pf-main').getBoundingClientRect().width }; })()`);
+      let tightW = 1360 - Math.round((fullW.mainW - fullW.textW - 8) / 0.74);
+      await sizeTo(a, tightW, 819);
+      const adj = await a.run(`document.querySelector('.pf-row[data-item="${longRowId}"] .pf-main').getBoundingClientRect().width`);
+      if (adj < fullW.textW + 2 || adj > fullW.textW + 18) { tightW += Math.round((fullW.textW + 8 - adj) / 0.74); await sizeTo(a, tightW, 819); }
+      const markCheck = await a.run(`(() => {
+        const r = document.querySelector('.pf-row[data-item="${longRowId}"]'), n = r.querySelector('.pf-name-text'), m = r.querySelector('.row-file-btn').getBoundingClientRect();
+        const w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT), nodes = [];
+        for (let t; (t = w.nextNode()); ) if (t.nodeValue.trim()) nodes.push(t);
+        const last = nodes.at(-1), rg = document.createRange(), mid = b => (b.top + b.bottom) / 2;
+        rg.setStart(last, last.nodeValue.length - 1); rg.setEnd(last, last.nodeValue.length);
+        const ch = rg.getBoundingClientRect();
+        const full = nodes.map(t => t.nodeValue).join(''), wordAt = full.lastIndexOf(' ') + 1;
+        let seen = 0, firstNode = nodes[0], firstOff = 0;
+        for (const t of nodes) { if (seen + t.nodeValue.length > wordAt) { firstNode = t; firstOff = wordAt - seen; break; } seen += t.nodeValue.length; }
+        rg.setStart(firstNode, firstOff); rg.setEnd(firstNode, firstOff + 1);
+        const wordStart = rg.getBoundingClientRect();
+        return { tightW: window.innerWidth, mainW: Math.round(r.querySelector('.pf-main').getBoundingClientRect().width), textW: Math.round(${fullW.textW}),
+          markWithLastChar: Math.abs(mid(m) - mid(ch)) <= 6 && m.left >= ch.right - 2, wholeLastWord: Math.abs(mid(wordStart) - mid(ch)) <= 6 };
+      })()`);
+      same('at the width where the name’s last word fits and the mark does not, the mark never wraps alone and the last word stays whole',
+        [markCheck.markWithLastChar, markCheck.wholeLastWord], [true, true]);
+      await withSidebarOpen(a, 1316, 819, async () => {
+        await a.run(`document.querySelector('.pf-row[data-item="${longRowId}"]')?.scrollIntoView({ block: 'center' })`);
+        await a.settle();
+        await openPf(longRowId, 'Step 1 of the release checklist.');
+        await wait(80);
+        const wideBox = await a.run(`(() => { const sc = document.getElementById('profile-scroll').getBoundingClientRect(), box = document.querySelector('.file-open-box'), row = document.querySelector('.pf-row.file-anchored'), head = document.querySelector('.pf-section')?.getBoundingClientRect(), next = row?.nextElementSibling?.getBoundingClientRect(), pre = box.querySelector('pre.content'), tail = box.querySelector('.file-open-foot .middle-tail'), barW = pre.offsetWidth - pre.clientWidth; return { rowInSight: !!row && row.getBoundingClientRect().top >= (head?.bottom ?? sc.top) - 2, nextInSight: !!next && next.top < sc.bottom - 8, footOneLine: box.querySelector('.file-open-foot').getBoundingClientRect().height <= 42, tailUncut: !!tail && tail.scrollWidth <= tail.clientWidth, hasScrollbar: pre.scrollHeight > pre.clientHeight && barW > 0 && barW <= 10 }; })()`);
+        same('at 1316×819, a 60-line file panel keeps its row and next row in sight, a 1-line uncut filename foot, visible scrollbar, and nothing cut off', [wideBox.rowInSight, wideBox.nextInSight, wideBox.footOneLine, wideBox.tailUncut, wideBox.hasScrollbar, ...await a.run(CUT_OFF)], [true, true, true, true, true]);
+        if (shots) { await a.run(`window.centralKnot.setAppearance('dark')`); await wait(80); await a.shot('profiles-long-file-1316-dark'); await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); }
+        await a.press('Escape');
+      });
+      await fullSize(a);
+    } finally {
+      if (installsBefore === undefined) rmSync(installRecord); else writeFileSync(installRecord, installsBefore);
+      rmSync(join(practice, `.claude/plugins/cache/ck-test-market/${longPlug}/1.0.0`), { recursive: true, force: true });
+      await a.click('#nav-plugins');
+    }
+  }
   writeFileSync(codexConfig, configBefore.slice(0, configBefore.indexOf('\n[marketplaces.ck-test-market]')));
   // document-tools' parts from an earlier version, moved at one look too: pdf-reader, edited in Pi since (Pi's skills folder known
   // first, as an earlier version's pass noted it), is his own now, said once; spreadsheet, left out of Pi, stays out of it.
@@ -9146,7 +9300,7 @@ async function syncEverythingFlow() {
     await a.run(`(() => { const o = document.querySelector('[data-outcome]'), u = o?.querySelector('#outcome-undo'); return [o?.querySelector('.band-text')?.textContent, u?.textContent, u?.title, u?.getAttribute('aria-description')]; })()`),
     ['Synchronize everything is on: it added 2 items.', 'Undo', 'Switches Synchronize everything off. It takes back the items it added, but for any changed since.', null]);
   same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
-  same('and Settings puts what it added above what waits, a line per kind without repeating the title, omitting History while the band holds Undo',
+  same('and Settings puts what it added above what waits, a line per kind without repeating the title, with no Undo of its own while the band’s Undo covers it',
     [await a.all('.setting-added .setting-message', 'e.textContent'), await a.run(`(() => { const a = document.querySelector('#setting-sync-everything .setting-added'), n = document.getElementById('setting-sync-everything-notice'); return !!a && !!n && !!(a.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING); })()`)],
     [['Added skill notes from Claude Code.', 'Added MCP server files from Codex.'], true]);
   await takenInSoon('fresh', text('fresh', 'Just saved.'), freshSaved, 'a skill saved just before is taken in soon after, with no click, once it has settled');
@@ -9192,8 +9346,8 @@ async function syncEverythingFlow() {
   await setTheme(a, '');
   await fullSize(a);
   await a.click('#outcome-dismiss');
-  same('closing the band brings back History on the take-in lines', await a.all('.setting-added .setting-message', 'e.textContent'),
-    ['Added skill notes from Claude Code. History can undo it.History', 'Added skill fresh from Claude Code. History can undo it.History', 'Added MCP server files from Codex. History can undo it.History']);
+  same('closing the band gives each take-in line its own Undo', await a.all('.setting-added .setting-message', 'e.textContent'),
+    ['Added skill notes from Claude Code.Undo', 'Added skill fresh from Claude Code.Undo', 'Added MCP server files from Codex.Undo']);
   await a.click('#nav-overview');
   same('the Overview’s foot is one sentence, where every change is kept: Automatic sync is the status bar’s to say', (await a.text('#overview-kept'))?.trim(), 'Every change Central Knot makes in your tools is kept in History, with Undo where it can be undone.');
   await openKind(a, 'skills');
@@ -9241,7 +9395,7 @@ async function syncEverythingFlow() {
   await a.click('#nav-settings');
   await a.click('#sync-everything-on');
   for (let tries = 0; tries < 40 && await ruleOn() !== 'false'; tries++) await wait(100);
-  same('turned off, it says first that what was undone isn’t added again by itself', [await ruleOn(), await ruleSays()], ['false', '1 found item isn’t added by itself again (taken out of Central Knot). Add on its row in the Library, or Restore in History, brings it back. 2 found items have copies that differ and wait for your choice of copy.']);
+  same('turned off, its fold counts what was undone, which isn’t added again by itself', [await ruleOn(), await a.text('#setting-taken-out-toggle'), await ruleSays()], ['false', '1 removed item stays out of Central Knot.', '2 found items have copies that differ and wait for your choice of copy.']);
   await openAgainOnSettings('switched on and off');
   // Saved just before the rule is switched on again, with nothing else for that pass to write, and still being saved as it
   // runs: that pass leaves it, and a pass soon after takes it in (takenInSoon).
@@ -9289,9 +9443,9 @@ async function syncEverythingFlow() {
   const twoUndone = 'Undone: switched off, and 2 items it took in are out of Central Knot again, each tool they were found in keeping its own.';
   same('Settings inline Undo turns the rule off, takes back both kinds like History’s Undo, leaves originals and conflict, clears undone taken-in lines, and reads as History’s',
     [uRecord().syncEverything, existsSync(join(uCodex, 'notes')), readNow(join(uClaude, 'notes/SKILL.md')), readNow(join(uClaude, 'review/SKILL.md')), readNow(join(uCodex, 'review/SKILL.md')), 'files' in (JSON.parse(readNow(join(uHome, '.claude.json'))).mcpServers ?? {}), /\[mcp_servers\.files\]/.test(readNow(join(uHome, '.codex/config.toml'))), await uBand(),
-      await b.all('.setting-added .setting-message', 'e.textContent'), await b.exists('#nav-library .nav-unseen'), await b.text('#setting-sync-everything-notice .setting-message-text')],
+      await b.all('.setting-added .setting-message', 'e.textContent'), await b.exists('#nav-library .nav-unseen'), await b.text('#setting-taken-out-toggle'), await b.text('#setting-sync-everything-notice .setting-message-text')],
     [false, false, text('notes', 'Take notes.'), text('review', 'Review gently.'), text('review', 'Review hard.'), false, true, [twoUndone, null, null, false, false],
-      [], false, '2 found items aren’t added by themselves again (taken out of Central Knot). Add on their rows in the Library, or Restore in History, brings them back. 1 found item has copies that differ and waits for your choice of copy.']);
+      [], false, '2 removed items stay out of Central Knot.', '1 found item has copies that differ and waits for your choice of copy.']);
   check('Choose copies sits beside the last sentence (waiting), not up on the first line', await b.run(`(() => { const t = document.querySelector('#setting-sync-everything-notice .setting-message-text')?.getBoundingClientRect(), a = document.querySelector('#setting-sync-everything-notice-action')?.getBoundingClientRect(); return !!t && !!a && a.bottom >= t.bottom - 4; })()`));
   await b.click('#nav-history');
   for (let tries = 0; tries < 30 && !(await b.exists('.history-row[data-kind="everything"]')); tries++) await wait(100);
@@ -9308,23 +9462,25 @@ async function syncEverythingFlow() {
   settleOld([skill(uClaude, 'edited', text('edited', 'Original.')), join(uClaude, 'edited/SKILL.md')]);
   for (let tries = 0; tries < 100 && (readNow(join(uCodex, 'edited/SKILL.md')) !== text('edited', 'Original.') || (await b.all('.setting-added .setting-message')).length < 2); tries++) await wait(100);
   writeFileSync(join(uClaude, 'edited/SKILL.md'), text('edited', 'Edited by hand.'));
-  for (let tries = 0; tries < 80 && !(await b.all('.setting-added .setting-message', 'e.textContent')).includes('Added skill edited from Claude Code. History can undo it.History'); tries++) await wait(100);
-  same('editing a taken-in skill in its tool restores History on its line while the band’s Undo still stands',
+  for (let tries = 0; tries < 80 && readNow(join(uCodex, 'edited/SKILL.md')) !== text('edited', 'Edited by hand.'); tries++) await wait(100);
+  for (let tries = 0; tries < 80 && !(await b.all('.setting-added .setting-message', 'e.textContent')).includes('Added skill edited from Claude Code. changed since'); tries++) await wait(100);
+  await b.settle();
+  same('a taken-in skill edited in its tool gets no Undo of its own on its line but says why, and the untouched one stays covered by the band',
     await b.all('.setting-added .setting-message', 'e.textContent'),
-    ['Added skill later from Claude Code.', 'Added skill edited from Claude Code. History can undo it.History']);
+    ['Added skill later from Claude Code.', 'Added skill edited from Claude Code. changed since']);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
   same('inline Undo takes back the untouched take-in, clears its line, and keeps the later edited addition and its line',
     [uRecord().syncEverything, existsSync(join(uCodex, 'later')), readNow(join(uClaude, 'edited/SKILL.md')), await b.text('[data-outcome] .band-text'), await b.all('.setting-added .setting-message', 'e.textContent')],
-    [false, false, text('edited', 'Edited by hand.'), 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: edited (changed since).', ['Added skill edited from Claude Code. History can undo it.History']]);
+    [false, false, text('edited', 'Edited by hand.'), 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: edited (changed since).', ['Added skill edited from Claude Code. changed since']]);
   // Automatic sync off: band shows without reloads, carries the second sentence, and Undo switches the rule off.
   await b.click('#sync-switch');
   for (let tries = 0; tries < 40 && await b.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
   await b.click('#sync-everything-on');
   await waitBand('true', 'Synchronize everything is on');
-  same('with Automatic sync off, the band shows its second sentence and Undo without reloads, and an older take-in line keeps its History link',
-    [await uBand(), await b.exists('#setting-sync-everything-added-skills-action')],
-    [['Synchronize everything is on. Nothing added yet: Automatic sync is off.', 'Undo', twoHelp, false, false], true]);
+  same('with Automatic sync off, the band shows its second sentence and Undo without reloads, and the older edited take-in’s line still has no Undo of its own',
+    [await uBand(), await b.all('.setting-added .text-action')],
+    [['Synchronize everything is on. Nothing added yet: Automatic sync is off.', 'Undo', twoHelp, false, false], []]);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
   same('Undo with Automatic sync off turns the rule off and says nothing was taken back',
@@ -9347,7 +9503,7 @@ async function syncEverythingFlow() {
       [await b.exists('[data-outcome]'), await b.run(`document.querySelector('#announcement')?.classList.contains('visually-hidden')`), await b.run(`document.querySelector('#announcement')?.dataset.text`)],
       [false, false, 'Copied s1 to Claude Code. Took in s1. Copied s2 to Claude Code. Took in s2. Sync once took in 2 more items.']);
   }
-  // Two-item picture (without repeating the unit test's switch checks), then a twelve-item line at 860 checking wrapping and History.
+  // Two-item picture (without repeating the unit test's switch checks), then a twelve-item line at 860 checking wrapping and its Undo.
   settleOld([skill(uClaude, 'lint', text('lint', 'Lint gently.')), join(uClaude, 'lint/SKILL.md'),
     skill(uCodex, 'tidy', text('tidy', 'Tidy up.')), join(uCodex, 'tidy/SKILL.md')]);
   await b.click('#sync-switch');
@@ -9357,6 +9513,14 @@ async function syncEverythingFlow() {
   await b.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
   await b.settle();
   await b.shot('settings-added-two-items-860-light');
+  // lint edited in Claude Code since: the line's Undo takes tidy alone, and says so.
+  writeFileSync(join(uClaude, 'lint/SKILL.md'), text('lint', 'Lint harder.'));
+  const twoLine = `[...document.querySelectorAll('.setting-added .setting-message')].find(el => el.textContent.startsWith('Added 2 skills from Claude Code and Codex: lint and tidy.'))`;
+  for (let tries = 0; tries < 100 && await b.run(`${twoLine}?.querySelector('.text-action')?.textContent`) !== 'Undo tidy'; tries++) await wait(100);
+  await b.settle();
+  same('a line one of whose two take-ins was edited since has Undo tidy, its hover naming it', await b.run(`[${twoLine}.querySelector('.text-action').textContent, ${twoLine}.querySelector('.text-action').title]`),
+    ['Undo tidy', 'Take tidy out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own']);
+  await b.shot('settings-added-undo-some-860-light');
   const twelve = ['audit-logs', 'bench-run', 'code-review', 'deploy', 'doc-syncs', 'migrate-db', 'plan-work', 'release-cut', 'schema-diff', 'test-smoke', 'trace-req', 'watch-ci'];
   await b.click('#sync-switch');
   for (let tries = 0; tries < 40 && await b.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
@@ -9369,7 +9533,7 @@ async function syncEverythingFlow() {
   const wrapped = await b.run(`(() => {
     const lines = [...document.querySelectorAll('.setting-added .setting-message')];
     const twelveLine = lines.find(el => el.textContent.startsWith('Added 12 skills from Claude Code:'));
-    let markStarts = 0, punctStarts = 0, historyAlone = 0;
+    let markStarts = 0, punctStarts = 0, undoBefore = 0;
     for (const line of lines) {
       const body = line.querySelector('.setting-message-body'), bodyLeft = body.getBoundingClientRect().left;
       for (const btn of line.querySelectorAll('.row-file-btn')) if (btn.getBoundingClientRect().left <= bodyLeft + 2) markStarts++;
@@ -9382,17 +9546,73 @@ async function syncEverythingFlow() {
           if (r.getBoundingClientRect().left <= bodyLeft + 2) punctStarts++;
         }
       }
-      const history = line.querySelector('.text-action');
-      if (history && history.getBoundingClientRect().left <= bodyLeft + 2) historyAlone++;
+      // The line's Undo is its action, after its words as every Settings line's action is (Choose copies): never above their last line.
+      const undo = line.querySelector('.text-action'), words = line.querySelector('.setting-message-text');
+      if (undo && undo.getBoundingClientRect().bottom < words.getBoundingClientRect().bottom - 4) undoBefore++;
     }
     const marks = [...twelveLine.querySelectorAll('.row-file-btn')];
-    return { marks: marks.length, markStarts, punctStarts, historyAlone, thirdMark: marks[2]?.id };
+    const undos = ['Added 2 skills from Claude Code and Codex: lint and tidy.', 'Added 12 skills'].map(start => lines.find(el => el.textContent.startsWith(start))?.querySelector('.text-action')?.textContent);
+    return { marks: marks.length, markStarts, punctStarts, undoBefore, undos, thirdMark: marks[2]?.id };
   })()`);
-  same('at 860, added lines (including a twelve-item line) start no wrapped line with a mark or punctuation and never drop History alone',
-    [wrapped.marks, wrapped.markStarts, wrapped.punctStarts, wrapped.historyAlone, await b.run(CUT_OFF)], [12, 0, 0, 0, []]);
+  same('at 860, added lines (including a twelve-item line) start no wrapped line with a mark or punctuation, and each has its Undo after its last name',
+    [wrapped.marks, wrapped.markStarts, wrapped.punctStarts, wrapped.undoBefore, wrapped.undos, await b.run(CUT_OFF)], [12, 0, 0, 0, ['Undo tidy', 'Undo all 12'], []]);
   await openAdded(b, wrapped.thirdMark, 'Skill code-review.');
   await b.shot('settings-added-several-open-860-light');
   await b.press('Escape');
+  await sizeTo(b, 1316, 819);
+  await setTheme(b, 'dark');
+  await b.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+  await b.settle();
+  await b.shot('settings-added-undo-1316-dark');
+  // The twelve-item line's own Undo: one press, one result in Settings' band with its Restore, the line gone, the fold up by twelve;
+  // each Codex copy Central Knot put there goes, and Claude Code keeps its own byte for byte.
+  await sizeTo(b, ...SMALLEST);
+  await setTheme(b, 'light');
+  const takenOut = async () => Number((await b.text('#setting-taken-out-toggle'))?.match(/^\d+/)?.[0] ?? 0);
+  const outBefore = await takenOut(), twelveLine = `[...document.querySelectorAll('.setting-added .setting-message')].find(el => el.textContent.startsWith('Added 12 skills'))`;
+  await b.run(`${twelveLine}.querySelector('.text-action').click()`);
+  for (let tries = 0; tries < 80 && !(await b.text('[data-outcome] .band-text') ?? '').startsWith('audit-logs'); tries++) await wait(100);
+  await b.settle();
+  same('the twelve-item line’s Undo says in Settings’ band what is out again, with Restore, and the line goes; the fold counts them',
+    [await b.text('[data-outcome] .band-text'), await b.text('[data-outcome] #outcome-undo'), await b.run(`!!${twelveLine}`), await takenOut() - outBefore, existsSync(join(uCodex, 'deploy')), readNow(join(uClaude, 'deploy/SKILL.md')), await b.run(CUT_OFF)],
+    [`${twelve.slice(0, -1).join(', ')} and watch-ci are out of Central Knot again. The copies Central Knot put in other tools are gone; the tools they were found in keep theirs.`, 'Restore', false, 12, false, text('deploy', 'Skill deploy.'), []]);
+  await b.shot('settings-undo-band-860-light');
+  await b.click('#outcome-undo');
+  for (let tries = 0; tries < 80 && !(await b.text('[data-outcome] .band-text') ?? '').endsWith('are back in Central Knot.'); tries++) await wait(100);
+  same('its Restore puts the twelve back in Central Knot and in Codex, and the fold no longer counts them', [readNow(join(uCodex, 'deploy/SKILL.md')), await takenOut() - outBefore], [text('deploy', 'Skill deploy.'), 0]);
+  // The fold: shut, then open, each found item taken out earlier named by kind with the Library row's own Add.
+  await b.run(`document.getElementById('setting-taken-out')?.scrollIntoView({ block: 'center' })`);
+  await b.settle();
+  await b.shot('settings-taken-out-shut-860-light');
+  await b.click('#setting-taken-out-toggle');
+  await b.settle();
+  same('opened at 860, the fold names each item taken out earlier with its kind and Add, nothing cut off',
+    [await b.all('.setting-taken-out-row', 'e.textContent'), await b.run(CUT_OFF)], [['later skillAdd', 'notes skillAdd', 'files MCP serverAdd'], []]);
+  await b.shot('settings-taken-out-open-860-light');
+  await b.click('#setting-taken-out-add-skills-notes');
+  for (let tries = 0; tries < 80 && readNow(join(uCodex, 'notes/SKILL.md')) !== text('notes', 'Take notes.'); tries++) await wait(100);
+  await b.settle();
+  same('Add in the fold takes notes in again from Claude Code’s copy and puts it in Codex; its band says so, and the fold counts one fewer',
+    [readNow(join(uCodex, 'notes/SKILL.md')), !!(await b.text('[data-outcome] .band-text')), await takenOut()], [text('notes', 'Take notes.'), true, outBefore - 1]);
+  // A copy of later turns up in Codex, unlike Claude Code's: its row has Choose copy, which opens the Library row's own question
+  // under it; choosing Claude Code's copy takes it in and puts that copy in Codex.
+  settleOld([skill(uCodex, 'later', text('later', 'Later, another way.')), join(uCodex, 'later/SKILL.md')]);
+  for (let tries = 0; tries < 100 && !(await b.exists('#setting-taken-out-choose-skills-later')); tries++) await wait(100);
+  await b.settle();
+  same('a removed item whose copies came to differ has copies differ, its hover saying why, and Choose copy in Add’s place',
+    [await b.all('.setting-taken-out-row', 'e.textContent'), await b.run(`document.querySelector('#setting-taken-out .row-tag-differs')?.title`)],
+    [['later skillcopies differChoose copy', 'files MCP serverAdd'], 'Its tools’ copies differ, so adding it needs a choice of copy.']);
+  await b.shot('settings-taken-out-differ-860-light');
+  await b.click('#setting-taken-out-choose-skills-later');
+  for (let tries = 0; tries < 40 && !(await b.exists('.setting-taken-out-list .compare-block')); tries++) await wait(100);
+  await b.settle();
+  check('Choose copy opens the copy question under its row, nothing cut off', await b.exists('.setting-taken-out-list .compare-block') && (await b.run(CUT_OFF)).length === 0, await b.run(CUT_OFF));
+  await b.shot('settings-taken-out-choose-860-light');
+  await b.run(`document.querySelector('.setting-taken-out-list .compare-choices button.version[id$="claude-cli"]').click()`);
+  for (let tries = 0; tries < 80 && readNow(join(uCodex, 'later/SKILL.md')) !== text('later', 'Later skill.'); tries++) await wait(100);
+  await b.settle();
+  same('choosing Claude Code’s copy takes later in, puts that copy in Codex, says so in the band, and the list no longer names it',
+    [readNow(join(uCodex, 'later/SKILL.md')), !!(await b.text('[data-outcome] .band-text')), await b.all('.setting-taken-out-row', 'e.textContent')], [text('later', 'Later skill.'), true, ['files MCP serverAdd']]);
   await setTheme(b, '');
   await fullSize(b);
   same('no page errors, Settings inline Undo', b.pageErrors, []);
@@ -13318,8 +13538,9 @@ async function mcpSigninFlow() {
   /** Claude Code's servers (notes a local one), with `more` added or changed. */
   const claudeFile = (more = {}) => JSON.stringify({ mcpServers: { ...remote(claudeServers), notes: { type: 'stdio', command: server }, ...more } });
   write('.claude.json', claudeFile());
+  const copilotDir = 'enterprise-platform-engineering-settings/copilot-config', copilotPath = `${copilotDir}/mcp-config.json`;
   const copilotFile = JSON.stringify({ mcpServers: Object.fromEntries(Object.entries(remote(['plain', 'oauth', 'github'])).map(([name, entry]) => [name, { ...entry, tools: ['*'] }])) });
-  write('.copilot/mcp-config.json', copilotFile);
+  write(copilotPath, copilotFile);
   write('.codex/config.toml', ['plain', 'oauth', 'down', 'silent', 'docs', 'calendar'].map((name, index) => `[mcp_servers.${name}]\nurl = "${P(47201 + index)}"\n${name === 'docs' ? 'enabled = false\n' : ''}`).join('\n'));
   /** Pi's servers (tickets a local one), with `more` added or changed. */
   const piFile = (more = {}) => JSON.stringify({ mcpServers: { ...Object.fromEntries(['plain', 'oauth', 'down', 'silent', 'tickets', 'calendar'].map((name, index) => [name, { url: P(47201 + index) }])), tickets: { command: server }, ...more } });
@@ -13400,7 +13621,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   const started = () => called().filter(([what]) => what === 'start');
   // A check's limit of 4 s here (main.ts CK_SIGNIN_LIMIT_MS), so "Didn’t answer" comes without waiting 70 s; a sign-in's of 6 s
   // (CK_SIGNIN_START_LIMIT_MS), so "Not finished in 3 minutes" comes without waiting three minutes.
-  const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), CK_SIGNIN_LIMIT_MS: '4000', BROWSER: 'ck-browser', CK_SIGNIN_START_LIMIT_MS: '6000' });
+  const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), COPILOT_HOME: join(home, copilotDir), CK_SIGNIN_LIMIT_MS: '4000', BROWSER: 'ck-browser', CK_SIGNIN_START_LIMIT_MS: '6000' });
   await a.click('#home-actual');
   /** The page as drawn: the tools' columns, and each row's name, plugin and cells' words (a mark and a Copy's label aside). */
   const page = async () => {
@@ -13554,6 +13775,23 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('at 860 pressing a server’s mark opens its entry in a full-width row under it, nothing cut off',
     [oauthEntry.anchored, oauthEntry.colspan, oauthEntry.boxes, oauthEntry.text.includes('http://127.0.0.1:47202/mcp'), ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)],
     [true, '7', 1, true]);
+  const ghEntry = await openEntry('github', 'http://127.0.0.1:47203/mcp');
+  const ghFoot = await a.run(`(() => {
+    const scroll = document.getElementById('mcpsignin-scroll'), panel = document.getElementById('file-panel-mcpsignin');
+    const td = panel?.closest('td'), foot = panel?.querySelector('.file-open-foot');
+    const head = foot?.querySelector('.middle-head'), tail = foot?.querySelector('.middle-tail');
+    return {
+      pathLen: ((head?.textContent ?? '') + (tail?.textContent ?? '')).length,
+      fullWidth: !!td && !!panel && Math.abs(panel.getBoundingClientRect().width - (td.getBoundingClientRect().width - 20)) <= 2,
+      noScrollX: scroll.scrollWidth <= scroll.clientWidth,
+      footOneLine: !!foot && Math.round(foot.getBoundingClientRect().height) <= 42,
+      tail: tail?.textContent ?? '',
+      tailUncut: !!tail && tail.scrollWidth <= tail.clientWidth,
+    };
+  })()`);
+  same('at 860 a 50+ char settings path keeps every column width unchanged, no horizontal scroll, a 1-line foot and an uncut filename',
+    [ghEntry.anchored, ghFoot.pathLen >= 50, ghFoot.fullWidth, (await markMetrics()).ths, ghFoot.noScrollX, ghFoot.footOneLine, ghFoot.tail, ghFoot.tailUncut, ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)],
+    [true, true, true, colsBefore, true, true, '/mcp-config.json', true]);
   const fsEntry = await openEntry('Filesystem', 'http://127.0.0.1:47215/mcp');
   same('at 860 pressing a second capitalised server’s mark moves the panel under it with that server’s entry',
     [fsEntry.anchored, fsEntry.colspan, fsEntry.boxes, fsEntry.text.includes('http://127.0.0.1:47215/mcp')], [true, '7', 1, true]);
@@ -14128,7 +14366,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('OpenCode of a version not known: it may do either', await top(), ['Check starts local servers in Claude Code, Pi and OpenCode; OpenCode may leave a service running or add $schema to its config files (its version isn’t known).', true]);
   await owners('version-not-known');
   // And the tools there: Codex and Pi, then Codex alone, then only the two whose sign-in shows inside a session.
-  for (const path of ['.claude.json', '.copilot/mcp-config.json', '.config/opencode/opencode.json', '.gemini/config/mcp_config.json']) write(path, '{}');
+  for (const path of ['.claude.json', copilotPath, '.config/opencode/opencode.json', '.gemini/config/mcp_config.json']) write(path, '{}');
   rmSync(join(home, '.claude/plugins'), { recursive: true, force: true });
   await a.click('#header-refresh');
   same('Codex and Pi: Pi starts its local server, Codex starts none', [(await page()).tools, ...await top()], [['codex-cli', 'pi-cli'], 'Check starts local servers in Pi.', true]);
@@ -14136,14 +14374,14 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   await a.click('#header-refresh');
   same('Codex alone: it contacts its remote servers', [(await page()).tools, ...await top()], [['codex-cli'], 'Check contacts remote servers in Codex.', true]);
   write('.codex/config.toml', '');
-  write('.copilot/mcp-config.json', copilotFile);
+  write(copilotPath, copilotFile);
   write('.gemini/config/mcp_config.json', antigravityFile);
   await a.click('#header-refresh');
   same('only Copilot CLI and Antigravity: no line and no Check all; Antigravity’s head names no command', [(await page()).tools, ...await top(), await head('antigravity-cli')],
     [['copilot-cli', 'antigravity-cli'], null, false, 'Antigravity\nSign in inside a session']);
   await owners('session-only');
   // No server in any tool: the page says so.
-  for (const path of ['.copilot/mcp-config.json', '.gemini/config/mcp_config.json']) write(path, '{}');
+  for (const path of [copilotPath, '.gemini/config/mcp_config.json']) write(path, '{}');
   await a.click('#header-refresh');
   same('with no server in any tool the page says so, in one line', [await a.text('.empty-title'), await a.exists('.empty-body')], ['No MCP servers in your tools.', false]);
   await owners('no-servers');
@@ -19607,13 +19845,16 @@ esac
   same('on the card: the file, the base strip, the files read with it, this strip, then Earlier versions', await a.run(`(() => { const card = document.querySelector('article[aria-label="Claude Code instructions"]');
     const parts = ['.ins-body > :first-child', '.base-strip', '#ins-parts-claude-cli', '#session-claude-cli', 'details.ins-versions'].map(selector => card.querySelector(selector));
     return [parts.map(part => !!part), parts.every((part, at) => at === 0 || (parts[at - 1].compareDocumentPosition(part) & Node.DOCUMENT_POSITION_FOLLOWING))]; })()`), [[true, true, true, true, true], true]);
-  same('Codex’s strip: its note above its rows, then the same plugin in Codex’s form, when each runs as its matcher says', [await a.text('#session-codex-cli .session-note'), await groups('codex-cli'),
-    await a.run(`!!(document.querySelector('#session-codex-cli .session-note').compareDocumentPosition(document.querySelector('#session-codex-cli .session-groups')) & Node.DOCUMENT_POSITION_FOLLOWING)`)],
-    ['Codex runs a hook only after you trust it in /hooks.', [['release-helper', [['When a session starts or when a session resumes', 'node "${PLUGIN_ROOT}/hooks/remind.mjs" --days 2'], ['When a session starts or when a session resumes', long]], []]], true]);
-  same('Copilot CLI with only a prompt hook: no row, its note says why', [await groups('copilot-cli'), await a.text('#session-copilot-cli .session-note')],
-    [[], 'Copilot CLI ignores what prompt hooks print.']);
-  same('in another folder, no Run it button and no standing run warning appear anywhere',
-    [await a.run(`document.querySelectorAll('button[data-hook-run]').length`), await a.run(`document.querySelectorAll('.session-run-warn').length`)], [0, 0]);
+  same('Codex’s strip: chosen-folder reason then its note behind its (?), then the same plugin in Codex’s form, when each runs as its matcher says',
+    [await a.text('#session-codex-cli .session-note'), await a.text('#session-hooks-info-codex-cli-card'), await groups('codex-cli')],
+    [null, 'See what it adds works only on this computer’s home. Codex runs a hook only after you trust it in its /hooks command.', [['release-helper', [['When a session starts or when a session resumes', 'node "${PLUGIN_ROOT}/hooks/remind.mjs" --days 2'], ['When a session starts or when a session resumes', long]], []]]]);
+  same('Copilot CLI with only a prompt hook: no row, no standing paragraph, its (?) says why',
+    [await groups('copilot-cli'), await a.text('#session-copilot-cli .session-note'), await a.text('#session-hooks-info-copilot-cli-card')],
+    [[], null, 'Copilot CLI ignores what prompt hooks print.']);
+  same('in another folder, no See what it adds button and no standing run warning appear anywhere, and the first strip’s (?) says why',
+    [await a.run(`document.querySelectorAll('button[data-hook-run]').length`), await a.run(`document.querySelectorAll('.session-run-warn').length`),
+      await a.text('#session-hooks-info-card')],
+    [0, 0, 'See what it adds works only on this computer’s home. This lists session-start and prompt hooks, not URL, MCP, project or organisation.']);
   same('Pi’s and OpenCode’s extensions by name, under each tool’s own word, with no standing prose paragraph', [await a.text('#session-pi-cli .session-title'), await names('pi-cli'), await a.text('#session-opencode-cli .session-title'), await names('opencode-cli'),
     await a.exists('#session-pi-cli .session-about'), await a.exists('#session-opencode-cli .session-about')], ['Packages that can add text', ['npm:@example/pi-tools@1.0.0'], 'Plugins that can add text', ['opencode-wakatime'],
     false, false]);
@@ -20042,7 +20283,7 @@ async function hookRunFlow() {
     const ids = await rowOf(stripId, cmd);
     if (!ids?.runId) throw new Error(`No Run it button for ${stripId} / ${cmd}`);
     await a.click(byId(ids.runId));
-    await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(ids.runId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, ms);
+    await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(ids.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, ms);
     return a.run(`document.getElementById(${JSON.stringify(ids.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`);
   };
   const pictures = async (label, selector, sizes = [[1316, 820, false]]) => {
@@ -20074,22 +20315,27 @@ async function hookRunFlow() {
   await redrawUnder(a, '#session-claude-cli .session-title');
   same('nothing ran on opening Instructions, Refresh, or a redraw landing', [markerCount(), existsSync(pluginMarker)], [0, false]);
 
-  // Check 3: single standing line on runnable strips, none on non-runnable; Copilot prompt-only note; Codex T2.28 note; T1.23 once & <= 30 words with plugin sentence.
-  const runWarn = '“Run it” runs a hook’s command to show what it adds; it may change your files.';
-  const helpCardText = 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.';
-  same('standing warning is on Claude Code and Codex strips and absent on Copilot CLI prompt-only strip',
+  // Check 3: single standing line on runnable strips (See what it adds), no standing .session-note, at most one (?) a strip.
+  const runWarn = '“See what it adds” runs the hook’s command on this computer to collect what it prints. Nothing is added to any session, but the command may change your files.';
+  const codexRunWarn = '“See what it adds” runs the hook’s command on this computer to collect what it prints, whether or not you have trusted it in Codex’s /hooks command. Nothing is added to any session, but the command may change your files.';
+  const helpCardText = 'This lists session-start and prompt hooks, not URL, MCP, project or organisation. “See what it adds” uses your home or the hook’s folder, and plugin hooks can change installed files.';
+  same('standing warning is on Claude Code and Codex strips (Codex one sentence) and absent on Copilot CLI prompt-only strip',
     [await a.text('#session-claude-cli .session-run-warn'), await a.text('#session-codex-cli .session-run-warn'), await a.text('#session-copilot-cli .session-run-warn')],
-    [runWarn, runWarn, null]);
-  same('Codex runnable strip and Copilot CLI prompt-only strip show T2.28 lines in place of old notes',
-    [await a.text('#session-codex-cli .session-note'), await a.text('#session-copilot-cli .session-note'), await a.run(`document.querySelectorAll('#session-copilot-cli button[data-hook-run]').length`)],
-    ['Codex: Run it runs a hook even if it isn’t trusted in /hooks.', 'Copilot CLI ignores what prompt hooks print.', 0]);
+    [runWarn, codexRunWarn, null]);
+  same('Codex runnable strip and Copilot CLI prompt-only strip draw no standing .session-note; each (?) holds its note',
+    [await a.text('#session-codex-cli .session-note'), await a.text('#session-copilot-cli .session-note'),
+      await a.text('#session-hooks-info-codex-cli-card'), await a.text('#session-hooks-info-copilot-cli-card'),
+      await a.run(`document.querySelectorAll('#session-copilot-cli button[data-hook-run]').length`)],
+    [null, null, 'Codex runs a hook only after you trust it in its /hooks command.', 'Copilot CLI ignores what prompt hooks print.', 0]);
   const helpInfo = await a.run(`(() => {
-    const marks = [...document.querySelectorAll('.session-strip .info-mark')];
+    const perStrip = [...document.querySelectorAll('.session-strip')].map(s => s.querySelectorAll('.info-mark').length);
+    const ids = [...document.querySelectorAll('.session-strip .info-mark')].map(m => m.id);
     const card = document.getElementById('session-hooks-info-card')?.textContent ?? '';
-    return { count: marks.length, id: marks[0]?.id, card, words: card.trim().split(/\\s+/).length };
+    return { maxPerStrip: Math.max(0, ...perStrip), ids, card, words: card.trim().split(/\\s+/).length };
   })()`);
-  check('T1.23 info mark appears once on the page with exact wording and <= 30 words, and its open card clears the run warning and status bar',
-    helpInfo.count === 1 && helpInfo.id === 'session-hooks-info' && helpInfo.words <= 30 && helpInfo.card === helpCardText, helpInfo);
+  check('at most one (?) mark per strip, first strip keeps T1.23 wording <= 30 words, Copilot and Codex each have a mark',
+    helpInfo.maxPerStrip === 1 && JSON.stringify(helpInfo.ids) === JSON.stringify(['session-hooks-info', 'session-hooks-info-copilot-cli', 'session-hooks-info-codex-cli'])
+    && helpInfo.words <= 30 && helpInfo.card === helpCardText, helpInfo);
   await a.run(`document.querySelector('#session-claude-cli')?.scrollIntoView({ block: 'start' })`);
   await a.click('#session-hooks-info');
   check('opening T1.23 info card clears the standing run warning and stays above the status bar', await a.run(`(() => {
@@ -20170,7 +20416,7 @@ async function hookRunFlow() {
   const scrollBefore = await a.run(`document.getElementById('instructions-scroll')?.scrollTop ?? 0`);
   await a.run(`document.getElementById(${JSON.stringify(twoIds.runId)})?.focus()`);
   for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) });
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
   const addsText = await a.run(`document.getElementById(${JSON.stringify(twoIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`);
   const scrollAfter = await a.run(`document.getElementById('instructions-scroll')?.scrollTop ?? 0`);
   check('Enter on Run it shows Would add with quiet meta, both lines, no Run again, and page stays still when row is already in view',
@@ -20200,13 +20446,13 @@ async function hookRunFlow() {
   // Keyboard Space runs once; held Enter (autoRepeat: true) starts only one run!
   await a.run(`document.getElementById(${JSON.stringify(twoIds.runId)})?.focus()`);
   for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: ' ', code: 'Space', windowsVirtualKeyCode: 32, ...(type === 'keyDown' ? { text: ' ' } : {}) });
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
   same('Space on Run it ran once', markerCount(), 2);
   await a.run(`document.getElementById(${JSON.stringify(twoIds.runId)})?.focus()`);
   await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', autoRepeat: false });
   for (let i = 0; i < 3; i++) await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', autoRepeat: true });
   await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
   await wait(250);
   same('held Enter starts only one run', markerCount(), 3);
 
@@ -20216,7 +20462,7 @@ async function hookRunFlow() {
   await mouse(a, 'mousePressed', pt, 1);
   await redrawUnder(a, byId(twoIds.runId));
   await mouse(a, 'mouseReleased', pt, 0);
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
   await wait(200);
   same('kept click across redraw runs once', markerCount(), 4);
 
@@ -20336,7 +20582,7 @@ async function hookRunFlow() {
     await waitFor(`document.getElementById(${JSON.stringify(stopRowIds.runId)})?.textContent === 'Running…'`);
   }
   await a.click(`#session-claude-cli .session-hook:has(#${stopRowIds.runId}) button[data-hook-stop]`);
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(stopRowIds.runId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(stopRowIds.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
   const stoppedRes = await a.run(`document.getElementById(${JSON.stringify(stopRowIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`);
   check('Stop click shows Stopped caveat with quiet meta',
     /^Stopped\. What it changed stays; a program it started may still be running\. as Claude Code, run in ~, /.test(stoppedRes), stoppedRes);
@@ -20388,7 +20634,9 @@ async function hookRunFlow() {
   await steady();
   await waitFor(`!!document.querySelector('#session-copilot-cli button[data-hook-run]')`);
   const copilotPluginRow = await rowOf('session-copilot-cli', 'copilot-plugin-hook');
-  same('Copilot CLI installed plugin hook keeps View source alone and no Run it', [!!copilotPluginRow?.srcId, copilotPluginRow?.runId], [true, null]);
+  same('Copilot CLI installed plugin hook keeps View source alone, no standing .session-note, and (?) names plugin reason then output rule',
+    [!!copilotPluginRow?.srcId, copilotPluginRow?.runId, await a.text('#session-copilot-cli .session-note'), await a.text('#session-hooks-info-copilot-cli-card')],
+    [true, null, null, 'Central Knot can’t run a Copilot CLI plugin’s hook, but View source shows its script. Copilot CLI uses only top-level additionalContext from start-of-session hooks (not hookSpecificOutput) and ignores what prompt hooks print.']);
   same('Copilot CLI strip with runnable own hook and non-runnable plugin hook omits the plugin standing line',
     await a.run(`(() => { const w = document.querySelectorAll('#session-copilot-cli .session-run-warn'); return [w.length, !w[0]?.textContent?.includes('Plugin')]; })()`), [1, true]);
   const copRes = await runAndWait('session-copilot-cli', 'copilot-plain.sh');
@@ -20405,7 +20653,7 @@ async function hookRunFlow() {
   await a.run(`document.querySelector('#session-codex-cli')?.scrollIntoView({ block: 'center' })`);
   await a.settle();
   const awayTop = await a.run(`document.querySelector('#session-codex-cli')?.getBoundingClientRect().top ?? 0`);
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
   const awayAfter = await a.run(`(() => { const sc = document.getElementById('instructions-scroll').getBoundingClientRect();
     const row = document.getElementById(${JSON.stringify(lateIds.runId)}).closest('.session-hook').getBoundingClientRect();
     return { codexTop: document.querySelector('#session-codex-cli')?.getBoundingClientRect().top ?? 0, rowOffTop: row.bottom <= sc.top + 1 }; })()`);
@@ -20423,7 +20671,7 @@ async function hookRunFlow() {
     await a.run(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return [b?.textContent, !!b?.closest('.session-hook')?.querySelector('button[data-hook-stop]')]; })()`),
     ['Running…', true]);
   await a.click(`#session-claude-cli .session-hook:has(#${lateIds.runId}) button[data-hook-stop]`);
-  await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Run it'`);
+  await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'See what it adds'`);
   // Settling while away on Overview drops the late result.
   await a.click(byId(lateIds.runId));
   await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
@@ -20554,22 +20802,23 @@ async function hookRunFlow() {
   await waitFor(`document.querySelector('#plugin-session-hooks .session-command')?.textContent?.includes('codex-hello.sh')`);
   same('while Claude Code hook runs, switching to As Codex shows Codex idle without Stop or Claude result',
     await a.run(`(() => { const b = document.querySelector('#plugin-session-hooks button[data-hook-run]'); return [b?.textContent, document.querySelectorAll('#plugin-session-hooks button[data-hook-stop]').length, document.querySelectorAll('#plugin-session-hooks .hook-run').length]; })()`),
-    ['Run it', 0, 0]);
+    ['See what it adds', 0, 0]);
   await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); s.value = 'claude-cli'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await waitFor(`document.querySelector('#plugin-session-hooks .session-command')?.textContent?.includes('hello.sh')`);
   same('switching back to As Claude Code while still running keeps Running… and Stop reachable',
     await a.run(`(() => { const b = document.getElementById(${JSON.stringify(claudePluginRunId)}); return [b?.textContent, !!b?.closest('.session-hook')?.querySelector('button[data-hook-stop]')]; })()`),
     ['Running…', true]);
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(claudePluginRunId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(claudePluginRunId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
   check('Claude Code hook result lands in place after switching back from As Codex',
     (await a.text('#plugin-session-hooks .hook-run') ?? '').includes('Releases ship on Tuesdays. Run smoke checks before tagging.'));
   rmSync(slowFlag, { force: true });
   // Switch As <tool> to Codex and run Codex's installed hook.
   await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); s.value = 'codex-cli'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await waitFor(`document.querySelector('#plugin-session-hooks .session-command')?.textContent?.includes('codex-hello.sh')`);
-  same('switching to As Codex shows Codex trust note and Codex installed hook',
-    [await a.text('#plugin-session-hooks .session-note'), await a.text('#plugin-session-hooks .session-command')],
-    ['Codex: Run it runs a hook even if it isn’t trusted in /hooks.', '${PLUGIN_ROOT}/hooks/codex-hello.sh']);
+  const asCodexWarn = await a.text('#plugin-session-hooks .session-run-warn');
+  same('switching to As Codex shows Codex’s warning in .session-run-warn with no .session-note',
+    [asCodexWarn !== runWarn && !!asCodexWarn?.includes('Codex’s /hooks command'), await a.text('#plugin-session-hooks .session-note'), await a.text('#plugin-session-hooks .session-command')],
+    [true, null, '${PLUGIN_ROOT}/hooks/codex-hello.sh']);
   const codexPageRes = await runAndWait('plugin-session-hooks', 'codex-hello.sh');
   check('Run it as Codex on plugin page runs Codex installed hook with executed tool and plugin version and trust note',
     /^Would add as Codex, plugin 0\.4\.1, run in ~, /.test(codexPageRes) && codexPageRes.includes(`codex-root=${codexPluginRoot}`)
@@ -20638,11 +20887,12 @@ async function hookRunFlow() {
   await a.click('#nav-instructions');
   await waitFor(`!!document.querySelector('#session-codex-cli')`);
   await steady();
-  same('Instructions strip whose tool has no command line hides Run it and states why with visible styling',
+  same('Instructions strip whose tool has no command line hides Run it, states why with visible styling, and keeps Codex’s note behind (?)',
     [await a.run(`document.querySelectorAll('#session-codex-cli button[data-hook-run]').length`),
       await a.text('#session-codex-cli .session-run-warn'),
-      await a.run(`(() => { const n = document.querySelector('#session-codex-cli .session-note'); return [n?.textContent, n?.classList.contains('session-cant-run')]; })()`)],
-    [0, null, ['Codex’s command line isn’t on this computer, so these can’t be run here.', true]]);
+      await a.run(`(() => { const n = document.querySelector('#session-codex-cli .session-note'); return [n?.textContent, n?.classList.contains('session-cant-run')]; })()`),
+      await a.text('#session-hooks-info-codex-cli-card')],
+    [0, null, ['Codex’s command line isn’t on this computer, so these can’t be run here.', true], 'Codex runs a hook only after you trust it in its /hooks command.']);
   if (shots) {
     await sizeTo(a, 860, 560);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
